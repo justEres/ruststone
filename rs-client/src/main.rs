@@ -1,3 +1,4 @@
+use rs_protocol::protocol;
 use tracing::info;
 
 
@@ -7,6 +8,8 @@ async fn main() {
     .without_time()
     .compact()
     .init();
+
+    
 
     info!("Starting ruststone")
 }
