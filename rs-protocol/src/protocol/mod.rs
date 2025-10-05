@@ -29,18 +29,18 @@ use std::sync::{Arc, Mutex};
 
 use aes::Aes128;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use cfb8::cipher::{AsyncStreamCipher, NewCipher};
 use cfb8::Cfb8;
-use flate2::read::{ZlibDecoder, ZlibEncoder};
+use cfb8::cipher::{AsyncStreamCipher, NewCipher};
 use flate2::Compression;
+use flate2::read::{ZlibDecoder, ZlibEncoder};
 use instant::{Duration, Instant};
 use lazy_static::lazy_static;
 use log::{debug, warn};
-use num_traits::cast::{cast, NumCast};
+use num_traits::cast::{NumCast, cast};
 use serde::{Deserialize, Serialize};
+use trust_dns_resolver::Resolver;
 use trust_dns_resolver::config::ResolverConfig;
 use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::Resolver;
 
 use crate::format;
 use crate::nbt;
@@ -686,11 +686,7 @@ impl<L: Lengthable> fmt::Debug for LenPrefixedBytes<L> {
 
 impl Lengthable for bool {
     fn into_len(self) -> usize {
-        if self {
-            1
-        } else {
-            0
-        }
+        if self { 1 } else { 0 }
     }
 
     fn from_len(u: usize) -> bool {
@@ -1375,9 +1371,9 @@ impl Conn {
     }
 
     pub fn do_status(mut self) -> Result<(Status, Duration), Error> {
+        use self::packet::Packet;
         use self::packet::handshake::serverbound::Handshake;
         use self::packet::status::serverbound::*;
-        use self::packet::Packet;
         use serde_json::Value;
         let host = self.host.clone();
         let port = self.port;

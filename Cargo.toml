@@ -1,5 +1,5 @@
 [workspace]
-members = ["rs-client", "rs-net", "rs-protocol"]
+members = ["rs-client", "rs-net", "rs-protocol", "rs-render", "rs-ui"]
 resolver = "3"
 
 [workspace.dependencies]

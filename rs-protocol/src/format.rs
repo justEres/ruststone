@@ -629,11 +629,7 @@ pub mod color {
         }
 
         pub fn use_or_def(self, color: Color) -> Self {
-            if self == Color::None {
-                color
-            } else {
-                self
-            }
+            if self == Color::None { color } else { self }
         }
     }
 

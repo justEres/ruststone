@@ -1,8 +1,6 @@
 use super::*;
 
-
 mod v1_8_9;
-
 
 // https://wiki.vg/Protocol_History
 // https://wiki.vg/Protocol_version_numbers#Versions_after_the_Netty_rewrite

@@ -33,11 +33,7 @@ impl Array {
 
     pub fn get(&self, idx: usize) -> u8 {
         let val = self.data[idx >> 1];
-        if idx & 1 == 0 {
-            val & 0xF
-        } else {
-            val >> 4
-        }
+        if idx & 1 == 0 { val & 0xF } else { val >> 4 }
     }
 
     pub fn set(&mut self, idx: usize, val: u8) {

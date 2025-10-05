@@ -26,9 +26,6 @@ impl Axis {
     }
 }
 
-
-
-
 use bevy_ecs::prelude::*;
 use std::fmt;
 use std::ops;
@@ -115,8 +112,6 @@ impl fmt::Debug for Position {
         write!(f, "<{},{},{}>", self.x, self.y, self.z)
     }
 }
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {

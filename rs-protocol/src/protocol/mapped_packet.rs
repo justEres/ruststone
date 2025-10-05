@@ -8,25 +8,25 @@ use crate::protocol::mapped_packet::login::serverbound::{
 };
 use crate::protocol::mapped_packet::play::clientbound::{
     AcknowledgePlayerDigging, Advancements, Animation, BlockAction, BlockBreakAnimation,
-    BlockChange, BossBar, Camera, ChangeGameState, ChunkData, ChunkDataBulk, ChunkDataBulk_17,
-    ChunkData_17, ChunkData_Biomes3D, ChunkData_Biomes3D_bool, ChunkData_Biomes3D_i32,
-    ChunkData_HeightMap, ChunkData_NoEntities, ChunkData_NoEntities_u16, ChunkUnload,
-    CoFHLib_SendUUID, CollectItem, CombatEvent, ConfirmTransaction, CraftRecipeResponse,
-    DeclareCommands, DeclareRecipes, Disconnect, Effect, Entity, EntityAction, EntityAttach,
-    EntityDestroy, EntityEffect, EntityEquipment_Array, EntityEquipment_Single, EntityHeadLook,
-    EntityLook, EntityLookAndMove, EntityMetadata, EntityMove, EntityProperties,
-    EntityRemoveEffect, EntitySoundEffect, EntityStatus, EntityTeleport, EntityUpdateNBT,
-    EntityUsedBed, EntityVelocity, Explosion, FacePlayer, JoinGame, KeepAliveClientbound, Maps,
-    MultiBlockChange, NBTQueryResponse, NamedSoundEffect, OpenBook, Particle, PlayerAbilities,
-    PlayerInfo, PlayerInfo_String, PlayerListHeaderFooter, PluginMessageClientbound,
-    ResourcePackSend, Respawn, ScoreboardDisplay, ScoreboardObjective, SelectAdvancementTab,
-    ServerDifficulty, ServerMessage, SetCompression, SetCooldown, SetCurrentHotbarSlot,
-    SetExperience, SetPassengers, SignEditorOpen, SoundEffect, SpawnExperienceOrb,
-    SpawnGlobalEntity, SpawnMob, SpawnObject, SpawnPainting, SpawnPlayer, SpawnPosition,
-    Statistics, StopSound, TabCompleteReply, Tags, Teams, TeleportPlayer, TimeUpdate, Title,
-    TradeList, UnlockRecipes, UpdateBlockEntity, UpdateHealth, UpdateLight, UpdateScore,
-    UpdateSign, UpdateViewDistance, UpdateViewPosition, VehicleTeleport, WindowClose, WindowItems,
-    WindowOpen, WindowOpenHorse, WindowProperty, WindowSetSlot, WorldBorder,
+    BlockChange, BossBar, Camera, ChangeGameState, ChunkData, ChunkData_17, ChunkData_Biomes3D,
+    ChunkData_Biomes3D_bool, ChunkData_Biomes3D_i32, ChunkData_HeightMap, ChunkData_NoEntities,
+    ChunkData_NoEntities_u16, ChunkDataBulk, ChunkDataBulk_17, ChunkUnload, CoFHLib_SendUUID,
+    CollectItem, CombatEvent, ConfirmTransaction, CraftRecipeResponse, DeclareCommands,
+    DeclareRecipes, Disconnect, Effect, Entity, EntityAction, EntityAttach, EntityDestroy,
+    EntityEffect, EntityEquipment_Array, EntityEquipment_Single, EntityHeadLook, EntityLook,
+    EntityLookAndMove, EntityMetadata, EntityMove, EntityProperties, EntityRemoveEffect,
+    EntitySoundEffect, EntityStatus, EntityTeleport, EntityUpdateNBT, EntityUsedBed,
+    EntityVelocity, Explosion, FacePlayer, JoinGame, KeepAliveClientbound, Maps, MultiBlockChange,
+    NBTQueryResponse, NamedSoundEffect, OpenBook, Particle, PlayerAbilities, PlayerInfo,
+    PlayerInfo_String, PlayerListHeaderFooter, PluginMessageClientbound, ResourcePackSend, Respawn,
+    ScoreboardDisplay, ScoreboardObjective, SelectAdvancementTab, ServerDifficulty, ServerMessage,
+    SetCompression, SetCooldown, SetCurrentHotbarSlot, SetExperience, SetPassengers,
+    SignEditorOpen, SoundEffect, SpawnExperienceOrb, SpawnGlobalEntity, SpawnMob, SpawnObject,
+    SpawnPainting, SpawnPlayer, SpawnPosition, Statistics, StopSound, TabCompleteReply, Tags,
+    Teams, TeleportPlayer, TimeUpdate, Title, TradeList, UnlockRecipes, UpdateBlockEntity,
+    UpdateHealth, UpdateLight, UpdateScore, UpdateSign, UpdateViewDistance, UpdateViewPosition,
+    VehicleTeleport, WindowClose, WindowItems, WindowOpen, WindowOpenHorse, WindowProperty,
+    WindowSetSlot, WorldBorder,
 };
 use crate::protocol::mapped_packet::play::serverbound::{
     AdvancementTab, ArmSwing, ChatMessage, ClickWindow, ClickWindowButton, ClientAbilities,
@@ -1412,7 +1412,9 @@ state_mapped_packets!(
 
 impl Default for MappedPacket {
     fn default() -> Self {
-        panic!("This function is not meant to be used, it is only used to make `MappedPacket` visible to the outside world.")
+        panic!(
+            "This function is not meant to be used, it is only used to make `MappedPacket` visible to the outside world."
+        )
     }
 }
 
