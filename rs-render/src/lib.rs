@@ -6,9 +6,9 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_camera)
-        .add_systems(Startup, setup_scene)
-        .add_systems(Update, rotate_cube)
-        .add_systems(Update, camera_mouse_look);
+            .add_systems(Startup, setup_scene)
+            .add_systems(Update, rotate_cube)
+            .add_systems(Update, camera_mouse_look);
     }
 }
 
@@ -18,10 +18,12 @@ struct CameraState {
     yaw: f32,
 }
 
-
-pub fn setup_camera(mut commands: Commands, asset_server: Res<AssetServer>,mut images: ResMut<Assets<Image>>) {
+pub fn setup_camera(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let image_handle = asset_server.load("skybox.ktx2");
-
 
     commands.spawn((
         Camera3d::default(),
@@ -30,13 +32,10 @@ pub fn setup_camera(mut commands: Commands, asset_server: Res<AssetServer>,mut i
             image: image_handle,
             brightness: 1000.,
             ..Default::default()
-        }
-        
+        },
     ));
 
-    commands.insert_resource(CameraState{yaw: 0.,pitch: 0.});
-
-
+    commands.insert_resource(CameraState { yaw: 0., pitch: 0. });
 }
 
 pub fn setup_scene(
@@ -78,13 +77,11 @@ fn rotate_cube(mut query: Query<&mut Transform, With<Rotates>>, time: Res<Time>)
     }
 }
 
-
 fn camera_mouse_look(
     mut state: ResMut<CameraState>,
     mut query: Query<&mut Transform, With<Camera3d>>,
     mut motion_events: EventReader<MouseMotion>,
-    mut app_state: ResMut<AppState>,
-
+    app_state: ResMut<AppState>,
 ) {
     if !matches!(app_state.0, rs_utils::ApplicationState::Connected) {
         return;
@@ -101,12 +98,10 @@ fn camera_mouse_look(
     state.pitch = state.pitch.clamp(-1.54, 1.54); // limit pitch (~±88°)
 
     // Compute new rotation
-    let rotation = Quat::from_axis_angle(Vec3::Y, state.yaw)
-        * Quat::from_axis_angle(Vec3::X, state.pitch);
+    let rotation =
+        Quat::from_axis_angle(Vec3::Y, state.yaw) * Quat::from_axis_angle(Vec3::X, state.pitch);
 
     for mut transform in query.iter_mut() {
         transform.rotation = rotation;
     }
 }
-
-

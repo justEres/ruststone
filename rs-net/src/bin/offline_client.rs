@@ -13,20 +13,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = rs_protocol::protocol::Conn::new(target, 47)?;
 
     // Send handshake (next = 2 for login)
-    conn.write_packet(rs_protocol::protocol::packet::handshake::serverbound::Handshake {
-        protocol_version: rs_protocol::protocol::VarInt(47),
-        host: conn.host.clone(),
-        port: conn.port,
-        next: rs_protocol::protocol::VarInt(2),
-    })?;
+    conn.write_packet(
+        rs_protocol::protocol::packet::handshake::serverbound::Handshake {
+            protocol_version: rs_protocol::protocol::VarInt(47),
+            host: conn.host.clone(),
+            port: conn.port,
+            next: rs_protocol::protocol::VarInt(2),
+        },
+    )?;
 
     // Switch to login state
     conn.state = rs_protocol::protocol::State::Login;
 
     // Send LoginStart with username
-    conn.write_packet(rs_protocol::protocol::packet::login::serverbound::LoginStart {
-        username: username.to_string(),
-    })?;
+    conn.write_packet(
+        rs_protocol::protocol::packet::login::serverbound::LoginStart {
+            username: username.to_string(),
+        },
+    )?;
 
     // Loop reading packets and printing concise summaries (packet kind + small fields)
     loop {
@@ -40,11 +44,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         conn.set_compression(s.threshold.0);
                     }
                     Packet::LoginSuccess_String(s) => {
-                        println!("RECV: LoginSuccess_String (uuid={}, username={})", s.uuid, s.username);
+                        println!(
+                            "RECV: LoginSuccess_String (uuid={}, username={})",
+                            s.uuid, s.username
+                        );
                         conn.state = rs_protocol::protocol::State::Play;
                     }
                     Packet::LoginSuccess_UUID(s) => {
-                        println!("RECV: LoginSuccess_UUID (uuid=..., username={})", s.username);
+                        println!(
+                            "RECV: LoginSuccess_UUID (uuid=..., username={})",
+                            s.username
+                        );
                         conn.state = rs_protocol::protocol::State::Play;
                     }
 
@@ -66,7 +76,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let start = pos + needle.len();
                                 let rest = &dbg[start..];
                                 let rest = rest.trim_start();
-                                let end = rest.find(|c: char| c == ',' || c == ')' || c == '}').unwrap_or(rest.len());
+                                let end = rest
+                                    .find(|c: char| c == ',' || c == ')' || c == '}')
+                                    .unwrap_or(rest.len());
                                 return Some(rest[..end].trim().to_string());
                             }
                             None

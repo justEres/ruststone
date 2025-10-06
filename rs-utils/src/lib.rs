@@ -1,13 +1,10 @@
 use bevy::ecs::resource::Resource;
 use crossbeam::channel::{Receiver, Sender};
 
-
-
-
 #[derive(Resource)]
 pub struct AppState(pub ApplicationState);
 
-pub enum ApplicationState{
+pub enum ApplicationState {
     Disconnected,
     Connecting,
     Connected,
@@ -17,15 +14,18 @@ pub enum ApplicationState{
 pub struct ToNet(pub Sender<ToNetMessage>);
 
 #[derive(Resource)]
-pub struct FromNet(pub Receiver<ToMainMessage>);
+pub struct FromNet(pub Receiver<FromNetMessage>);
 
-
-pub enum ToNetMessage{
-    Connect{username: String,address: String},
+pub enum ToNetMessage {
+    Connect { username: String, address: String },
     Disconnect,
+    Shutdown,
 }
 
-pub enum ToMainMessage{
+use rs_protocol::protocol::packet::Packet;
+
+pub enum FromNetMessage {
     Connected,
     Disconnected,
+    Packet(Packet),
 }
