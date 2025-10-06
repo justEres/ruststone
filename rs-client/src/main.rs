@@ -1,15 +1,23 @@
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
-use rs_net::NetworkingPlugin;
+use crossbeam::channel::{Receiver, Sender};
+use rs_utils::{ToMainMessage, ToNetMessage};
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
+use rs_utils::{AppState, ApplicationState, FromNet, ToNet};
 use tracing::info;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tracing_subscriber::fmt().without_time().compact().init();
 
     info!("Starting ruststone");
+
+    let (tx_outgoing, rx_outgoing) = crossbeam::channel::unbounded::<ToNetMessage>();
+    let (tx_incoming, rx_incoming) = crossbeam::channel::unbounded::<ToMainMessage>();
+
+    std::thread::spawn(move || {
+        rs_net::start_networking(rx_outgoing, tx_incoming);
+    });
 
     App::new()
         .add_plugins(
@@ -28,6 +36,10 @@ async fn main() {
         )
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
-        .add_plugins(NetworkingPlugin)
+        .insert_resource(ToNet(tx_outgoing))
+        .insert_resource(FromNet(rx_incoming))
+        .insert_resource(AppState(ApplicationState::Disconnected))
         .run();
 }
+
+

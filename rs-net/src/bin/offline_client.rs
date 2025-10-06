@@ -47,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("RECV: LoginSuccess_UUID (uuid=..., username={})", s.username);
                         conn.state = rs_protocol::protocol::State::Play;
                     }
+
                     // Generic fallback: produce a concise summary using the packet's Debug output.
                     // This avoids having to reference every concrete Packet variant type by name.
                     other => {

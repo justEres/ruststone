@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.16.0", features = ["dynamic_linking"] }
+
+rs-ui = { version = "0.1.0", path = "../rs-ui" }
+rs-utils = { version = "0.1.0", path = "../rs-utils" }

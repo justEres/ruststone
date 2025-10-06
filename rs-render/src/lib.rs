@@ -1,4 +1,5 @@
 use bevy::{core_pipeline::Skybox, input::mouse::MouseMotion, prelude::*};
+use rs_utils::AppState;
 
 pub struct RenderPlugin;
 
@@ -82,8 +83,12 @@ fn camera_mouse_look(
     mut state: ResMut<CameraState>,
     mut query: Query<&mut Transform, With<Camera3d>>,
     mut motion_events: EventReader<MouseMotion>,
+    mut app_state: ResMut<AppState>,
 
 ) {
+    if !matches!(app_state.0, rs_utils::ApplicationState::Connected) {
+        return;
+    }
     let mut delta = Vec2::ZERO;
     for ev in motion_events.read() {
         delta += ev.delta;
@@ -103,3 +108,5 @@ fn camera_mouse_look(
         transform.rotation = rotation;
     }
 }
+
+

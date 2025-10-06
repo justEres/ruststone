@@ -1,10 +1,23 @@
-use bevy::prelude::*;
+use rs_utils::{ToMainMessage, ToNetMessage};
 
-pub struct NetworkingPlugin;
 
-impl Plugin for NetworkingPlugin {
-    fn build(&self, app: &mut App) {
-        warn!("networking plugin loaded???");
+
+
+
+pub fn start_networking(from_main: crossbeam::channel::Receiver<ToNetMessage>, to_main: crossbeam::channel::Sender<ToMainMessage>){
+    
+
+
+
+    while let Ok(msg) = from_main.recv(){
+        match msg{
+            ToNetMessage::Connect{username,address}=>{
+                println!("Connecting to server at {} as {}",address,username);
+
+            }
+            _ => {
+                println!("Received unhandled ToNetMessage");
+            }
+        }
     }
 }
-
