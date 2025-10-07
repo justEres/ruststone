@@ -9,17 +9,20 @@ pub fn start_networking(
     from_main: crossbeam::channel::Receiver<ToNetMessage>,
     to_main: crossbeam::channel::Sender<FromNetMessage>,
 ) {
-    enable_network_debug();
-    while let Ok(msg) = from_main.recv() {
+    //enable_network_debug();
+
+
+    if let Ok(msg) = from_main.recv() {
         match msg {
             ToNetMessage::Connect { username, address } => {
                 println!("Connecting to server at {} as {}", address, username);
                 match connect(&address, &username) {
                     Ok(conn) => {
                         println!("Connected to server");
-                        let to_main_thread = to_main.clone();
                         let to_main_signal = to_main.clone();
-                        thread::spawn(move || packet_handler_loop(conn, to_main_thread));
+                        //thread::spawn(move || packet_handler_loop(conn, to_main_thread));
+                        message_receiver_thread(conn.clone(), from_main);
+                        packet_handler_loop(conn, to_main_signal.clone());
                         to_main_signal.send(FromNetMessage::Connected).unwrap();
                     }
                     Err(e) => {
@@ -28,10 +31,6 @@ pub fn start_networking(
                     }
                 }
             }
-            ToNetMessage::Shutdown => {
-                // Optionally handle shutdown logic here
-                break;
-            }
             _ => {
                 println!("Received unhandled ToNetMessage");
             }
@@ -39,6 +38,21 @@ pub fn start_networking(
     }
 }
 
+fn message_receiver_thread(conn: Conn, from_main: crossbeam::channel::Receiver<ToNetMessage>) {
+    thread::spawn(move || {
+        while let Ok(msg) = from_main.recv() {
+            match msg {
+                ToNetMessage::Disconnect => {
+                    println!("Received disconnect message");
+                    break;
+                }
+                _ => {
+                    println!("Received unhandled ToNetMessage");
+                }
+            }
+        }
+    });
+}
 
 fn packet_handler_loop(mut conn: Conn, to_main: crossbeam::channel::Sender<FromNetMessage>) {
     loop {

@@ -1106,21 +1106,6 @@ lazy_static! {
 }
 
 impl Conn {
-    fn try_clone(&self) -> Result<Conn, Error> {
-        let stream = self.stream.try_clone()?;
-        Ok(Conn {
-            stream,
-            host: self.host.clone(),
-            port: self.port,
-            direction: self.direction,
-            state: self.state,
-            protocol_version: self.protocol_version,
-            read_cipher: self.read_cipher.clone(),
-            write_cipher: self.write_cipher.clone(),
-            compression_threshold: self.compression_threshold,
-            send: self.send.clone(),
-        })
-    }
 
     fn get_server_addresses(hostname: &str) -> Vec<(String, u16)> {
         let mut addresses = vec![];

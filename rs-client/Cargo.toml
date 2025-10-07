@@ -2,6 +2,7 @@
 name = "rs-client"
 version = "0.1.0"
 edition = "2024"
+default-run = "rs-client"
 
 [dependencies]
 bevy = { version = "0.16.0", features = ["dynamic_linking"] }

@@ -1,6 +1,7 @@
 [workspace]
 members = ["rs-client", "rs-net", "rs-protocol", "rs-render", "rs-ui", "rs-utils"]
 resolver = "3"
+default-run = "rs-client"
 
 [workspace.dependencies]
 tracing = { version = "0.1.41" }
