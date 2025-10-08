@@ -1106,7 +1106,6 @@ lazy_static! {
 }
 
 impl Conn {
-
     fn get_server_addresses(hostname: &str) -> Vec<(String, u16)> {
         let mut addresses = vec![];
 

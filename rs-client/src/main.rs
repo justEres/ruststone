@@ -3,7 +3,7 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use crossbeam::channel::{Receiver, Sender};
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
-use rs_utils::{AppState, ApplicationState, FromNet, ToNet};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
@@ -45,6 +45,7 @@ fn main() {
         .insert_resource(ToNet(tx_outgoing))
         .insert_resource(FromNet(rx_incoming))
         .insert_resource(AppState(ApplicationState::Disconnected))
+        .insert_resource(Chat::default())
         .add_systems(Update, message_handler::handle_messages)
         .run();
 }

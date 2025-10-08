@@ -2,15 +2,16 @@
 
 use std::thread;
 
-use rs_protocol::protocol::{enable_network_debug, packet::Packet, Conn};
+use rs_protocol::protocol::{Conn, enable_network_debug, packet::Packet};
 use rs_utils::{FromNetMessage, ToNetMessage};
+
+mod handle_packet;
 
 pub fn start_networking(
     from_main: crossbeam::channel::Receiver<ToNetMessage>,
     to_main: crossbeam::channel::Sender<FromNetMessage>,
 ) {
     //enable_network_debug();
-
 
     if let Ok(msg) = from_main.recv() {
         match msg {
@@ -20,10 +21,10 @@ pub fn start_networking(
                     Ok(conn) => {
                         println!("Connected to server");
                         let to_main_signal = to_main.clone();
-                        //thread::spawn(move || packet_handler_loop(conn, to_main_thread));
+
                         message_receiver_thread(conn.clone(), from_main);
-                        packet_handler_loop(conn, to_main_signal.clone());
                         to_main_signal.send(FromNetMessage::Connected).unwrap();
+                        packet_handler_loop(conn, to_main_signal.clone());
                     }
                     Err(e) => {
                         println!("Failed to connect to server: {}", e);
@@ -38,13 +39,22 @@ pub fn start_networking(
     }
 }
 
-fn message_receiver_thread(conn: Conn, from_main: crossbeam::channel::Receiver<ToNetMessage>) {
+fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiver<ToNetMessage>) {
     thread::spawn(move || {
         while let Ok(msg) = from_main.recv() {
             match msg {
                 ToNetMessage::Disconnect => {
                     println!("Received disconnect message");
                     break;
+                }
+                ToNetMessage::ChatMessage(text) => {
+                    conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::ChatMessage {
+                            message: text,
+                        },
+                    )
+                    .unwrap();
+                    println!("Sent chat message");
                 }
                 _ => {
                     println!("Received unhandled ToNetMessage");
@@ -59,10 +69,7 @@ fn packet_handler_loop(mut conn: Conn, to_main: crossbeam::channel::Sender<FromN
         match conn.read_packet() {
             Ok(pkt) => {
                 // Forward packet to main thread
-                if to_main.send(FromNetMessage::Packet(pkt)).is_err() {
-                    // Main thread hung up
-                    break;
-                }
+                handle_packet::handle_packet(pkt, &to_main, &mut conn);
             }
             Err(e) => {
                 println!("Error reading packet: {}", e);
