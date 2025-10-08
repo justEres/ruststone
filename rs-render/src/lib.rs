@@ -21,7 +21,7 @@ struct CameraState {
 pub fn setup_camera(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
+    images: ResMut<Assets<Image>>,
 ) {
     let image_handle = asset_server.load("skybox.ktx2");
 
