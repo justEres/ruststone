@@ -1,6 +1,6 @@
 use rs_protocol::protocol::{
     Conn,
-    packet::{Packet, play::clientbound::ChunkData},
+    packet::Packet,
 };
 use rs_utils::FromNetMessage;
 

@@ -2,7 +2,7 @@ use bevy::app::Plugin;
 use bevy::prelude::*;
 use bevy_egui::{
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
-    egui::{self, TextEdit},
+    egui::{self},
 };
 use rs_utils::{AppState, ApplicationState, Chat, ToNet, ToNetMessage};
 

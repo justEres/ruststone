@@ -2,7 +2,7 @@
 
 use std::thread;
 
-use rs_protocol::protocol::{Conn, enable_network_debug, packet::Packet};
+use rs_protocol::protocol::Conn;
 use rs_utils::{FromNetMessage, ToNetMessage};
 
 mod handle_packet;

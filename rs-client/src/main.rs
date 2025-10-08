@@ -1,6 +1,4 @@
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
-use crossbeam::channel::{Receiver, Sender};
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
 use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet};
