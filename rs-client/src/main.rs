@@ -1,7 +1,7 @@
 use bevy::{log::LogPlugin, prelude::*};
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet, UiState};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
@@ -44,6 +44,7 @@ fn main() {
         .insert_resource(FromNet(rx_incoming))
         .insert_resource(AppState(ApplicationState::Disconnected))
         .insert_resource(Chat::default())
+        .insert_resource(UiState::default())
         .add_systems(Update, message_handler::handle_messages)
         .run();
 }

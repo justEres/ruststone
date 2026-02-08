@@ -13,6 +13,11 @@ pub enum ApplicationState {
     Connected,
 }
 
+#[derive(Resource, Default)]
+pub struct UiState {
+    pub chat_open: bool,
+}
+
 #[derive(Resource)]
 pub struct ToNet(pub Sender<ToNetMessage>);
 
