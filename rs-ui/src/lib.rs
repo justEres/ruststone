@@ -1,10 +1,11 @@
 use bevy::app::Plugin;
+use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy_egui::{
-    EguiContexts, EguiPlugin, EguiPrimaryContextPass,
     egui::{self},
+    EguiContexts, EguiPlugin, EguiPrimaryContextPass,
 };
-use rs_utils::{AppState, ApplicationState, Chat, ToNet, ToNetMessage};
+use rs_utils::{AppState, ApplicationState, Chat, ToNet, ToNetMessage, UiState};
 
 pub struct UiPlugin;
 
@@ -22,22 +23,27 @@ fn connect_ui(
     app_state: Res<AppState>,
     to_net: Res<ToNet>,
     mut chat: ResMut<Chat>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ui_state: ResMut<UiState>,
 ) {
-    let show_connect_window;
-    //println!("App state: {:?}", app_state.0);
-    match app_state.0 {
-        ApplicationState::Disconnected | ApplicationState::Connecting => {
-            show_connect_window = true;
-            //println!("Showing connect window");
-        }
-        ApplicationState::Connected => {
-            show_connect_window = false;
-            //println!("Connected, not showing connect window");
+    let ctx = contexts.ctx_mut().unwrap();
+
+    if keys.just_pressed(KeyCode::Escape) && ui_state.chat_open {
+        ui_state.chat_open = false;
+    } else if keys.just_pressed(KeyCode::KeyT) && !ctx.wants_keyboard_input() {
+        ui_state.chat_open = !ui_state.chat_open;
+        if ui_state.chat_open {
+            chat.1.clear();
         }
     }
 
+    let show_connect_window = matches!(
+        app_state.0,
+        ApplicationState::Disconnected | ApplicationState::Connecting
+    );
+
     if show_connect_window {
-        egui::Window::new("Connect to Server").show(contexts.ctx_mut().unwrap(), |ui| {
+        egui::Window::new("Connect to Server").show(ctx, |ui| {
             ui.label("Server Address:");
             ui.text_edit_singleline(&mut state.server_address);
             ui.label("Username:");
@@ -57,26 +63,30 @@ fn connect_ui(
         });
     }
 
-    egui::Window::new("Chat")
-        .vscroll(true)
-        .show(contexts.ctx_mut().unwrap(), |ui| {
-            for msg in chat.0.iter() {
-                ui.label(msg);
-            }
+    if ui_state.chat_open {
+        egui::Window::new("Chat")
+            .vscroll(true)
+            .show(ctx, |ui| {
+                for msg in chat.0.iter() {
+                    ui.label(msg);
+                }
 
-            let response = ui.text_edit_singleline(&mut chat.1);
+                let response = ui.text_edit_singleline(&mut chat.1);
+                response.request_focus();
 
-            if response.lost_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                && !chat.1.is_empty()
-            {
-                to_net
-                    .0
-                    .send(ToNetMessage::ChatMessage(chat.1.clone()))
-                    .unwrap();
-                chat.1.clear();
-            }
-        });
+                if response.has_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    && !chat.1.is_empty()
+                {
+                    to_net
+                        .0
+                        .send(ToNetMessage::ChatMessage(chat.1.clone()))
+                        .unwrap();
+                    chat.1.clear();
+                    response.request_focus();
+                }
+            });
+    }
 }
 
 #[derive(Resource)]
