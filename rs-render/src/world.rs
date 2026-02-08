@@ -19,40 +19,9 @@ impl Default for WorldSettings {
 
 pub fn setup_world(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    settings: Res<WorldSettings>,
+    _settings: Res<WorldSettings>,
 ) {
-    let root = commands
-        .spawn((
-            WorldRoot,
-            Transform::default(),
-            GlobalTransform::default(),
-        ))
-        .id();
-
-    commands.entity(root).with_children(|parent| {
-        let ground_mesh = Mesh::from(Plane3d::default());
-        parent.spawn((
-            Mesh3d(meshes.add(ground_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: settings.ground_color,
-                perceptual_roughness: 1.0,
-                ..default()
-            })),
-            Transform::from_scale(Vec3::splat(settings.ground_size)),
-        ));
-
-        let marker_mesh = Mesh::from(Cuboid::new(1.0, 1.0, 1.0));
-        parent.spawn((
-            Mesh3d(meshes.add(marker_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.2, 0.6, 0.9),
-                ..default()
-            })),
-            Transform::from_xyz(3.0, 0.5, -3.0),
-        ));
-    });
+    let _root = commands.spawn((WorldRoot, Transform::default(), GlobalTransform::default()));
 
     commands.spawn((
         DirectionalLight {

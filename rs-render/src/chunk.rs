@@ -22,6 +22,43 @@ struct ChunkEntry {
     mesh: Handle<Mesh>,
 }
 
+#[derive(Resource, Default)]
+pub struct ChunkStore {
+    chunks: HashMap<(i32, i32), ChunkColumn>,
+}
+
+#[derive(Clone)]
+struct ChunkColumn {
+    full: bool,
+    sections: Vec<Option<Vec<u16>>>,
+}
+
+impl ChunkColumn {
+    fn new() -> Self {
+        Self {
+            full: false,
+            sections: vec![None; 16],
+        }
+    }
+
+    fn set_full(&mut self) {
+        self.full = true;
+        for section in &mut self.sections {
+            if section.is_none() {
+                *section = Some(vec![0u16; 4096]);
+            }
+        }
+    }
+
+    fn set_section(&mut self, y: u8, blocks: Vec<u16>) {
+        let idx = y as usize;
+        if idx >= self.sections.len() {
+            return;
+        }
+        self.sections[idx] = Some(blocks);
+    }
+}
+
 #[derive(Resource)]
 pub struct ChunkRenderAssets {
     material: Handle<StandardMaterial>,
@@ -45,14 +82,38 @@ pub fn apply_chunk_updates(
     assets: Res<ChunkRenderAssets>,
     mut queue: ResMut<ChunkUpdateQueue>,
     mut state: ResMut<ChunkRenderState>,
+    mut store: ResMut<ChunkStore>,
 ) {
     if queue.0.is_empty() {
         return;
     }
 
+    let mut updated_keys = Vec::new();
+
     for chunk in queue.0.drain(..) {
         let key = (chunk.x, chunk.z);
-        let mesh = build_chunk_mesh(&chunk);
+        let column = store
+            .chunks
+            .entry(key)
+            .or_insert_with(ChunkColumn::new);
+
+        if chunk.full {
+            column.set_full();
+        }
+
+        for section in chunk.sections {
+            column.set_section(section.y, section.blocks);
+        }
+
+        updated_keys.push(key);
+    }
+
+    for key in updated_keys {
+        let Some(column) = store.chunks.get(&key) else {
+            continue;
+        };
+        let mesh = build_chunk_mesh(&store, key.0, key.1, column);
+
         if let Some(entry) = state.entries.get_mut(&key) {
             if let Some(existing) = meshes.get_mut(&entry.mesh) {
                 *existing = mesh;
@@ -68,9 +129,9 @@ pub fn apply_chunk_updates(
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(assets.material.clone()),
                     Transform::from_xyz(
-                        (chunk.x * CHUNK_SIZE) as f32,
+                        (key.0 * CHUNK_SIZE) as f32,
                         0.0,
-                        (chunk.z * CHUNK_SIZE) as f32,
+                        (key.1 * CHUNK_SIZE) as f32,
                     ),
                     GlobalTransform::default(),
                 ))
@@ -81,41 +142,37 @@ pub fn apply_chunk_updates(
     }
 }
 
-fn build_chunk_mesh(chunk: &ChunkData) -> Mesh {
+fn build_chunk_mesh(store: &ChunkStore, chunk_x: i32, chunk_z: i32, column: &ChunkColumn) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    let mut section_map: Vec<Option<&[u8]>> = vec![None; 16];
-    for section in &chunk.sections {
-        section_map[section.y as usize] = Some(&section.blocks);
-    }
-
-    for section in &chunk.sections {
-        let base_y = section.y as i32 * SECTION_HEIGHT;
+    for (section_y, section_opt) in column.sections.iter().enumerate() {
+        let Some(section_blocks) = section_opt else {
+            continue;
+        };
+        let base_y = section_y as i32 * SECTION_HEIGHT;
         for y in 0..SECTION_HEIGHT {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
-                    let block_id = section.blocks[idx];
+                    let block_id = section_blocks[idx];
                     if block_id == 0 {
                         continue;
                     }
-
-                    let wx = x;
-                    let wy = base_y + y;
-                    let wz = z;
 
                     add_block_faces(
                         &mut positions,
                         &mut normals,
                         &mut uvs,
                         &mut indices,
-                        &section_map,
-                        wx,
-                        wy,
-                        wz,
+                        store,
+                        chunk_x,
+                        chunk_z,
+                        x,
+                        base_y + y,
+                        z,
                     );
                 }
             }
@@ -135,7 +192,9 @@ fn add_block_faces(
     normals: &mut Vec<[f32; 3]>,
     uvs: &mut Vec<[f32; 2]>,
     indices: &mut Vec<u32>,
-    section_map: &[Option<&[u8]>],
+    store: &ChunkStore,
+    chunk_x: i32,
+    chunk_z: i32,
     x: i32,
     y: i32,
     z: i32,
@@ -180,7 +239,7 @@ fn add_block_faces(
     ];
 
     for (dx, dy, dz, normal, verts) in faces {
-        if block_at(section_map, x + dx, y + dy, z + dz) != 0 {
+        if block_at(store, chunk_x, chunk_z, x + dx, y + dy, z + dz) != 0 {
             continue;
         }
 
@@ -197,28 +256,52 @@ fn add_block_faces(
         ]);
         indices.extend_from_slice(&[
             base_index,
+            base_index + 2,
             base_index + 1,
-            base_index + 2,
             base_index,
-            base_index + 2,
             base_index + 3,
+            base_index + 2,
         ]);
     }
 }
 
-fn block_at(section_map: &[Option<&[u8]>], x: i32, y: i32, z: i32) -> u8 {
-    if x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE || y < 0 || y >= WORLD_HEIGHT {
+fn block_at(store: &ChunkStore, chunk_x: i32, chunk_z: i32, x: i32, y: i32, z: i32) -> u16 {
+    if y < 0 || y >= WORLD_HEIGHT {
         return 0;
     }
 
+    let mut target_chunk_x = chunk_x;
+    let mut target_chunk_z = chunk_z;
+    let mut local_x = x;
+    let mut local_z = z;
+
+    if local_x < 0 {
+        target_chunk_x -= 1;
+        local_x += CHUNK_SIZE;
+    } else if local_x >= CHUNK_SIZE {
+        target_chunk_x += 1;
+        local_x -= CHUNK_SIZE;
+    }
+
+    if local_z < 0 {
+        target_chunk_z -= 1;
+        local_z += CHUNK_SIZE;
+    } else if local_z >= CHUNK_SIZE {
+        target_chunk_z += 1;
+        local_z -= CHUNK_SIZE;
+    }
+
+    let Some(column) = store.chunks.get(&(target_chunk_x, target_chunk_z)) else {
+        return 1;
+    };
+
     let section_index = (y / SECTION_HEIGHT) as usize;
     let local_y = (y % SECTION_HEIGHT) as usize;
-    let local_x = x as usize;
-    let local_z = z as usize;
 
-    let Some(blocks) = section_map.get(section_index).and_then(|v| *v) else {
-        return 0;
+    let Some(section) = column.sections.get(section_index).and_then(|v| v.as_ref()) else {
+        return if column.full { 0 } else { 1 };
     };
-    let idx = local_y * 16 * 16 + local_z * 16 + local_x;
-    blocks[idx]
+
+    let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
+    section[idx]
 }
