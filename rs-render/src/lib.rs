@@ -19,6 +19,7 @@ impl Plugin for RenderPlugin {
             .init_resource::<world::WorldSettings>()
             .init_resource::<chunk::ChunkUpdateQueue>()
             .init_resource::<chunk::ChunkRenderState>()
+            .init_resource::<chunk::ChunkStore>()
             .init_resource::<chunk::ChunkRenderAssets>()
             .add_systems(Startup, (world::setup_world, camera::spawn_player))
             .add_systems(

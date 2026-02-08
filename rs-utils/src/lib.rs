@@ -21,7 +21,7 @@ pub struct UiState {
 #[derive(Clone)]
 pub struct ChunkSection {
     pub y: u8,
-    pub blocks: Vec<u8>,
+    pub blocks: Vec<u16>,
 }
 
 #[derive(Clone)]
@@ -30,6 +30,15 @@ pub struct ChunkData {
     pub z: i32,
     pub full: bool,
     pub sections: Vec<ChunkSection>,
+}
+
+#[derive(Clone)]
+pub struct PlayerPosition {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw: Option<f32>,
+    pub pitch: Option<f32>,
 }
 
 #[derive(Resource)]
@@ -56,4 +65,5 @@ pub enum FromNetMessage {
     Packet(Packet),
     ChatMessage(String),
     ChunkData(ChunkData),
+    PlayerPosition(PlayerPosition),
 }

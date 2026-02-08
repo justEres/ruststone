@@ -2,3 +2,5 @@
 Cargo.lock
 /server
 .cargo-remote.toml
+
+leafish

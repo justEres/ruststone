@@ -1,5 +1,5 @@
 use rs_protocol::protocol::{Conn, packet::Packet};
-use rs_utils::FromNetMessage;
+use rs_utils::{FromNetMessage, PlayerPosition};
 
 use crate::chunk_decode;
 
@@ -49,6 +49,42 @@ pub fn handle_packet(
                     }
                 }
             }
+        }
+        Packet::PlayerPosition(position) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+                yaw: None,
+                pitch: None,
+            }));
+        }
+        Packet::PlayerPosition_HeadY(position) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                x: position.x,
+                y: position.feet_y,
+                z: position.z,
+                yaw: None,
+                pitch: None,
+            }));
+        }
+        Packet::PlayerPositionLook(position) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+                yaw: Some(position.yaw),
+                pitch: Some(position.pitch),
+            }));
+        }
+        Packet::PlayerPositionLook_HeadY(position) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                x: position.x,
+                y: position.feet_y,
+                z: position.z,
+                yaw: Some(position.yaw),
+                pitch: Some(position.pitch),
+            }));
         }
         Packet::EntityMetadata(_em) => {}
         Packet::EntityProperties(_ep) => {}
