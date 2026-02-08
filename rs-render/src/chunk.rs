@@ -14,23 +14,23 @@ pub struct ChunkUpdateQueue(pub Vec<ChunkData>);
 
 #[derive(Resource, Default)]
 pub struct ChunkRenderState {
-    entries: HashMap<(i32, i32), ChunkEntry>,
+    pub entries: HashMap<(i32, i32), ChunkEntry>,
 }
 
-struct ChunkEntry {
-    entity: Entity,
-    mesh: Handle<Mesh>,
+pub struct ChunkEntry {
+    pub entity: Entity,
+    pub mesh: Handle<Mesh>,
 }
 
 #[derive(Resource, Default)]
 pub struct ChunkStore {
-    chunks: HashMap<(i32, i32), ChunkColumn>,
+    pub chunks: HashMap<(i32, i32), ChunkColumn>,
 }
 
 #[derive(Clone)]
-struct ChunkColumn {
-    full: bool,
-    sections: Vec<Option<Vec<u16>>>,
+pub struct ChunkColumn {
+    pub full: bool,
+    pub sections: Vec<Option<Vec<u16>>>,
 }
 
 impl ChunkColumn {
@@ -59,9 +59,39 @@ impl ChunkColumn {
     }
 }
 
+#[derive(Clone)]
+pub struct ChunkColumnSnapshot {
+    pub center_key: (i32, i32),
+    pub columns: HashMap<(i32, i32), ChunkColumn>,
+}
+
+impl ChunkColumnSnapshot {
+    pub fn build_mesh_data(&self) -> MeshData {
+        build_chunk_mesh(self, self.center_key.0, self.center_key.1)
+    }
+}
+
+pub struct MeshData {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+}
+
+impl MeshData {
+    pub fn empty() -> Self {
+        Self {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct ChunkRenderAssets {
-    material: Handle<StandardMaterial>,
+    pub material: Handle<StandardMaterial>,
 }
 
 impl FromWorld for ChunkRenderAssets {
@@ -76,77 +106,51 @@ impl FromWorld for ChunkRenderAssets {
     }
 }
 
-pub fn apply_chunk_updates(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    assets: Res<ChunkRenderAssets>,
-    mut queue: ResMut<ChunkUpdateQueue>,
-    mut state: ResMut<ChunkRenderState>,
-    mut store: ResMut<ChunkStore>,
-) {
-    if queue.0.is_empty() {
-        return;
+pub fn apply_mesh_data(mesh: &mut Mesh, data: MeshData) {
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs);
+    mesh.insert_indices(Indices::U32(data.indices));
+}
+
+pub fn build_mesh_from_data(data: MeshData) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    apply_mesh_data(&mut mesh, data);
+    mesh
+}
+
+pub fn update_store(store: &mut ChunkStore, chunk: ChunkData) {
+    let key = (chunk.x, chunk.z);
+    let column = store.chunks.entry(key).or_insert_with(ChunkColumn::new);
+
+    if chunk.full {
+        column.set_full();
     }
 
-    let mut updated_keys = Vec::new();
-
-    for chunk in queue.0.drain(..) {
-        let key = (chunk.x, chunk.z);
-        let column = store
-            .chunks
-            .entry(key)
-            .or_insert_with(ChunkColumn::new);
-
-        if chunk.full {
-            column.set_full();
-        }
-
-        for section in chunk.sections {
-            column.set_section(section.y, section.blocks);
-        }
-
-        updated_keys.push(key);
-    }
-
-    for key in updated_keys {
-        let Some(column) = store.chunks.get(&key) else {
-            continue;
-        };
-        let mesh = build_chunk_mesh(&store, key.0, key.1, column);
-
-        if let Some(entry) = state.entries.get_mut(&key) {
-            if let Some(existing) = meshes.get_mut(&entry.mesh) {
-                *existing = mesh;
-            } else {
-                let handle = meshes.add(mesh);
-                commands.entity(entry.entity).insert(Mesh3d(handle.clone()));
-                entry.mesh = handle;
-            }
-        } else {
-            let handle = meshes.add(mesh);
-            let entity = commands
-                .spawn((
-                    Mesh3d(handle.clone()),
-                    MeshMaterial3d(assets.material.clone()),
-                    Transform::from_xyz(
-                        (key.0 * CHUNK_SIZE) as f32,
-                        0.0,
-                        (key.1 * CHUNK_SIZE) as f32,
-                    ),
-                    GlobalTransform::default(),
-                ))
-                .id();
-
-            state.entries.insert(key, ChunkEntry { entity, mesh: handle });
-        }
+    for section in chunk.sections {
+        column.set_section(section.y, section.blocks);
     }
 }
 
-fn build_chunk_mesh(store: &ChunkStore, chunk_x: i32, chunk_z: i32, column: &ChunkColumn) -> Mesh {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals: Vec<[f32; 3]> = Vec::new();
-    let mut uvs: Vec<[f32; 2]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
+pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSnapshot {
+    let mut columns = HashMap::new();
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let neighbor_key = (key.0 + dx, key.1 + dz);
+            if let Some(column) = store.chunks.get(&neighbor_key) {
+                columns.insert(neighbor_key, column.clone());
+            }
+        }
+    }
+    ChunkColumnSnapshot { center_key: key, columns }
+}
+
+fn build_chunk_mesh(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshData {
+    let mut data = MeshData::empty();
+
+    let Some(column) = snapshot.columns.get(&(chunk_x, chunk_z)) else {
+        return data;
+    };
 
     for (section_y, section_opt) in column.sections.iter().enumerate() {
         let Some(section_blocks) = section_opt else {
@@ -163,11 +167,8 @@ fn build_chunk_mesh(store: &ChunkStore, chunk_x: i32, chunk_z: i32, column: &Chu
                     }
 
                     add_block_faces(
-                        &mut positions,
-                        &mut normals,
-                        &mut uvs,
-                        &mut indices,
-                        store,
+                        &mut data,
+                        snapshot,
                         chunk_x,
                         chunk_z,
                         x,
@@ -179,20 +180,12 @@ fn build_chunk_mesh(store: &ChunkStore, chunk_x: i32, chunk_z: i32, column: &Chu
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
+    data
 }
 
 fn add_block_faces(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
-    store: &ChunkStore,
+    data: &mut MeshData,
+    snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -213,16 +206,16 @@ fn add_block_faces(
             [0.0, 1.0, 1.0],
         ]),
         (0, 1, 0, [0.0, 1.0, 0.0], [
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [1.0, 1.0, 0.0],
             [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
         ]),
         (0, -1, 0, [0.0, -1.0, 0.0], [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 1.0],
             [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ]),
         (0, 0, 1, [0.0, 0.0, 1.0], [
             [1.0, 0.0, 1.0],
@@ -239,22 +232,23 @@ fn add_block_faces(
     ];
 
     for (dx, dy, dz, normal, verts) in faces {
-        if block_at(store, chunk_x, chunk_z, x + dx, y + dy, z + dz) != 0 {
+        if block_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz) != 0 {
             continue;
         }
 
-        let base_index = positions.len() as u32;
+        let base_index = data.positions.len() as u32;
         for vert in verts {
-            positions.push([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
-            normals.push(normal);
+            data.positions
+                .push([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
+            data.normals.push(normal);
         }
-        uvs.extend_from_slice(&[
+        data.uvs.extend_from_slice(&[
             [0.0, 0.0],
             [1.0, 0.0],
             [1.0, 1.0],
             [0.0, 1.0],
         ]);
-        indices.extend_from_slice(&[
+        data.indices.extend_from_slice(&[
             base_index,
             base_index + 2,
             base_index + 1,
@@ -265,7 +259,7 @@ fn add_block_faces(
     }
 }
 
-fn block_at(store: &ChunkStore, chunk_x: i32, chunk_z: i32, x: i32, y: i32, z: i32) -> u16 {
+fn block_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, y: i32, z: i32) -> u16 {
     if y < 0 || y >= WORLD_HEIGHT {
         return 0;
     }
@@ -291,7 +285,7 @@ fn block_at(store: &ChunkStore, chunk_x: i32, chunk_z: i32, x: i32, y: i32, z: i
         local_z -= CHUNK_SIZE;
     }
 
-    let Some(column) = store.chunks.get(&(target_chunk_x, target_chunk_z)) else {
+    let Some(column) = snapshot.columns.get(&(target_chunk_x, target_chunk_z)) else {
         return 1;
     };
 
