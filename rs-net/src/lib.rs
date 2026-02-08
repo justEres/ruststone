@@ -5,6 +5,7 @@ use std::thread;
 use rs_protocol::protocol::Conn;
 use rs_utils::{FromNetMessage, ToNetMessage};
 
+mod chunk_decode;
 mod handle_packet;
 
 pub fn start_networking(
