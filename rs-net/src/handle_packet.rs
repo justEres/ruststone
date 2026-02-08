@@ -1,8 +1,7 @@
-use rs_protocol::protocol::{
-    Conn,
-    packet::Packet,
-};
+use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_utils::FromNetMessage;
+
+use crate::chunk_decode;
 
 pub fn handle_packet(
     pkt: Packet,
@@ -11,19 +10,57 @@ pub fn handle_packet(
 ) {
     use rs_protocol::protocol::packet::Packet;
     match pkt {
-        Packet::ChunkData(cd) => {}
-        Packet::ChunkDataBulk(cdb) => {}
-        Packet::EntityMetadata(em) => {}
-        Packet::EntityProperties(ep) => {}
-        Packet::SpawnMob_u8_i32_NoUUID(sm) => {}
-        Packet::EntityHeadLook(ehl) => {}
-        Packet::EntityMove_i8(em) => {}
-        Packet::EntityVelocity(ev) => {}
-        Packet::EntityTeleport_i32(et) => {}
-        Packet::EntityEquipment_u16(ee) => {}
-        Packet::EntityLookAndMove_i8(elm) => {}
-        Packet::EntityLook_VarInt(el) => {}
-        Packet::UpdateBlockEntity(ube) => {}
+        Packet::ChunkData(cd) => {
+            let bitmask = cd.bitmask.0 as u16;
+            match chunk_decode::decode_chunk(
+                cd.chunk_x,
+                cd.chunk_z,
+                cd.new,
+                bitmask,
+                &cd.data.data,
+                true,
+            ) {
+                Ok((chunk, _)) => {
+                    let _ = to_main.send(FromNetMessage::ChunkData(chunk));
+                }
+                Err(err) => {
+                    println!("Failed to decode ChunkData: {}", err);
+                }
+            }
+        }
+        Packet::ChunkDataBulk(cdb) => {
+            let mut offset = 0usize;
+            for meta in cdb.chunk_meta.data.iter() {
+                match chunk_decode::decode_chunk(
+                    meta.x,
+                    meta.z,
+                    true,
+                    meta.bitmask,
+                    &cdb.chunk_data[offset..],
+                    cdb.skylight,
+                ) {
+                    Ok((chunk, consumed)) => {
+                        offset += consumed;
+                        let _ = to_main.send(FromNetMessage::ChunkData(chunk));
+                    }
+                    Err(err) => {
+                        println!("Failed to decode ChunkDataBulk: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
+        Packet::EntityMetadata(_em) => {}
+        Packet::EntityProperties(_ep) => {}
+        Packet::SpawnMob_u8_i32_NoUUID(_sm) => {}
+        Packet::EntityHeadLook(_ehl) => {}
+        Packet::EntityMove_i8(_em) => {}
+        Packet::EntityVelocity(_ev) => {}
+        Packet::EntityTeleport_i32(_et) => {}
+        Packet::EntityEquipment_u16(_ee) => {}
+        Packet::EntityLookAndMove_i8(_elm) => {}
+        Packet::EntityLook_VarInt(_el) => {}
+        Packet::UpdateBlockEntity(_ube) => {}
         Packet::KeepAliveClientbound_VarInt(ka) => {
             conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::KeepAliveServerbound_VarInt {
@@ -48,7 +85,6 @@ pub fn handle_packet(
 
         other => {
             let dbg = format!("{:?}", other);
-            // Extract variant name (text before first '(') if present
             let variant = if let Some(idx) = dbg.find('(') {
                 dbg[..idx].to_string()
             } else {

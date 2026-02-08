@@ -18,6 +18,20 @@ pub struct UiState {
     pub chat_open: bool,
 }
 
+#[derive(Clone)]
+pub struct ChunkSection {
+    pub y: u8,
+    pub blocks: Vec<u8>,
+}
+
+#[derive(Clone)]
+pub struct ChunkData {
+    pub x: i32,
+    pub z: i32,
+    pub full: bool,
+    pub sections: Vec<ChunkSection>,
+}
+
 #[derive(Resource)]
 pub struct ToNet(pub Sender<ToNetMessage>);
 
@@ -41,4 +55,5 @@ pub enum FromNetMessage {
     Disconnected,
     Packet(Packet),
     ChatMessage(String),
+    ChunkData(ChunkData),
 }
