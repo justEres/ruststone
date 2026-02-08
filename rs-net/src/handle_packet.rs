@@ -50,40 +50,73 @@ pub fn handle_packet(
                 }
             }
         }
+        Packet::TeleportPlayer_NoConfirm(tp) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                position: Some((tp.x, tp.y, tp.z)),
+                yaw: Some(tp.yaw),
+                pitch: Some(tp.pitch),
+                flags: Some(tp.flags),
+            }));
+        }
+        Packet::TeleportPlayer_WithConfirm(tp) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                position: Some((tp.x, tp.y, tp.z)),
+                yaw: Some(tp.yaw),
+                pitch: Some(tp.pitch),
+                flags: Some(tp.flags),
+            }));
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::TeleportConfirm {
+                    teleport_id: tp.teleport_id,
+                },
+            );
+        }
+        Packet::TeleportPlayer_OnGround(tp) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                position: Some((tp.x, tp.eyes_y, tp.z)),
+                yaw: Some(tp.yaw),
+                pitch: Some(tp.pitch),
+                flags: None,
+            }));
+        }
         Packet::PlayerPosition(position) => {
             let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                x: position.x,
-                y: position.y,
-                z: position.z,
+                position: Some((position.x, position.y, position.z)),
                 yaw: None,
                 pitch: None,
+                flags: None,
             }));
         }
         Packet::PlayerPosition_HeadY(position) => {
             let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                x: position.x,
-                y: position.feet_y,
-                z: position.z,
+                position: Some((position.x, position.feet_y, position.z)),
                 yaw: None,
                 pitch: None,
+                flags: None,
             }));
         }
         Packet::PlayerPositionLook(position) => {
             let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                x: position.x,
-                y: position.y,
-                z: position.z,
+                position: Some((position.x, position.y, position.z)),
                 yaw: Some(position.yaw),
                 pitch: Some(position.pitch),
+                flags: None,
             }));
         }
         Packet::PlayerPositionLook_HeadY(position) => {
             let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                x: position.x,
-                y: position.feet_y,
-                z: position.z,
+                position: Some((position.x, position.feet_y, position.z)),
                 yaw: Some(position.yaw),
                 pitch: Some(position.pitch),
+                flags: None,
+            }));
+        }
+        Packet::PlayerLook(position) => {
+            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+                position: None,
+                yaw: Some(position.yaw),
+                pitch: Some(position.pitch),
+                flags: None,
             }));
         }
         Packet::EntityMetadata(_em) => {}

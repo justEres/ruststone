@@ -34,11 +34,10 @@ pub struct ChunkData {
 
 #[derive(Clone)]
 pub struct PlayerPosition {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub position: Option<(f64, f64, f64)>,
     pub yaw: Option<f32>,
     pub pitch: Option<f32>,
+    pub flags: Option<u8>,
 }
 
 #[derive(Resource)]

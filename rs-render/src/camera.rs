@@ -3,6 +3,8 @@ use bevy::prelude::*;
 
 use crate::components::{LookAngles, Player, PlayerCamera, Velocity};
 
+const EYE_HEIGHT: f32 = 1.62;
+
 pub fn spawn_player(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -14,7 +16,7 @@ pub fn spawn_player(
             Player,
             Velocity::default(),
             LookAngles::default(),
-            Transform::from_xyz(0.0, 2.0, 8.0),
+            Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
         ))
         .with_children(|parent| {
@@ -26,7 +28,7 @@ pub fn spawn_player(
                     brightness: 1000.0,
                     ..Default::default()
                 },
-                Transform::from_xyz(0.0, 0.0, 0.0),
+                Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
             ));
         });
 }
