@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
@@ -9,7 +10,7 @@ use crate::chunk::{ChunkColumnSnapshot, MeshBatch};
 
 #[derive(Resource)]
 pub struct MeshAsyncResources {
-    pub runtime: Arc<Runtime>,
+    pub runtime: ManuallyDrop<Arc<Runtime>>,
     pub job_tx: UnboundedSender<MeshJob>,
     pub result_rx: Mutex<UnboundedReceiver<MeshResult>>,
 }
@@ -40,7 +41,7 @@ impl FromWorld for MeshAsyncResources {
         });
 
         Self {
-            runtime,
+            runtime: ManuallyDrop::new(runtime),
             job_tx,
             result_rx: Mutex::new(result_rx),
         }

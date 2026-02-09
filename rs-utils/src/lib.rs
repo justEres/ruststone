@@ -71,6 +71,20 @@ impl Default for PlayerStatus {
     }
 }
 
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct PerfTimings {
+    pub frame_delta_ms: f32,
+    pub main_thread_ms: f32,
+    pub handle_messages_ms: f32,
+    pub input_collect_ms: f32,
+    pub fixed_tick_ms: f32,
+    pub net_apply_ms: f32,
+    pub smoothing_ms: f32,
+    pub apply_transform_ms: f32,
+    pub debug_ui_ms: f32,
+    pub ui_ms: f32,
+}
+
 pub enum ToNetMessage {
     Connect { username: String, address: String },
     Disconnect,

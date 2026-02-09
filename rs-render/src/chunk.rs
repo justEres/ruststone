@@ -105,6 +105,8 @@ pub struct MeshData {
     pub uvs: Vec<[f32; 2]>,
     pub colors: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
+    pub bounds_min: Option<Vec3>,
+    pub bounds_max: Option<Vec3>,
 }
 
 impl MeshData {
@@ -115,6 +117,30 @@ impl MeshData {
             uvs: Vec::new(),
             colors: Vec::new(),
             indices: Vec::new(),
+            bounds_min: None,
+            bounds_max: None,
+        }
+    }
+
+    pub fn push_pos(&mut self, pos: [f32; 3]) {
+        let v = Vec3::new(pos[0], pos[1], pos[2]);
+        match (self.bounds_min.as_mut(), self.bounds_max.as_mut()) {
+            (Some(min), Some(max)) => {
+                *min = min.min(v);
+                *max = max.max(v);
+            }
+            _ => {
+                self.bounds_min = Some(v);
+                self.bounds_max = Some(v);
+            }
+        }
+        self.positions.push(pos);
+    }
+
+    pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
+        match (self.bounds_min, self.bounds_max) {
+            (Some(min), Some(max)) => Some((min, max)),
+            _ => None,
         }
     }
 }
@@ -223,10 +249,11 @@ pub fn apply_mesh_data(mesh: &mut Mesh, data: MeshData) {
     mesh.insert_indices(Indices::U32(data.indices));
 }
 
-pub fn build_mesh_from_data(data: MeshData) -> Mesh {
+pub fn build_mesh_from_data(data: MeshData) -> (Mesh, Option<(Vec3, Vec3)>) {
+    let bounds = data.bounds();
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     apply_mesh_data(&mut mesh, data);
-    mesh
+    (mesh, bounds)
 }
 
 pub fn update_store(store: &mut ChunkStore, chunk: ChunkData) {
@@ -355,9 +382,9 @@ fn build_chunk_mesh_greedy(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z
                             Face::PosZ => (0, 0, 1),
                             Face::NegZ => (0, 0, -1),
                         };
-                        if block_at(snapshot, chunk_x, chunk_z, x + dx, base_y + y + dy, z + dz)
-                            != 0
-                        {
+                        let neighbor =
+                            block_at(snapshot, chunk_x, chunk_z, x + dx, base_y + y + dy, z + dz);
+                        if face_is_occluded(block_id, neighbor) {
                             continue;
                         }
 
@@ -511,7 +538,7 @@ fn add_greedy_quad(
     };
 
     for vert in verts {
-        data.positions.push(vert);
+        data.push_pos(vert);
         data.normals.push(normal);
     }
 
@@ -617,7 +644,8 @@ fn add_block_faces(
     ];
 
     for (face, dx, dy, dz, normal, verts) in faces {
-        if block_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz) != 0 {
+        let neighbor = block_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz);
+        if face_is_occluded(block_id, neighbor) {
             continue;
         }
 
@@ -625,8 +653,7 @@ fn add_block_faces(
         let data = batch.ensure(texture);
         let base_index = data.positions.len() as u32;
         for vert in verts {
-            data.positions
-                .push([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
+            data.push_pos([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
             data.normals.push(normal);
         }
         let uvs = uv_for_texture(texture);
@@ -703,4 +730,18 @@ fn block_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, 
 
     let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
     section[idx]
+}
+
+fn is_liquid(block_id: u16) -> bool {
+    matches!(block_id, 8 | 9 | 10 | 11)
+}
+
+fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
+    if neighbor_id == 0 {
+        return false;
+    }
+    if is_liquid(neighbor_id) {
+        return is_liquid(block_id);
+    }
+    true
 }

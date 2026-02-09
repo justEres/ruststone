@@ -20,6 +20,9 @@ pub fn spawn_player(
             LookAngles::default(),
             Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -35,6 +38,9 @@ pub fn spawn_player(
                     ..Default::default()
                 }),
                 Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
+                Visibility::Inherited,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
             ));
         });
 }

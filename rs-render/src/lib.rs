@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy::pbr::wireframe::WireframePlugin;
+use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
@@ -42,7 +43,16 @@ impl Plugin for RenderPlugin {
                     enqueue_chunk_meshes,
                 ),
             )
-            .add_systems(PostUpdate, apply_mesh_results);
+            .add_systems(
+                PostUpdate,
+                (
+                    apply_mesh_results.before(VisibilitySystems::CheckVisibility),
+                    debug::manual_frustum_cull
+                        .after(apply_mesh_results)
+                        .before(VisibilitySystems::CheckVisibility),
+                    debug::gather_render_stats.after(VisibilitySystems::CheckVisibility),
+                ),
+            );
     }
 }
 
@@ -60,11 +70,12 @@ fn enqueue_chunk_meshes(
         return;
     }
 
-    let mut updated_keys = Vec::new();
+    let mut updated_keys = std::collections::HashSet::new();
+    let raw_updates = queue.0.len() as u32;
     for chunk in queue.0.drain(..) {
         let key = (chunk.x, chunk.z);
         chunk::update_store(&mut store, chunk);
-        updated_keys.push(key);
+        updated_keys.insert(key);
     }
     let updates_len = updated_keys.len() as u32;
 
@@ -91,6 +102,7 @@ fn enqueue_chunk_meshes(
         perf.avg_enqueue_ms * 0.9 + elapsed_ms * 0.1
     };
     perf.last_updates = updates_len;
+    perf.last_updates_raw = raw_updates;
     perf.in_flight = in_flight.chunks.len() as u32;
 }
 
@@ -137,7 +149,7 @@ fn apply_mesh_results(
 
         for (texture_key, data) in mesh_batch.meshes {
             active_keys.insert(texture_key);
-            let mesh = chunk::build_mesh_from_data(data);
+            let (mesh, bounds) = chunk::build_mesh_from_data(data);
 
             if let Some(submesh) = entry.submeshes.get_mut(&texture_key) {
                 if let Some(existing) = meshes.get_mut(&submesh.mesh) {
@@ -146,6 +158,14 @@ fn apply_mesh_results(
                     let handle = meshes.add(mesh);
                     commands.entity(submesh.entity).insert(Mesh3d(handle.clone()));
                     submesh.mesh = handle;
+                }
+                if let Some((min, max)) = bounds {
+                    let center = (min + max) * 0.5;
+                    let half = (max - min) * 0.5;
+                    commands.entity(submesh.entity).insert(bevy::render::primitives::Aabb {
+                        center: center.into(),
+                        half_extents: half.into(),
+                    });
                 }
             } else {
                 let handle = meshes.add(mesh);
@@ -165,6 +185,14 @@ fn apply_mesh_results(
                         ViewVisibility::default(),
                     ))
                     .id();
+                if let Some((min, max)) = bounds {
+                    let center = (min + max) * 0.5;
+                    let half = (max - min) * 0.5;
+                    commands.entity(child).insert(bevy::render::primitives::Aabb {
+                        center: center.into(),
+                        half_extents: half.into(),
+                    });
+                }
                 commands.entity(entry.entity).add_child(child);
                 entry.submeshes.insert(
                     texture_key,
