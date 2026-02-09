@@ -84,10 +84,11 @@ fn apply_mesh_results(
 
         let entry = state.entries.entry(key).or_insert_with(|| {
             let entity = commands
-                .spawn((
-                    Transform::from_xyz((key.0 * 16) as f32, 0.0, (key.1 * 16) as f32),
-                    GlobalTransform::default(),
-                ))
+                .spawn(SpatialBundle::from_transform(Transform::from_xyz(
+                    (key.0 * 16) as f32,
+                    0.0,
+                    (key.1 * 16) as f32,
+                )))
                 .id();
             chunk::ChunkEntry {
                 entity,
@@ -120,8 +121,7 @@ fn apply_mesh_results(
                     .spawn((
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material),
-                        Transform::default(),
-                        GlobalTransform::default(),
+                        SpatialBundle::default(),
                     ))
                     .id();
                 commands.entity(entry.entity).add_child(child);
