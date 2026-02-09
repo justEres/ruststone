@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::components::WorldRoot;
+use crate::components::{ShadowCasterLight, WorldRoot};
 
 #[derive(Resource)]
 pub struct WorldSettings {
@@ -31,6 +31,7 @@ pub fn setup_world(
             shadow_normal_bias: 0.6,
             ..default()
         },
+        ShadowCasterLight,
         Transform::from_xyz(8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 

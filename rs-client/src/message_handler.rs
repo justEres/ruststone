@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::ChunkUpdateQueue;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage, PlayerStatus};
 
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
@@ -23,6 +23,7 @@ pub fn handle_messages(
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
     mut collision_map: ResMut<WorldCollisionMap>,
+    mut player_status: ResMut<PlayerStatus>,
     sim_state: Res<SimState>,
     mut sim_clock: ResMut<SimClock>,
     mut sim_ready: ResMut<SimReady>,
@@ -49,6 +50,16 @@ pub fn handle_messages(
             FromNetMessage::ChunkData(chunk) => {
                 collision_map.update_chunk(chunk.clone());
                 chunk_updates.0.push(chunk);
+            }
+            FromNetMessage::UpdateHealth {
+                health,
+                food,
+                food_saturation,
+            } => {
+                player_status.health = health;
+                player_status.food = food;
+                player_status.food_saturation = food_saturation;
+                player_status.dead = health <= 0.0;
             }
             FromNetMessage::PlayerPosition(pos) => {
                 let mut position = sim_state.current.pos;

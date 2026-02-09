@@ -51,11 +51,31 @@ pub struct FromNet(pub Receiver<FromNetMessage>);
 #[derive(Resource, Default)]
 pub struct Chat(pub VecDeque<String>, pub String);
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct PlayerStatus {
+    pub health: f32,
+    pub food: i32,
+    pub food_saturation: f32,
+    pub dead: bool,
+}
+
+impl Default for PlayerStatus {
+    fn default() -> Self {
+        Self {
+            health: 20.0,
+            food: 20,
+            food_saturation: 5.0,
+            dead: false,
+        }
+    }
+}
+
 pub enum ToNetMessage {
     Connect { username: String, address: String },
     Disconnect,
     Shutdown,
     ChatMessage(String),
+    Respawn,
     PlayerMove {
         x: f64,
         y: f64,
@@ -75,4 +95,9 @@ pub enum FromNetMessage {
     ChatMessage(String),
     ChunkData(ChunkData),
     PlayerPosition(PlayerPosition),
+    UpdateHealth {
+        health: f32,
+        food: i32,
+        food_saturation: f32,
+    },
 }

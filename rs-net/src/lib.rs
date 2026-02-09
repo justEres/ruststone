@@ -76,6 +76,12 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                     )
                     .unwrap();
                 }
+                ToNetMessage::Respawn => {
+                    let _ = rs_protocol::protocol::packet::send_client_status(
+                        &mut conn,
+                        rs_protocol::protocol::packet::ClientStatus::PerformRespawn,
+                    );
+                }
                 _ => {}
             }
         }

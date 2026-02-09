@@ -5,7 +5,7 @@ use bevy_egui::{
     egui::{self},
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
 };
-use rs_utils::{AppState, ApplicationState, Chat, ToNet, ToNetMessage, UiState};
+use rs_utils::{AppState, ApplicationState, Chat, PlayerStatus, ToNet, ToNetMessage, UiState};
 
 pub struct UiPlugin;
 
@@ -25,6 +25,7 @@ fn connect_ui(
     mut chat: ResMut<Chat>,
     keys: Res<ButtonInput<KeyCode>>,
     mut ui_state: ResMut<UiState>,
+    player_status: Res<PlayerStatus>,
 ) {
     let ctx = contexts.ctx_mut().unwrap();
 
@@ -85,6 +86,23 @@ fn connect_ui(
                     chat.1.clear();
                     response.request_focus();
                 }
+            });
+    }
+
+    if matches!(app_state.0, ApplicationState::Connected) && player_status.dead {
+        egui::Area::new("death_screen".into())
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let screen = ui.ctx().screen_rect();
+                ui.set_min_size(screen.size());
+                ui.vertical_centered(|ui| {
+                    ui.add_space(screen.height() * 0.3);
+                    ui.heading("You Died");
+                    ui.add_space(8.0);
+                    if ui.button("Respawn").clicked() {
+                        let _ = to_net.0.send(ToNetMessage::Respawn);
+                    }
+                });
             });
     }
 }

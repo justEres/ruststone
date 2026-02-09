@@ -158,6 +158,20 @@ pub fn handle_packet(
             let text = sm.message.to_string();
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
+        Packet::UpdateHealth(health) => {
+            let _ = to_main.send(FromNetMessage::UpdateHealth {
+                health: health.health,
+                food: health.food.0,
+                food_saturation: health.food_saturation,
+            });
+        }
+        Packet::UpdateHealth_u16(health) => {
+            let _ = to_main.send(FromNetMessage::UpdateHealth {
+                health: health.health,
+                food: health.food as i32,
+                food_saturation: health.food_saturation,
+            });
+        }
 
         _other => {}
     }
