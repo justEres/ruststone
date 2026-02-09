@@ -1,13 +1,17 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use image::{imageops, DynamicImage, ImageBuffer, Rgba};
 use rs_utils::ChunkData;
 
 use crate::block_textures::{
-    biome_tint, texture_for_face, texture_path, uv_for_texture, BiomeTint, Face, TextureKey,
+    biome_tint, is_transparent_texture, texture_for_face, texture_path, uv_for_texture, BiomeTint,
+    Face, TextureKey, ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TEXTURES,
 };
 
 const CHUNK_SIZE: i32 = 16;
@@ -25,7 +29,7 @@ pub struct ChunkRenderState {
 
 pub struct ChunkEntry {
     pub entity: Entity,
-    pub submeshes: HashMap<TextureKey, SubmeshEntry>,
+    pub submeshes: HashMap<MaterialGroup, SubmeshEntry>,
 }
 
 pub struct SubmeshEntry {
@@ -88,15 +92,34 @@ impl ChunkColumnSnapshot {
     }
 }
 
-#[derive(Default)]
 pub struct MeshBatch {
-    pub meshes: HashMap<TextureKey, MeshData>,
+    pub opaque: MeshData,
+    pub transparent: MeshData,
 }
 
 impl MeshBatch {
-    pub fn ensure(&mut self, key: TextureKey) -> &mut MeshData {
-        self.meshes.entry(key).or_insert_with(MeshData::empty)
+    pub fn data_for(&mut self, key: TextureKey) -> &mut MeshData {
+        if is_transparent_texture(key) {
+            &mut self.transparent
+        } else {
+            &mut self.opaque
+        }
     }
+}
+
+impl Default for MeshBatch {
+    fn default() -> Self {
+        Self {
+            opaque: MeshData::empty(),
+            transparent: MeshData::empty(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+pub enum MaterialGroup {
+    Opaque,
+    Transparent,
 }
 
 pub struct MeshData {
@@ -147,98 +170,136 @@ impl MeshData {
 
 #[derive(Resource)]
 pub struct ChunkRenderAssets {
-    pub materials: HashMap<TextureKey, Handle<StandardMaterial>>,
+    pub opaque_material: Handle<StandardMaterial>,
+    pub transparent_material: Handle<StandardMaterial>,
+    pub atlas: Handle<Image>,
 }
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
-        let asset_server = world.resource::<AssetServer>().clone();
+        let mut atlas_image = load_or_build_atlas();
+        let mut sampler = ImageSamplerDescriptor::nearest();
+        sampler.address_mode_u = ImageAddressMode::Repeat;
+        sampler.address_mode_v = ImageAddressMode::Repeat;
+        sampler.address_mode_w = ImageAddressMode::Repeat;
+        atlas_image.sampler = ImageSampler::Descriptor(sampler);
+        let atlas_handle = {
+            let mut images = world.resource_mut::<Assets<Image>>();
+            images.add(atlas_image)
+        };
         let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-        let mut materials_map = HashMap::new();
 
-        let mut register = |key: TextureKey| {
-            let path = format!("{}{}", TEXTURE_BASE, texture_path(key));
-            let texture: Handle<Image> =
-                asset_server.load_with_settings(path, |settings: &mut ImageLoaderSettings| {
-                    let mut sampler = ImageSamplerDescriptor::nearest();
-                    sampler.address_mode_u = ImageAddressMode::Repeat;
-                    sampler.address_mode_v = ImageAddressMode::Repeat;
-                    sampler.address_mode_w = ImageAddressMode::Repeat;
-                    settings.sampler = ImageSampler::Descriptor(sampler);
-                });
-            let mut material = StandardMaterial {
-                base_color: Color::WHITE,
-                base_color_texture: Some(texture),
-                perceptual_roughness: 1.0,
-                ..default()
-            };
-            if matches!(key, TextureKey::Water | TextureKey::Lava) {
-                material.alpha_mode = AlphaMode::Blend;
-                material.cull_mode = None;
-                material.base_color = Color::srgba(1.0, 1.0, 1.0, 0.8);
-            }
-            let handle = materials.add(material);
-            materials_map.insert(key, handle);
+        let opaque_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(atlas_handle.clone()),
+            perceptual_roughness: 1.0,
+            ..default()
+        });
+        let transparent_material = materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 1.0, 1.0, 0.8),
+            base_color_texture: Some(atlas_handle.clone()),
+            perceptual_roughness: 1.0,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+
+        Self {
+            opaque_material,
+            transparent_material,
+            atlas: atlas_handle,
+        }
+    }
+}
+
+fn assets_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rs-client/assets")
+}
+
+fn atlas_cache_path() -> PathBuf {
+    assets_root().join("texturepack/atlas_cache.png")
+}
+
+fn texture_root_path() -> PathBuf {
+    assets_root().join(TEXTURE_BASE)
+}
+
+fn load_or_build_atlas() -> Image {
+    let cache_path = atlas_cache_path();
+    if let Ok(img) = image::open(&cache_path) {
+        return bevy_image_from_rgba(img);
+    }
+
+    let textures_root = texture_root_path();
+    let mut tile_size = None;
+    let mut atlas = None::<ImageBuffer<Rgba<u8>, Vec<u8>>>;
+
+    for (idx, key) in ATLAS_TEXTURES.iter().enumerate() {
+        let texture_path = textures_root.join(texture_path(*key));
+        let img = image::open(&texture_path).unwrap_or_else(|_| missing_texture_image());
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let size = tile_size.get_or_insert((w, h));
+        let (tile_w, tile_h) = *size;
+        let rgba = if w != tile_w || h != tile_h {
+            imageops::resize(&rgba, tile_w, tile_h, imageops::Nearest)
+        } else {
+            rgba
         };
 
-        for key in [
-            TextureKey::Stone,
-            TextureKey::Dirt,
-            TextureKey::GrassTop,
-            TextureKey::GrassSide,
-            TextureKey::Cobblestone,
-            TextureKey::Planks,
-            TextureKey::Bedrock,
-            TextureKey::Sand,
-            TextureKey::Gravel,
-            TextureKey::GoldOre,
-            TextureKey::IronOre,
-            TextureKey::CoalOre,
-            TextureKey::LogOak,
-            TextureKey::LeavesOak,
-            TextureKey::Sponge,
-            TextureKey::Glass,
-            TextureKey::LapisOre,
-            TextureKey::LapisBlock,
-            TextureKey::SandstoneTop,
-            TextureKey::SandstoneSide,
-            TextureKey::SandstoneBottom,
-            TextureKey::NoteBlock,
-            TextureKey::GoldBlock,
-            TextureKey::IronBlock,
-            TextureKey::Brick,
-            TextureKey::TntTop,
-            TextureKey::TntSide,
-            TextureKey::TntBottom,
-            TextureKey::MossyCobble,
-            TextureKey::Obsidian,
-            TextureKey::DiamondOre,
-            TextureKey::DiamondBlock,
-            TextureKey::CraftingTop,
-            TextureKey::CraftingSide,
-            TextureKey::CraftingFront,
-            TextureKey::FurnaceTop,
-            TextureKey::FurnaceSide,
-            TextureKey::FurnaceFront,
-            TextureKey::Ladder,
-            TextureKey::CactusTop,
-            TextureKey::CactusSide,
-            TextureKey::CactusBottom,
-            TextureKey::Clay,
-            TextureKey::Snow,
-            TextureKey::SnowBlock,
-            TextureKey::Ice,
-            TextureKey::SoulSand,
-            TextureKey::Glowstone,
-            TextureKey::Netherrack,
-            TextureKey::Water,
-            TextureKey::Lava,
-        ] {
-            register(key);
-        }
-
-        Self { materials: materials_map }
+        let atlas_buf = atlas.get_or_insert_with(|| {
+            ImageBuffer::from_pixel(
+                tile_w * ATLAS_COLUMNS,
+                tile_h * ATLAS_ROWS,
+                Rgba([0, 0, 0, 0]),
+            )
+        });
+        let col = (idx as u32) % ATLAS_COLUMNS;
+        let row = (idx as u32) / ATLAS_COLUMNS;
+        let x = col * tile_w;
+        let y = row * tile_h;
+        imageops::overlay(atlas_buf, &rgba, x.into(), y.into());
     }
+
+    let atlas = atlas.unwrap_or_else(|| {
+        ImageBuffer::from_pixel(ATLAS_COLUMNS, ATLAS_ROWS, Rgba([0, 0, 0, 0]))
+    });
+
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = atlas.save(&cache_path);
+
+    bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas))
+}
+
+fn bevy_image_from_rgba(img: DynamicImage) -> Image {
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let data = rgba.into_raw();
+    let mut image = Image::new_fill(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.data = Some(data);
+    image
+}
+
+fn missing_texture_image() -> DynamicImage {
+    let mut img = ImageBuffer::from_pixel(16, 16, Rgba([255, 0, 255, 255]));
+    for (x, y, pixel) in img.enumerate_pixels_mut() {
+        if (x + y) % 2 == 0 {
+            *pixel = Rgba([0, 0, 0, 255]);
+        }
+    }
+    DynamicImage::ImageRgba8(img)
 }
 
 pub fn apply_mesh_data(mesh: &mut Mesh, data: MeshData) {
@@ -446,7 +507,7 @@ fn add_greedy_quad(
     texture: TextureKey,
     tint: BiomeTint,
 ) {
-    let data = batch.ensure(texture);
+    let data = batch.data_for(texture);
     let base_index = data.positions.len() as u32;
 
     let u0 = quad.x as f32;
@@ -650,7 +711,7 @@ fn add_block_faces(
         }
 
         let texture = texture_for_face(block_id, face);
-        let data = batch.ensure(texture);
+        let data = batch.data_for(texture);
         let base_index = data.positions.len() as u32;
         for vert in verts {
             data.push_pos([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);

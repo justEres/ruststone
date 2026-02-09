@@ -7,3 +7,4 @@ edition = "2024"
 bevy = { version = "0.16.0", features = ["dynamic_linking"] }
 rs-utils = { version = "0.1.0", path = "../rs-utils" }
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "sync"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -146,12 +146,26 @@ fn apply_mesh_results(
         });
 
         let mut active_keys = std::collections::HashSet::new();
-
-        for (texture_key, data) in mesh_batch.meshes {
-            active_keys.insert(texture_key);
+        let chunk::MeshBatch { opaque, transparent } = mesh_batch;
+        for (group, data, material) in [
+            (
+                chunk::MaterialGroup::Opaque,
+                opaque,
+                assets.opaque_material.clone(),
+            ),
+            (
+                chunk::MaterialGroup::Transparent,
+                transparent,
+                assets.transparent_material.clone(),
+            ),
+        ] {
+            if data.positions.is_empty() {
+                continue;
+            }
+            active_keys.insert(group);
             let (mesh, bounds) = chunk::build_mesh_from_data(data);
 
-            if let Some(submesh) = entry.submeshes.get_mut(&texture_key) {
+            if let Some(submesh) = entry.submeshes.get_mut(&group) {
                 if let Some(existing) = meshes.get_mut(&submesh.mesh) {
                     *existing = mesh;
                 } else {
@@ -169,11 +183,6 @@ fn apply_mesh_results(
                 }
             } else {
                 let handle = meshes.add(mesh);
-                let material = assets
-                    .materials
-                    .get(&texture_key)
-                    .expect("missing material for texture key")
-                    .clone();
                 let child = commands
                     .spawn((
                         Mesh3d(handle.clone()),
@@ -195,7 +204,7 @@ fn apply_mesh_results(
                 }
                 commands.entity(entry.entity).add_child(child);
                 entry.submeshes.insert(
-                    texture_key,
+                    group,
                     chunk::SubmeshEntry {
                         entity: child,
                         mesh: handle,

@@ -75,6 +75,9 @@ impl Default for PlayerStatus {
 pub struct PerfTimings {
     pub frame_delta_ms: f32,
     pub main_thread_ms: f32,
+    pub update_ms: f32,
+    pub post_update_ms: f32,
+    pub fixed_update_ms: f32,
     pub handle_messages_ms: f32,
     pub input_collect_ms: f32,
     pub fixed_tick_ms: f32,

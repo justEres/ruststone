@@ -22,6 +22,9 @@ use crate::sim::{
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
     pub start: Option<Instant>,
+    pub update_start: Option<Instant>,
+    pub post_update_start: Option<Instant>,
+    pub fixed_update_start: Option<Instant>,
 }
 
 #[derive(Resource)]
@@ -115,6 +118,42 @@ pub fn frame_timing_end(
 ) {
     if let Some(start) = state.start.take() {
         timings.main_thread_ms = start.elapsed().as_secs_f32() * 1000.0;
+    }
+}
+
+pub fn update_timing_start(mut state: ResMut<FrameTimingState>) {
+    state.update_start = Some(Instant::now());
+}
+
+pub fn update_timing_end(mut state: ResMut<FrameTimingState>, mut timings: ResMut<PerfTimings>) {
+    if let Some(start) = state.update_start.take() {
+        timings.update_ms = start.elapsed().as_secs_f32() * 1000.0;
+    }
+}
+
+pub fn post_update_timing_start(mut state: ResMut<FrameTimingState>) {
+    state.post_update_start = Some(Instant::now());
+}
+
+pub fn post_update_timing_end(
+    mut state: ResMut<FrameTimingState>,
+    mut timings: ResMut<PerfTimings>,
+) {
+    if let Some(start) = state.post_update_start.take() {
+        timings.post_update_ms = start.elapsed().as_secs_f32() * 1000.0;
+    }
+}
+
+pub fn fixed_update_timing_start(mut state: ResMut<FrameTimingState>) {
+    state.fixed_update_start = Some(Instant::now());
+}
+
+pub fn fixed_update_timing_end(
+    mut state: ResMut<FrameTimingState>,
+    mut timings: ResMut<PerfTimings>,
+) {
+    if let Some(start) = state.fixed_update_start.take() {
+        timings.fixed_update_ms = start.elapsed().as_secs_f32() * 1000.0;
     }
 }
 
@@ -384,6 +423,21 @@ pub fn debug_overlay_system(
                     "handle_messages: {:.3}ms {}",
                     timings.handle_messages_ms,
                     fmt_pct(timings.handle_messages_ms)
+                ));
+                ui.label(format!(
+                    "update schedule: {:.3}ms {}",
+                    timings.update_ms,
+                    fmt_pct(timings.update_ms)
+                ));
+                ui.label(format!(
+                    "post update: {:.3}ms {}",
+                    timings.post_update_ms,
+                    fmt_pct(timings.post_update_ms)
+                ));
+                ui.label(format!(
+                    "fixed update: {:.3}ms {}",
+                    timings.fixed_update_ms,
+                    fmt_pct(timings.fixed_update_ms)
                 ));
                 ui.label(format!(
                     "input_collect: {:.3}ms {}",
