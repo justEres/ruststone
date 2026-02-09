@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::pbr::wireframe::WireframePlugin;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
@@ -8,7 +9,7 @@ mod block_textures;
 mod camera;
 mod chunk;
 mod components;
-mod debug;
+pub mod debug;
 mod input;
 mod world;
 
@@ -22,18 +23,22 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<world::WorldSettings>()
             .init_resource::<debug::RenderDebugSettings>()
+            .init_resource::<debug::MeshingToggleState>()
+            .init_resource::<debug::RenderPerfStats>()
             .init_resource::<chunk::ChunkUpdateQueue>()
             .init_resource::<chunk::ChunkRenderState>()
             .init_resource::<chunk::ChunkStore>()
             .init_resource::<chunk::ChunkRenderAssets>()
             .init_resource::<async_mesh::MeshAsyncResources>()
             .init_resource::<async_mesh::MeshInFlight>()
+            .add_plugins(WireframePlugin::default())
             .add_systems(Startup, (world::setup_world, camera::spawn_player))
             .add_systems(
                 Update,
                 (
                     input::apply_cursor_lock,
                     debug::apply_render_debug_settings,
+                    debug::remesh_on_meshing_toggle,
                     enqueue_chunk_meshes,
                 ),
             )
@@ -46,8 +51,12 @@ fn enqueue_chunk_meshes(
     mut store: ResMut<chunk::ChunkStore>,
     async_mesh: Res<async_mesh::MeshAsyncResources>,
     mut in_flight: ResMut<async_mesh::MeshInFlight>,
+    render_debug: Res<debug::RenderDebugSettings>,
+    mut perf: ResMut<debug::RenderPerfStats>,
 ) {
+    let start = std::time::Instant::now();
     if queue.0.is_empty() {
+        perf.in_flight = in_flight.chunks.len() as u32;
         return;
     }
 
@@ -57,17 +66,32 @@ fn enqueue_chunk_meshes(
         chunk::update_store(&mut store, chunk);
         updated_keys.push(key);
     }
+    let updates_len = updated_keys.len() as u32;
 
     for key in updated_keys {
         if in_flight.chunks.contains(&key) {
             continue;
         }
         let snapshot = chunk::snapshot_for_chunk(&store, key);
-        let job = async_mesh::MeshJob { chunk_key: key, snapshot };
+        let job = async_mesh::MeshJob {
+            chunk_key: key,
+            snapshot,
+            use_greedy: render_debug.use_greedy_meshing,
+        };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);
         }
     }
+
+    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+    perf.last_enqueue_ms = elapsed_ms;
+    perf.avg_enqueue_ms = if perf.avg_enqueue_ms == 0.0 {
+        elapsed_ms
+    } else {
+        perf.avg_enqueue_ms * 0.9 + elapsed_ms * 0.1
+    };
+    perf.last_updates = updates_len;
+    perf.in_flight = in_flight.chunks.len() as u32;
 }
 
 fn apply_mesh_results(
@@ -77,7 +101,11 @@ fn apply_mesh_results(
     mut state: ResMut<chunk::ChunkRenderState>,
     async_mesh: Res<async_mesh::MeshAsyncResources>,
     mut in_flight: ResMut<async_mesh::MeshInFlight>,
+    mut perf: ResMut<debug::RenderPerfStats>,
 ) {
+    let start = std::time::Instant::now();
+    let mut applied = 0u32;
+    let mut last_build_ms = 0.0f32;
     let mut receiver = async_mesh
         .result_rx
         .lock()
@@ -86,6 +114,7 @@ fn apply_mesh_results(
     while let Ok(result) = receiver.try_recv() {
         let key = result.chunk_key;
         let mesh_batch = result.mesh;
+        last_build_ms = result.build_ms;
 
         let entry = state.entries.entry(key).or_insert_with(|| {
             let entity = commands
@@ -159,5 +188,22 @@ fn apply_mesh_results(
         }
 
         in_flight.chunks.remove(&key);
+        applied += 1;
     }
+
+    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+    perf.last_apply_ms = elapsed_ms;
+    perf.avg_apply_ms = if perf.avg_apply_ms == 0.0 {
+        elapsed_ms
+    } else {
+        perf.avg_apply_ms * 0.9 + elapsed_ms * 0.1
+    };
+    perf.last_mesh_build_ms = last_build_ms;
+    perf.avg_mesh_build_ms = if perf.avg_mesh_build_ms == 0.0 {
+        last_build_ms
+    } else {
+        perf.avg_mesh_build_ms * 0.9 + last_build_ms * 0.1
+    };
+    perf.last_meshes_applied = applied;
+    perf.in_flight = in_flight.chunks.len() as u32;
 }
