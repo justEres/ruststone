@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bevy::image::{ImageLoaderSettings, ImageSampler};
+use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
@@ -79,8 +79,12 @@ pub struct ChunkColumnSnapshot {
 }
 
 impl ChunkColumnSnapshot {
-    pub fn build_mesh_data(&self) -> MeshBatch {
-        build_chunk_mesh(self, self.center_key.0, self.center_key.1)
+    pub fn build_mesh_data(&self, use_greedy: bool) -> MeshBatch {
+        if use_greedy {
+            build_chunk_mesh_greedy(self, self.center_key.0, self.center_key.1)
+        } else {
+            build_chunk_mesh_culled(self, self.center_key.0, self.center_key.1)
+        }
     }
 }
 
@@ -130,7 +134,11 @@ impl FromWorld for ChunkRenderAssets {
             let path = format!("{}{}", TEXTURE_BASE, texture_path(key));
             let texture: Handle<Image> =
                 asset_server.load_with_settings(path, |settings: &mut ImageLoaderSettings| {
-                    settings.sampler = ImageSampler::nearest();
+                    let mut sampler = ImageSamplerDescriptor::nearest();
+                    sampler.address_mode_u = ImageAddressMode::Repeat;
+                    sampler.address_mode_v = ImageAddressMode::Repeat;
+                    sampler.address_mode_w = ImageAddressMode::Repeat;
+                    settings.sampler = ImageSampler::Descriptor(sampler);
                 });
             let mut material = StandardMaterial {
                 base_color: Color::WHITE,
@@ -251,7 +259,7 @@ pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSna
     ChunkColumnSnapshot { center_key: key, columns }
 }
 
-fn build_chunk_mesh(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshBatch {
+fn build_chunk_mesh_culled(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
     let Some(column) = snapshot.columns.get(&(chunk_x, chunk_z)) else {
@@ -291,6 +299,271 @@ fn build_chunk_mesh(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) 
     }
 
     batch
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+struct GreedyKey {
+    texture: TextureKey,
+    tint_key: u8,
+}
+
+#[derive(Debug)]
+struct GreedyQuad {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+fn build_chunk_mesh_greedy(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshBatch {
+    let mut batch = MeshBatch::default();
+
+    let Some(column) = snapshot.columns.get(&(chunk_x, chunk_z)) else {
+        return batch;
+    };
+
+    for (section_y, section_opt) in column.sections.iter().enumerate() {
+        let Some(section_blocks) = section_opt else {
+            continue;
+        };
+        let base_y = section_y as i32 * SECTION_HEIGHT;
+
+        for face in [
+            Face::PosX,
+            Face::NegX,
+            Face::PosY,
+            Face::NegY,
+            Face::PosZ,
+            Face::NegZ,
+        ] {
+            let mut planes = vec![HashMap::<GreedyKey, [u32; 16]>::new(); 16];
+
+            for y in 0..SECTION_HEIGHT {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
+                        let block_id = section_blocks[idx];
+                        if block_id == 0 {
+                            continue;
+                        }
+
+                        let (dx, dy, dz) = match face {
+                            Face::PosX => (1, 0, 0),
+                            Face::NegX => (-1, 0, 0),
+                            Face::PosY => (0, 1, 0),
+                            Face::NegY => (0, -1, 0),
+                            Face::PosZ => (0, 0, 1),
+                            Face::NegZ => (0, 0, -1),
+                        };
+                        if block_at(snapshot, chunk_x, chunk_z, x + dx, base_y + y + dy, z + dz)
+                            != 0
+                        {
+                            continue;
+                        }
+
+                        let texture = texture_for_face(block_id, face);
+                        let biome_id = biome_at(snapshot, chunk_x, chunk_z, x, z);
+                        let tint_key = if matches!(
+                            texture,
+                            TextureKey::GrassTop
+                                | TextureKey::GrassSide
+                                | TextureKey::LeavesOak
+                                | TextureKey::Water
+                        ) {
+                            biome_id
+                        } else {
+                            0
+                        };
+                        let key = GreedyKey { texture, tint_key };
+
+                        let (axis, u, v) = match face {
+                            Face::PosY | Face::NegY => (y, x, z),
+                            Face::PosX | Face::NegX => (x, z, y),
+                            Face::PosZ | Face::NegZ => (z, x, y),
+                        };
+                        let entry = planes[axis as usize].entry(key).or_insert([0u32; 16]);
+                        entry[u as usize] |= 1u32 << v;
+                    }
+                }
+            }
+
+            for (axis, plane) in planes.into_iter().enumerate() {
+                for (key, data) in plane {
+                    let quads = greedy_mesh_binary_plane(data, 16);
+                    for quad in quads {
+                        let tint = biome_tint(key.tint_key);
+                        add_greedy_quad(
+                            &mut batch,
+                            face,
+                            axis as i32,
+                            base_y,
+                            quad,
+                            key.texture,
+                            tint,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    batch
+}
+
+fn add_greedy_quad(
+    batch: &mut MeshBatch,
+    face: Face,
+    axis: i32,
+    base_y: i32,
+    quad: GreedyQuad,
+    texture: TextureKey,
+    tint: BiomeTint,
+) {
+    let data = batch.ensure(texture);
+    let base_index = data.positions.len() as u32;
+
+    let u0 = quad.x as f32;
+    let v0 = quad.y as f32;
+    let u1 = u0 + quad.w as f32;
+    let v1 = v0 + quad.h as f32;
+
+    let (normal, verts) = match face {
+        Face::PosY => {
+            let y = (base_y + axis + 1) as f32;
+            (
+                [0.0, 1.0, 0.0],
+                [
+                    [u0, y, v0],
+                    [u1, y, v0],
+                    [u1, y, v1],
+                    [u0, y, v1],
+                ],
+            )
+        }
+        Face::NegY => {
+            let y = (base_y + axis) as f32;
+            (
+                [0.0, -1.0, 0.0],
+                [
+                    [u0, y, v1],
+                    [u1, y, v1],
+                    [u1, y, v0],
+                    [u0, y, v0],
+                ],
+            )
+        }
+        Face::PosX => {
+            let x = (axis + 1) as f32;
+            let y0 = (base_y as f32) + v0;
+            let y1 = (base_y as f32) + v1;
+            (
+                [1.0, 0.0, 0.0],
+                [
+                    [x, y0, u0],
+                    [x, y0, u1],
+                    [x, y1, u1],
+                    [x, y1, u0],
+                ],
+            )
+        }
+        Face::NegX => {
+            let x = axis as f32;
+            let y0 = (base_y as f32) + v0;
+            let y1 = (base_y as f32) + v1;
+            (
+                [-1.0, 0.0, 0.0],
+                [
+                    [x, y0, u1],
+                    [x, y0, u0],
+                    [x, y1, u0],
+                    [x, y1, u1],
+                ],
+            )
+        }
+        Face::PosZ => {
+            let z = (axis + 1) as f32;
+            let y0 = (base_y as f32) + v0;
+            let y1 = (base_y as f32) + v1;
+            (
+                [0.0, 0.0, 1.0],
+                [
+                    [u1, y0, z],
+                    [u0, y0, z],
+                    [u0, y1, z],
+                    [u1, y1, z],
+                ],
+            )
+        }
+        Face::NegZ => {
+            let z = axis as f32;
+            let y0 = (base_y as f32) + v0;
+            let y1 = (base_y as f32) + v1;
+            (
+                [0.0, 0.0, -1.0],
+                [
+                    [u0, y0, z],
+                    [u1, y0, z],
+                    [u1, y1, z],
+                    [u0, y1, z],
+                ],
+            )
+        }
+    };
+
+    for vert in verts {
+        data.positions.push(vert);
+        data.normals.push(normal);
+    }
+
+    let base_uvs = uv_for_texture(texture);
+    for uv in base_uvs {
+        data.uvs.push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
+    }
+    let color = tint_color(texture, tint);
+    data.colors.extend_from_slice(&[color, color, color, color]);
+    data.indices.extend_from_slice(&[
+        base_index,
+        base_index + 2,
+        base_index + 1,
+        base_index,
+        base_index + 3,
+        base_index + 2,
+    ]);
+}
+
+fn greedy_mesh_binary_plane(mut data: [u32; 16], size: u32) -> Vec<GreedyQuad> {
+    let mut greedy_quads = Vec::new();
+    for row in 0..data.len() {
+        let mut y = 0;
+        while y < size {
+            y += (data[row] >> y).trailing_zeros();
+            if y >= size {
+                continue;
+            }
+            let h = (data[row] >> y).trailing_ones();
+            let h_as_mask = u32::checked_shl(1, h).map_or(!0, |v| v - 1);
+            let mask = h_as_mask << y;
+
+            let mut w = 1;
+            while row + w < size as usize {
+                let next_row_h = (data[row + w] >> y) & h_as_mask;
+                if next_row_h != h_as_mask {
+                    break;
+                }
+                data[row + w] &= !mask;
+                w += 1;
+            }
+
+            greedy_quads.push(GreedyQuad {
+                y,
+                w: w as u32,
+                h,
+                x: row as u32,
+            });
+            y += h;
+        }
+    }
+    greedy_quads
 }
 
 fn add_block_faces(

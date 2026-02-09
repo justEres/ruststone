@@ -43,6 +43,7 @@ pub fn input_collect_system(
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
+        || ui_state.paused
         || player_status.dead
     {
         motion_events.clear();
@@ -85,8 +86,8 @@ pub fn input_collect_system(
         input.0.jump = true;
     }
 
-    input.0.sprint = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    input.0.sneak = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 }
 
 pub fn debug_toggle_system(
@@ -97,7 +98,7 @@ pub fn debug_toggle_system(
     if ui_state.chat_open {
         return;
     }
-    if keys.just_pressed(KeyCode::KeyD) {
+    if keys.just_pressed(KeyCode::KeyF) {
         debug_ui.open = !debug_ui.open;
     }
 }
@@ -143,15 +144,6 @@ pub fn fixed_sim_tick_system(
             pitch,
             on_ground: sim_state.current.on_ground,
         });
-        println!(
-            "Send move tick={} pos=({:.3},{:.3},{:.3}) yaw={:.1} pitch={:.1}",
-            tick,
-            pos.x,
-            pos.y,
-            pos.z,
-            yaw,
-            pitch
-        );
         latency.last_sent = Some(Instant::now());
     }
 }
@@ -286,6 +278,7 @@ pub fn debug_overlay_system(
             if debug_ui.show_render {
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                ui.checkbox(&mut render_debug.use_greedy_meshing, "Binary greedy meshing");
                 let mut dist = render_debug.render_distance_chunks as i32;
                 if ui
                     .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
