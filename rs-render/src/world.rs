@@ -26,15 +26,26 @@ pub fn setup_world(
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
-            illuminance: 14_000.0,
+            illuminance: 12_000.0,
+            shadow_depth_bias: 0.02,
+            shadow_normal_bias: 0.6,
             ..default()
         },
         Transform::from_xyz(8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            illuminance: 3_500.0,
+            ..default()
+        },
+        Transform::from_xyz(-6.0, 10.0, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
     commands.insert_resource(AmbientLight {
-        color: Color::srgb(0.55, 0.55, 0.6),
-        brightness: 0.75,
+        color: Color::srgb(0.6, 0.6, 0.65),
+        brightness: 0.9,
         affects_lightmapped_meshes: true,
     });
 }
