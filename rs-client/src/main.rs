@@ -3,7 +3,7 @@ use bevy_egui::EguiPrimaryContextPass;
 use bevy::time::Fixed;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, PlayerStatus, ToNet, UiState};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, PerfTimings, PlayerStatus, ToNet, UiState};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
@@ -53,6 +53,7 @@ fn main() {
         .insert_resource(Chat::default())
         .insert_resource(UiState::default())
         .insert_resource(PlayerStatus::default())
+        .insert_resource(PerfTimings::default())
         .insert_resource(net::events::NetEventQueue::default())
         .insert_resource(sim::SimClock::default())
         .insert_resource(sim::CurrentInput::default())
@@ -64,6 +65,8 @@ fn main() {
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
+        .insert_resource(sim_systems::FrameTimingState::default())
+        .add_systems(First, sim_systems::frame_timing_start)
         .add_systems(Update, message_handler::handle_messages)
         .add_systems(
             Update,
@@ -79,5 +82,6 @@ fn main() {
             (sim_systems::net_event_apply_system, sim_systems::fixed_sim_tick_system).chain(),
         )
         .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
+        .add_systems(Last, sim_systems::frame_timing_end)
         .run();
 }

@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::ChunkUpdateQueue;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage, PlayerStatus};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTimings, PlayerStatus};
 
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
@@ -24,12 +24,14 @@ pub fn handle_messages(
     mut net_events: ResMut<NetEventQueue>,
     mut collision_map: ResMut<WorldCollisionMap>,
     mut player_status: ResMut<PlayerStatus>,
+    mut timings: ResMut<PerfTimings>,
     sim_state: Res<SimState>,
     mut sim_clock: ResMut<SimClock>,
     mut sim_ready: ResMut<SimReady>,
     mut history: ResMut<PredictionHistory>,
     mut visual_offset: ResMut<VisualCorrectionOffset>,
 ) {
+    let start = std::time::Instant::now();
     while let Ok(msg) = from_net.0.try_recv() {
         match msg {
             FromNetMessage::Connected => {
@@ -112,4 +114,5 @@ pub fn handle_messages(
             _ => { /* Ignore other messages for now */ }
         }
     }
+    timings.handle_messages_ms = start.elapsed().as_secs_f32() * 1000.0;
 }

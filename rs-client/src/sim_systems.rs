@@ -14,9 +14,15 @@ use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
+use rs_utils::PerfTimings;
 use crate::sim::{
     CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimState, VisualCorrectionOffset,
 };
+
+#[derive(Resource, Default)]
+pub struct FrameTimingState {
+    pub start: Option<Instant>,
+}
 
 #[derive(Resource)]
 pub struct PredictionHistory(pub PredictionBuffer);
@@ -40,7 +46,9 @@ pub fn input_collect_system(
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
         || ui_state.paused
@@ -52,6 +60,7 @@ pub fn input_collect_system(
         input.0.sprint = false;
         input.0.sneak = false;
         input.0.jump = false;
+        timings.input_collect_ms = start.elapsed().as_secs_f32() * 1000.0;
         return;
     }
 
@@ -88,6 +97,25 @@ pub fn input_collect_system(
 
     input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    timings.input_collect_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+pub fn frame_timing_start(
+    time: Res<Time>,
+    mut state: ResMut<FrameTimingState>,
+    mut timings: ResMut<PerfTimings>,
+) {
+    state.start = Some(Instant::now());
+    timings.frame_delta_ms = time.delta_secs() * 1000.0;
+}
+
+pub fn frame_timing_end(
+    mut state: ResMut<FrameTimingState>,
+    mut timings: ResMut<PerfTimings>,
+) {
+    if let Some(start) = state.start.take() {
+        timings.main_thread_ms = start.elapsed().as_secs_f32() * 1000.0;
+    }
 }
 
 pub fn debug_toggle_system(
@@ -113,8 +141,11 @@ pub fn fixed_sim_tick_system(
     app_state: Res<AppState>,
     to_net: Res<ToNet>,
     sim_ready: Res<crate::sim::SimReady>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     if !matches!(app_state.0, ApplicationState::Connected) || !sim_ready.0 {
+        timings.fixed_tick_ms = start.elapsed().as_secs_f32() * 1000.0;
         return;
     }
     let world = WorldCollision::with_map(&collision_map);
@@ -146,6 +177,7 @@ pub fn fixed_sim_tick_system(
         });
         latency.last_sent = Some(Instant::now());
     }
+    timings.fixed_tick_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 pub fn net_event_apply_system(
@@ -158,7 +190,9 @@ pub fn net_event_apply_system(
     collision_map: Res<WorldCollisionMap>,
     sim_clock: Res<SimClock>,
     mut sim_ready: ResMut<crate::sim::SimReady>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     let world = WorldCollision::with_map(&collision_map);
     for event in net_events.drain() {
         let (pos, yaw, pitch, on_ground, recv_instant) = match event {
@@ -212,17 +246,21 @@ pub fn net_event_apply_system(
             }
         }
     }
+    timings.net_apply_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 pub fn visual_smoothing_system(
     time: Res<Time>,
     mut offset: ResMut<VisualCorrectionOffset>,
     mut debug: ResMut<DebugStats>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     let decay = 0.15f32;
     let factor = (1.0 - decay).powf(time.delta_secs() * 20.0);
     offset.0 *= factor;
     debug.smoothing_offset_len = offset.0.length();
+    timings.smoothing_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 pub fn apply_visual_transform_system(
@@ -230,7 +268,9 @@ pub fn apply_visual_transform_system(
     offset: Res<VisualCorrectionOffset>,
     mut player_query: Query<(&mut Transform, &mut LookAngles), With<Player>>,
     mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     if let Ok((mut player_transform, mut look)) = player_query.get_single_mut() {
         let pos = sim_state.current.pos + offset.0;
         player_transform.translation = pos;
@@ -241,6 +281,7 @@ pub fn apply_visual_transform_system(
             camera_transform.rotation = Quat::from_axis_angle(Vec3::X, look.pitch);
         }
     }
+    timings.apply_transform_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 pub fn debug_overlay_system(
@@ -249,11 +290,15 @@ pub fn debug_overlay_system(
     sim_clock: Res<SimClock>,
     history: Res<PredictionHistory>,
     diagnostics: Res<DiagnosticsStore>,
+    time: Res<Time>,
     mut debug_ui: ResMut<DebugUiState>,
     mut render_debug: ResMut<RenderDebugSettings>,
     render_perf: Res<RenderPerfStats>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     if !debug_ui.open {
+        timings.debug_ui_ms = 0.0;
         return;
     }
     let ctx = contexts.ctx_mut().unwrap();
@@ -263,6 +308,8 @@ pub fn debug_overlay_system(
             ui.checkbox(&mut debug_ui.show_prediction, "Prediction");
             ui.checkbox(&mut debug_ui.show_performance, "Performance");
             ui.checkbox(&mut debug_ui.show_render, "Render");
+
+            let frame_ms = (time.delta_secs_f64() * 1000.0) as f32;
 
             if debug_ui.show_performance {
                 ui.separator();
@@ -274,6 +321,16 @@ pub fn debug_overlay_system(
                 } else {
                     ui.label("fps: n/a");
                 }
+                ui.label(format!("frame ms (delta): {:.2}", frame_ms));
+                ui.label(format!(
+                    "main thread ms: {:.2} {}",
+                    timings.main_thread_ms,
+                    if frame_ms > 0.0 {
+                        format!("{:.1}%", (timings.main_thread_ms / frame_ms) * 100.0)
+                    } else {
+                        "n/a".to_string()
+                    }
+                ));
             }
 
             if debug_ui.show_render {
@@ -281,6 +338,14 @@ pub fn debug_overlay_system(
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
                 ui.checkbox(&mut render_debug.use_greedy_meshing, "Binary greedy meshing");
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
+                ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
+                ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
+                if render_debug.frustum_fov_debug {
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.frustum_fov_deg, 30.0..=140.0)
+                            .text("Frustum FOV"),
+                    );
+                }
                 let mut dist = render_debug.render_distance_chunks as i32;
                 if ui
                     .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
@@ -288,7 +353,7 @@ pub fn debug_overlay_system(
                 {
                     render_debug.render_distance_chunks = dist;
                 }
-                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=120.0).text("FOV"));
+                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"));
             }
 
             if debug_ui.show_prediction {
@@ -303,22 +368,110 @@ pub fn debug_overlay_system(
 
             if debug_ui.show_performance {
                 ui.separator();
+                let pct = |ms: f32| {
+                    if frame_ms <= 0.0 {
+                        None
+                    } else {
+                        Some((ms / frame_ms).max(0.0) * 100.0)
+                    }
+                };
+                let fmt_pct = |ms: f32| {
+                    pct(ms)
+                        .map(|p| format!("{:.1}%", p))
+                        .unwrap_or_else(|| "n/a".to_string())
+                };
                 ui.label(format!(
-                    "mesh build ms: {:.2} (avg {:.2})",
+                    "handle_messages: {:.3}ms {}",
+                    timings.handle_messages_ms,
+                    fmt_pct(timings.handle_messages_ms)
+                ));
+                ui.label(format!(
+                    "input_collect: {:.3}ms {}",
+                    timings.input_collect_ms,
+                    fmt_pct(timings.input_collect_ms)
+                ));
+                ui.label(format!(
+                    "net_apply: {:.3}ms {}",
+                    timings.net_apply_ms,
+                    fmt_pct(timings.net_apply_ms)
+                ));
+                ui.label(format!(
+                    "fixed_tick: {:.3}ms {}",
+                    timings.fixed_tick_ms,
+                    fmt_pct(timings.fixed_tick_ms)
+                ));
+                ui.label(format!(
+                    "smoothing: {:.3}ms {}",
+                    timings.smoothing_ms,
+                    fmt_pct(timings.smoothing_ms)
+                ));
+                ui.label(format!(
+                    "apply_transform: {:.3}ms {}",
+                    timings.apply_transform_ms,
+                    fmt_pct(timings.apply_transform_ms)
+                ));
+                ui.label(format!(
+                    "debug_ui: {:.3}ms {}",
+                    timings.debug_ui_ms,
+                    fmt_pct(timings.debug_ui_ms)
+                ));
+                ui.label(format!(
+                    "ui: {:.3}ms {}",
+                    timings.ui_ms,
+                    fmt_pct(timings.ui_ms)
+                ));
+
+                ui.label(format!(
+                    "mesh build ms: {:.2} (avg {:.2}) [async]",
                     render_perf.last_mesh_build_ms, render_perf.avg_mesh_build_ms
                 ));
                 ui.label(format!(
-                    "mesh apply ms: {:.2} (avg {:.2})",
-                    render_perf.last_apply_ms, render_perf.avg_apply_ms
+                    "mesh apply ms: {:.2} (avg {:.2}) {}",
+                    render_perf.last_apply_ms,
+                    render_perf.avg_apply_ms,
+                    fmt_pct(render_perf.last_apply_ms)
                 ));
                 ui.label(format!(
-                    "mesh enqueue ms: {:.2} (avg {:.2})",
-                    render_perf.last_enqueue_ms, render_perf.avg_enqueue_ms
+                    "mesh enqueue ms: {:.2} (avg {:.2}) {}",
+                    render_perf.last_enqueue_ms,
+                    render_perf.avg_enqueue_ms,
+                    fmt_pct(render_perf.last_enqueue_ms)
                 ));
                 ui.label(format!(
-                    "mesh applied: {} in_flight: {} updates: {}",
-                    render_perf.last_meshes_applied, render_perf.in_flight, render_perf.last_updates
+                    "manual cull ms: {:.2} {}",
+                    render_perf.manual_cull_ms,
+                    fmt_pct(render_perf.manual_cull_ms)
+                ));
+                ui.label(format!(
+                    "render debug ms: {:.2} {}",
+                    render_perf.apply_debug_ms,
+                    fmt_pct(render_perf.apply_debug_ms)
+                ));
+                ui.label(format!(
+                    "render stats ms: {:.2} {}",
+                    render_perf.gather_stats_ms,
+                    fmt_pct(render_perf.gather_stats_ms)
+                ));
+                ui.label(format!(
+                    "mesh applied: {} in_flight: {} updates: {} (raw {})",
+                    render_perf.last_meshes_applied,
+                    render_perf.in_flight,
+                    render_perf.last_updates,
+                    render_perf.last_updates_raw
+                ));
+                ui.label(format!(
+                    "meshes: dist {} / {} view {} / {}",
+                    render_perf.visible_meshes_distance,
+                    render_perf.total_meshes,
+                    render_perf.visible_meshes_view,
+                    render_perf.total_meshes
+                ));
+                ui.label(format!(
+                    "chunks: {} / {} (distance)",
+                    render_perf.visible_chunks, render_perf.total_chunks
                 ));
             }
         });
+    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.debug_ui_ms = elapsed_ms;
 }

@@ -7,8 +7,7 @@ use crate::chunk::{snapshot_for_chunk, ChunkStore};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
-use bevy::render::camera::CameraProjection;
-use bevy::render::primitives::{Aabb, Frustum};
+use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
 #[derive(Resource, Debug, Clone)]
@@ -68,6 +67,7 @@ pub struct RenderPerfStats {
     pub visible_chunks: u32,
     pub apply_debug_ms: f32,
     pub gather_stats_ms: f32,
+    pub manual_cull_ms: f32,
 }
 
 pub fn apply_render_debug_settings(
@@ -197,14 +197,25 @@ pub fn manual_frustum_cull(
         Query<(Entity, &Visibility), With<ChunkRoot>>,
         Query<(&ChildOf, &GlobalTransform, &Aabb, &mut Visibility), With<Mesh3d>>,
     )>,
+    mut perf: ResMut<RenderPerfStats>,
 ) {
     if !settings.manual_frustum_cull {
+        perf.manual_cull_ms = 0.0;
         return;
     }
+    let start = std::time::Instant::now();
     let Ok((cam_transform, projection)) = camera_query.get_single() else {
         return;
     };
-    let frustum = compute_camera_frustum(&settings, projection, cam_transform);
+    let (fov_y, aspect, near, far) = camera_fov_params(&settings, projection);
+    let (forward, right, up, cam_pos) = (
+        cam_transform.forward(),
+        cam_transform.right(),
+        cam_transform.up(),
+        cam_transform.translation(),
+    );
+    let tan_y = (fov_y * 0.5).tan();
+    let tan_x = tan_y * aspect;
     let chunk_visibility: HashMap<Entity, Visibility> = {
         let chunks = params.p0();
         let mut map = HashMap::new();
@@ -222,30 +233,46 @@ pub fn manual_frustum_cull(
             }
         }
 
-        let visible = frustum.intersects_obb(aabb, &transform.affine(), true, true);
+        let (scale, _, translation) = transform.to_scale_rotation_translation();
+        let center = translation + Vec3::from(aabb.center) * scale;
+        let half = Vec3::from(aabb.half_extents) * scale.abs();
+        let radius = half.length();
+        let to_center = center - cam_pos;
+        let z = to_center.dot(*forward);
+        if z < -radius {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        let x = to_center.dot(*right).abs();
+        let y = to_center.dot(*up).abs();
+        let visible = x <= z * tan_x + radius
+            && y <= z * tan_y + radius
+            && z <= far + radius
+            && z >= near - radius;
         *visibility = if visible {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
     }
+    perf.manual_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
-fn compute_camera_frustum(
+fn camera_fov_params(
     settings: &RenderDebugSettings,
     projection: &Projection,
-    cam_transform: &GlobalTransform,
-) -> Frustum {
-    match projection {
-        Projection::Perspective(persp) => {
-            if settings.frustum_fov_debug {
-                let mut custom = persp.clone();
-                custom.fov = settings.frustum_fov_deg.max(1.0).to_radians();
-                custom.compute_frustum(cam_transform)
-            } else {
-                persp.compute_frustum(cam_transform)
-            }
-        }
-        _ => projection.compute_frustum(cam_transform),
+) -> (f32, f32, f32, f32) {
+    let (mut fov_y, mut aspect, mut near, mut far) = match projection {
+        Projection::Perspective(p) => (p.fov, p.aspect_ratio, p.near, p.far),
+        _ => (settings.fov_deg.to_radians(), 1.0, 0.1, 1000.0),
+    };
+    if settings.frustum_fov_debug {
+        fov_y = settings.frustum_fov_deg.max(1.0).to_radians();
     }
+    // Expand FOV slightly to reduce border clipping artifacts.
+    fov_y = (fov_y * 1.12).min(std::f32::consts::PI - 0.01);
+    aspect = aspect.max(0.01);
+    near = near.max(0.01);
+    far = far.max(near + 0.01);
+    (fov_y, aspect, near, far)
 }

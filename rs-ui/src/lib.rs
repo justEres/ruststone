@@ -7,7 +7,7 @@ use bevy_egui::{
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
 };
 use rs_render::RenderDebugSettings;
-use rs_utils::{AppState, ApplicationState, Chat, PlayerStatus, ToNet, ToNetMessage, UiState};
+use rs_utils::{AppState, ApplicationState, Chat, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState};
 
 pub struct UiPlugin;
 
@@ -30,7 +30,9 @@ fn connect_ui(
     player_status: Res<PlayerStatus>,
     mut render_debug: ResMut<RenderDebugSettings>,
     mut window_events: EventReader<WindowFocused>,
+    mut timings: ResMut<PerfTimings>,
 ) {
+    let start = std::time::Instant::now();
     let ctx = contexts.ctx_mut().unwrap();
 
     for ev in window_events.read() {
@@ -137,6 +139,8 @@ fn connect_ui(
                 }
             });
     }
+
+    timings.ui_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 #[derive(Resource)]
