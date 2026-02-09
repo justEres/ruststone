@@ -13,7 +13,7 @@ use crate::sim::movement::{simulate_tick, WorldCollision};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
-use rs_render::RenderDebugSettings;
+use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use crate::sim::{
     CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimState, VisualCorrectionOffset,
 };
@@ -251,6 +251,7 @@ pub fn debug_overlay_system(
     diagnostics: Res<DiagnosticsStore>,
     mut debug_ui: ResMut<DebugUiState>,
     mut render_debug: ResMut<RenderDebugSettings>,
+    render_perf: Res<RenderPerfStats>,
 ) {
     if !debug_ui.open {
         return;
@@ -279,6 +280,7 @@ pub fn debug_overlay_system(
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
                 ui.checkbox(&mut render_debug.use_greedy_meshing, "Binary greedy meshing");
+                ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 let mut dist = render_debug.render_distance_chunks as i32;
                 if ui
                     .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
@@ -286,6 +288,7 @@ pub fn debug_overlay_system(
                 {
                     render_debug.render_distance_chunks = dist;
                 }
+                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=120.0).text("FOV"));
             }
 
             if debug_ui.show_prediction {
@@ -296,6 +299,26 @@ pub fn debug_overlay_system(
                 ui.label(format!("last replay ticks: {}", debug.last_replay));
                 ui.label(format!("smoothing offset: {:.4}", debug.smoothing_offset_len));
                 ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
+            }
+
+            if debug_ui.show_performance {
+                ui.separator();
+                ui.label(format!(
+                    "mesh build ms: {:.2} (avg {:.2})",
+                    render_perf.last_mesh_build_ms, render_perf.avg_mesh_build_ms
+                ));
+                ui.label(format!(
+                    "mesh apply ms: {:.2} (avg {:.2})",
+                    render_perf.last_apply_ms, render_perf.avg_apply_ms
+                ));
+                ui.label(format!(
+                    "mesh enqueue ms: {:.2} (avg {:.2})",
+                    render_perf.last_enqueue_ms, render_perf.avg_enqueue_ms
+                ));
+                ui.label(format!(
+                    "mesh applied: {} in_flight: {} updates: {}",
+                    render_perf.last_meshes_applied, render_perf.in_flight, render_perf.last_updates
+                ));
             }
         });
 }
