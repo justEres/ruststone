@@ -262,8 +262,9 @@ pub fn simulate_tick(
         state.on_ground = false;
         if input.sprint {
             let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
-            state.vel.x -= sin_yaw * 0.2;
-            state.vel.z += cos_yaw * 0.2;
+            let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
+            state.vel.x += forward.x * 0.2;
+            state.vel.z += forward.z * 0.2;
         }
     }
 
