@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 
 mod async_mesh;
+mod block_textures;
 mod camera;
 mod chunk;
 mod components;
 mod input;
-mod movement;
 mod world;
 
 pub use chunk::ChunkUpdateQueue;
@@ -15,9 +17,7 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<input::PlayerInput>()
-            .init_resource::<movement::MovementSettings>()
-            .init_resource::<world::WorldSettings>()
+        app.init_resource::<world::WorldSettings>()
             .init_resource::<chunk::ChunkUpdateQueue>()
             .init_resource::<chunk::ChunkRenderState>()
             .init_resource::<chunk::ChunkStore>()
@@ -28,9 +28,6 @@ impl Plugin for RenderPlugin {
             .add_systems(
                 Update,
                 (
-                    input::collect_player_input,
-                    movement::apply_player_look,
-                    movement::apply_player_movement,
                     input::apply_cursor_lock,
                     enqueue_chunk_meshes,
                 ),
@@ -83,28 +80,70 @@ fn apply_mesh_results(
 
     while let Ok(result) = receiver.try_recv() {
         let key = result.chunk_key;
-        let mesh = chunk::build_mesh_from_data(result.mesh);
+        let mesh_batch = result.mesh;
 
-        if let Some(entry) = state.entries.get_mut(&key) {
-            if let Some(existing) = meshes.get_mut(&entry.mesh) {
-                *existing = mesh;
-            } else {
-                let handle = meshes.add(mesh);
-                commands.entity(entry.entity).insert(Mesh3d(handle.clone()));
-                entry.mesh = handle;
-            }
-        } else {
-            let handle = meshes.add(mesh);
+        let entry = state.entries.entry(key).or_insert_with(|| {
             let entity = commands
                 .spawn((
-                    Mesh3d(handle.clone()),
-                    MeshMaterial3d(assets.material.clone()),
                     Transform::from_xyz((key.0 * 16) as f32, 0.0, (key.1 * 16) as f32),
                     GlobalTransform::default(),
                 ))
                 .id();
+            chunk::ChunkEntry {
+                entity,
+                submeshes: HashMap::new(),
+            }
+        });
 
-            state.entries.insert(key, chunk::ChunkEntry { entity, mesh: handle });
+        let mut active_keys = std::collections::HashSet::new();
+
+        for (texture_key, data) in mesh_batch.meshes {
+            active_keys.insert(texture_key);
+            let mesh = chunk::build_mesh_from_data(data);
+
+            if let Some(submesh) = entry.submeshes.get_mut(&texture_key) {
+                if let Some(existing) = meshes.get_mut(&submesh.mesh) {
+                    *existing = mesh;
+                } else {
+                    let handle = meshes.add(mesh);
+                    commands.entity(submesh.entity).insert(Mesh3d(handle.clone()));
+                    submesh.mesh = handle;
+                }
+            } else {
+                let handle = meshes.add(mesh);
+                let material = assets
+                    .materials
+                    .get(&texture_key)
+                    .expect("missing material for texture key")
+                    .clone();
+                let child = commands
+                    .spawn((
+                        Mesh3d(handle.clone()),
+                        MeshMaterial3d(material),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                    ))
+                    .id();
+                commands.entity(entry.entity).add_child(child);
+                entry.submeshes.insert(
+                    texture_key,
+                    chunk::SubmeshEntry {
+                        entity: child,
+                        mesh: handle,
+                    },
+                );
+            }
+        }
+
+        let mut remove_keys = Vec::new();
+        for (key, submesh) in entry.submeshes.iter() {
+            if !active_keys.contains(key) {
+                commands.entity(submesh.entity).despawn_recursive();
+                remove_keys.push(*key);
+            }
+        }
+        for key in remove_keys {
+            entry.submeshes.remove(&key);
         }
 
         in_flight.chunks.remove(&key);

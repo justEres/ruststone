@@ -97,7 +97,7 @@ pub struct ConnectUiState {
 impl Default for ConnectUiState {
     fn default() -> Self {
         Self {
-            username: "RustPlayer".to_string(),
+            username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
         }
     }

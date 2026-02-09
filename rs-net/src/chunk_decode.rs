@@ -14,12 +14,14 @@ pub fn decode_chunk(
     skylight: bool,
 ) -> Result<(ChunkData, usize), String> {
     let (sections, mut consumed) = decode_sections(bitmask, data, skylight)?;
+    let mut biomes = None;
 
     if full {
         let biomes_end = consumed + BIOME_BYTES;
         if biomes_end > data.len() {
             return Err("Chunk biome data underflow".to_string());
         }
+        biomes = Some(data[consumed..biomes_end].to_vec());
         consumed = biomes_end;
     }
 
@@ -29,6 +31,7 @@ pub fn decode_chunk(
             z,
             full,
             sections,
+            biomes,
         },
         consumed,
     ))

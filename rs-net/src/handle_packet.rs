@@ -56,6 +56,7 @@ pub fn handle_packet(
                 yaw: Some(tp.yaw),
                 pitch: Some(tp.pitch),
                 flags: Some(tp.flags),
+                on_ground: None,
             }));
         }
         Packet::TeleportPlayer_WithConfirm(tp) => {
@@ -64,6 +65,7 @@ pub fn handle_packet(
                 yaw: Some(tp.yaw),
                 pitch: Some(tp.pitch),
                 flags: Some(tp.flags),
+                on_ground: None,
             }));
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::TeleportConfirm {
@@ -77,6 +79,7 @@ pub fn handle_packet(
                 yaw: Some(tp.yaw),
                 pitch: Some(tp.pitch),
                 flags: None,
+                on_ground: Some(tp.on_ground),
             }));
         }
         Packet::PlayerPosition(position) => {
@@ -85,6 +88,7 @@ pub fn handle_packet(
                 yaw: None,
                 pitch: None,
                 flags: None,
+                on_ground: Some(position.on_ground),
             }));
         }
         Packet::PlayerPosition_HeadY(position) => {
@@ -93,6 +97,7 @@ pub fn handle_packet(
                 yaw: None,
                 pitch: None,
                 flags: None,
+                on_ground: Some(position.on_ground),
             }));
         }
         Packet::PlayerPositionLook(position) => {
@@ -101,6 +106,7 @@ pub fn handle_packet(
                 yaw: Some(position.yaw),
                 pitch: Some(position.pitch),
                 flags: None,
+                on_ground: Some(position.on_ground),
             }));
         }
         Packet::PlayerPositionLook_HeadY(position) => {
@@ -109,6 +115,7 @@ pub fn handle_packet(
                 yaw: Some(position.yaw),
                 pitch: Some(position.pitch),
                 flags: None,
+                on_ground: Some(position.on_ground),
             }));
         }
         Packet::PlayerLook(position) => {
@@ -117,6 +124,7 @@ pub fn handle_packet(
                 yaw: Some(position.yaw),
                 pitch: Some(position.pitch),
                 flags: None,
+                on_ground: Some(position.on_ground),
             }));
         }
         Packet::EntityMetadata(_em) => {}
@@ -137,7 +145,6 @@ pub fn handle_packet(
                 },
             )
             .unwrap();
-            println!("Sent KeepAlive response");
         }
         Packet::ServerMessage_NoPosition(sm) => {
             let text = sm.message.to_string();
@@ -152,14 +159,6 @@ pub fn handle_packet(
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
 
-        other => {
-            let dbg = format!("{:?}", other);
-            let variant = if let Some(idx) = dbg.find('(') {
-                dbg[..idx].to_string()
-            } else {
-                dbg.clone()
-            };
-            println!("RECV: {}", variant);
-        }
+        _other => {}
     }
 }

@@ -1,7 +1,14 @@
+use std::time::Instant;
+
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
-use rs_render::{ChunkUpdateQueue, LookAngles, Player, PlayerCamera};
+use rs_render::ChunkUpdateQueue;
 use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage};
+
+use crate::net::events::{NetEvent, NetEventQueue};
+use crate::sim::collision::WorldCollisionMap;
+use crate::sim::{SimClock, SimReady, SimState, VisualCorrectionOffset};
+use crate::sim_systems::PredictionHistory;
 
 const FLAG_REL_X: u8 = 0x01;
 const FLAG_REL_Y: u8 = 0x02;
@@ -14,13 +21,22 @@ pub fn handle_messages(
     mut app_state: ResMut<AppState>,
     mut chat: ResMut<Chat>,
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
-    mut player_query: Query<(&mut Transform, &mut LookAngles), With<Player>>,
-    mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    mut net_events: ResMut<NetEventQueue>,
+    mut collision_map: ResMut<WorldCollisionMap>,
+    sim_state: Res<SimState>,
+    mut sim_clock: ResMut<SimClock>,
+    mut sim_ready: ResMut<SimReady>,
+    mut history: ResMut<PredictionHistory>,
+    mut visual_offset: ResMut<VisualCorrectionOffset>,
 ) {
     while let Ok(msg) = from_net.0.try_recv() {
         match msg {
             FromNetMessage::Connected => {
                 *app_state = AppState(ApplicationState::Connected);
+                sim_clock.tick = 0;
+                sim_ready.0 = false;
+                history.0 = PredictionHistory::default().0;
+                visual_offset.0 = Vec3::ZERO;
                 println!("Connected to server");
             }
             FromNetMessage::Disconnected => {
@@ -31,54 +47,56 @@ pub fn handle_messages(
                 chat.0.truncate(100); // Keep only the last 100 messages
             }
             FromNetMessage::ChunkData(chunk) => {
+                collision_map.update_chunk(chunk.clone());
                 chunk_updates.0.push(chunk);
             }
             FromNetMessage::PlayerPosition(pos) => {
-                if let Ok((mut player_transform, mut look)) = player_query.get_single_mut() {
-                    if let Some((x, y, z)) = pos.position {
-                        let flags = pos.flags.unwrap_or(0);
-                        let mut target = player_transform.translation;
-                        if (flags & FLAG_REL_X) != 0 {
-                            target.x += x as f32;
-                        } else {
-                            target.x = x as f32;
-                        }
-                        if (flags & FLAG_REL_Y) != 0 {
-                            target.y += y as f32;
-                        } else {
-                            target.y = y as f32;
-                        }
-                        if (flags & FLAG_REL_Z) != 0 {
-                            target.z += z as f32;
-                        } else {
-                            target.z = z as f32;
-                        }
-                        player_transform.translation = target;
+                let mut position = sim_state.current.pos;
+                if let Some((x, y, z)) = pos.position {
+                    let flags = pos.flags.unwrap_or(0);
+                    if (flags & FLAG_REL_X) != 0 {
+                        position.x += x as f32;
+                    } else {
+                        position.x = x as f32;
                     }
-
-                    if let (Some(yaw), Some(pitch)) = (pos.yaw, pos.pitch) {
-                        let flags = pos.flags.unwrap_or(0);
-                        let yaw_radians = -yaw.to_radians();
-                        let pitch_radians = -pitch.to_radians();
-
-                        if (flags & FLAG_REL_YAW) != 0 {
-                            look.yaw += yaw_radians;
-                        } else {
-                            look.yaw = yaw_radians;
-                        }
-                        if (flags & FLAG_REL_PITCH) != 0 {
-                            look.pitch += pitch_radians;
-                        } else {
-                            look.pitch = pitch_radians;
-                        }
-
-                        look.pitch = look.pitch.clamp(-1.54, 1.54);
-                        player_transform.rotation = Quat::from_axis_angle(Vec3::Y, look.yaw);
-                        if let Ok(mut camera_transform) = camera_query.get_single_mut() {
-                            camera_transform.rotation = Quat::from_axis_angle(Vec3::X, look.pitch);
-                        }
+                    if (flags & FLAG_REL_Y) != 0 {
+                        position.y += y as f32;
+                    } else {
+                        position.y = y as f32;
+                    }
+                    if (flags & FLAG_REL_Z) != 0 {
+                        position.z += z as f32;
+                    } else {
+                        position.z = z as f32;
                     }
                 }
+
+                let mut yaw = sim_state.current.yaw;
+                let mut pitch = sim_state.current.pitch;
+                if let (Some(yaw_deg), Some(pitch_deg)) = (pos.yaw, pos.pitch) {
+                    let flags = pos.flags.unwrap_or(0);
+                    let yaw_rad = yaw_deg.to_radians();
+                    let pitch_rad = -pitch_deg.to_radians();
+                    if (flags & FLAG_REL_YAW) != 0 {
+                        yaw -= yaw_rad;
+                    } else {
+                        yaw = std::f32::consts::PI - yaw_rad;
+                    }
+                    if (flags & FLAG_REL_PITCH) != 0 {
+                        pitch += pitch_rad;
+                    } else {
+                        pitch = pitch_rad;
+                    }
+                }
+
+                let on_ground = pos.on_ground.unwrap_or(false);
+                net_events.push(NetEvent::ServerPosLook {
+                    pos: position,
+                    yaw,
+                    pitch,
+                    on_ground,
+                    recv_instant: Instant::now(),
+                });
             }
             _ => { /* Ignore other messages for now */ }
         }
