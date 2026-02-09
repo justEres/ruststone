@@ -16,6 +16,7 @@ pub enum ApplicationState {
 #[derive(Resource, Default)]
 pub struct UiState {
     pub chat_open: bool,
+    pub paused: bool,
 }
 
 #[derive(Clone)]

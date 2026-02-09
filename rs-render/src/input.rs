@@ -62,7 +62,9 @@ pub fn apply_cursor_lock(
         return;
     };
 
-    let should_lock = matches!(app_state.0, ApplicationState::Connected) && !ui_state.chat_open;
+    let should_lock = matches!(app_state.0, ApplicationState::Connected)
+        && !ui_state.chat_open
+        && !ui_state.paused;
 
     if should_lock {
         if window.cursor_options.grab_mode != CursorGrabMode::Locked {

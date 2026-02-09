@@ -1,10 +1,12 @@
 use bevy::app::Plugin;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
+use bevy::window::WindowFocused;
 use bevy_egui::{
     egui::{self},
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
 };
+use rs_render::RenderDebugSettings;
 use rs_utils::{AppState, ApplicationState, Chat, PlayerStatus, ToNet, ToNetMessage, UiState};
 
 pub struct UiPlugin;
@@ -26,11 +28,23 @@ fn connect_ui(
     keys: Res<ButtonInput<KeyCode>>,
     mut ui_state: ResMut<UiState>,
     player_status: Res<PlayerStatus>,
+    mut render_debug: ResMut<RenderDebugSettings>,
+    mut window_events: EventReader<WindowFocused>,
 ) {
     let ctx = contexts.ctx_mut().unwrap();
 
+    for ev in window_events.read() {
+        if ev.focused {
+            ui_state.paused = false;
+        } else {
+            ui_state.paused = true;
+        }
+    }
+
     if keys.just_pressed(KeyCode::Escape) && ui_state.chat_open {
         ui_state.chat_open = false;
+    } else if keys.just_pressed(KeyCode::Escape) {
+        ui_state.paused = !ui_state.paused;
     } else if keys.just_pressed(KeyCode::KeyT) && !ctx.wants_keyboard_input() {
         ui_state.chat_open = !ui_state.chat_open;
         if ui_state.chat_open {
@@ -90,19 +104,37 @@ fn connect_ui(
     }
 
     if matches!(app_state.0, ApplicationState::Connected) && player_status.dead {
-        egui::Area::new("death_screen".into())
-            .fixed_pos(egui::pos2(0.0, 0.0))
+        egui::Window::new("You Died")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                let screen = ui.ctx().screen_rect();
-                ui.set_min_size(screen.size());
-                ui.vertical_centered(|ui| {
-                    ui.add_space(screen.height() * 0.3);
-                    ui.heading("You Died");
-                    ui.add_space(8.0);
-                    if ui.button("Respawn").clicked() {
-                        let _ = to_net.0.send(ToNetMessage::Respawn);
-                    }
-                });
+                ui.heading("You Died");
+                ui.add_space(8.0);
+                if ui.button("Respawn").clicked() {
+                    let _ = to_net.0.send(ToNetMessage::Respawn);
+                }
+            });
+    }
+
+    if matches!(app_state.0, ApplicationState::Connected)
+        && ui_state.paused
+        && !player_status.dead
+    {
+        egui::Window::new("Paused")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.heading("Game Paused");
+                ui.add_space(8.0);
+                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=120.0).text("FOV"));
+                ui.add_space(8.0);
+                if ui.button("Video Settings (todo)").clicked() {}
+                if ui.button("Controls (todo)").clicked() {}
+                if ui.button("Done").clicked() {
+                    ui_state.paused = false;
+                }
             });
     }
 }
