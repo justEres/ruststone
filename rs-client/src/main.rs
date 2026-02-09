@@ -1,4 +1,6 @@
 use bevy::{log::LogPlugin, prelude::*};
+use bevy_egui::EguiPrimaryContextPass;
+use bevy::time::Fixed;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
 use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet, UiState};
@@ -6,6 +8,9 @@ use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
 mod message_handler;
+mod net;
+mod sim;
+mod sim_systems;
 
 fn main() {
     tracing_subscriber::fmt().without_time().compact().init();
@@ -38,6 +43,7 @@ fn main() {
                 .build()
                 .disable::<LogPlugin>(),
         )
+        .insert_resource(Time::<Fixed>::from_seconds(0.05))
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .insert_resource(ToNet(tx_outgoing))
@@ -45,6 +51,29 @@ fn main() {
         .insert_resource(AppState(ApplicationState::Disconnected))
         .insert_resource(Chat::default())
         .insert_resource(UiState::default())
+        .insert_resource(net::events::NetEventQueue::default())
+        .insert_resource(sim::SimClock::default())
+        .insert_resource(sim::CurrentInput::default())
+        .insert_resource(sim::SimState::default())
+        .insert_resource(sim::VisualCorrectionOffset::default())
+        .insert_resource(sim::DebugStats::default())
+        .insert_resource(sim::SimReady::default())
+        .insert_resource(sim::collision::WorldCollisionMap::default())
+        .insert_resource(sim_systems::PredictionHistory::default())
+        .insert_resource(sim_systems::LatencyEstimate::default())
         .add_systems(Update, message_handler::handle_messages)
+        .add_systems(
+            Update,
+            (
+                sim_systems::input_collect_system,
+                sim_systems::visual_smoothing_system,
+                sim_systems::apply_visual_transform_system,
+            ),
+        )
+        .add_systems(
+            FixedUpdate,
+            (sim_systems::net_event_apply_system, sim_systems::fixed_sim_tick_system).chain(),
+        )
+        .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
         .run();
 }

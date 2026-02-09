@@ -55,11 +55,28 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         },
                     )
                     .unwrap();
-                    println!("Sent chat message");
                 }
-                _ => {
-                    println!("Received unhandled ToNetMessage");
+                ToNetMessage::PlayerMove {
+                    x,
+                    y,
+                    z,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } => {
+                    conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerPositionLook {
+                            x,
+                            y,
+                            z,
+                            yaw,
+                            pitch,
+                            on_ground,
+                        },
+                    )
+                    .unwrap();
                 }
+                _ => {}
             }
         }
     });

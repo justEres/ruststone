@@ -30,6 +30,7 @@ pub struct ChunkData {
     pub z: i32,
     pub full: bool,
     pub sections: Vec<ChunkSection>,
+    pub biomes: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -38,6 +39,7 @@ pub struct PlayerPosition {
     pub yaw: Option<f32>,
     pub pitch: Option<f32>,
     pub flags: Option<u8>,
+    pub on_ground: Option<bool>,
 }
 
 #[derive(Resource)]
@@ -54,6 +56,14 @@ pub enum ToNetMessage {
     Disconnect,
     Shutdown,
     ChatMessage(String),
+    PlayerMove {
+        x: f64,
+        y: f64,
+        z: f64,
+        yaw: f32,
+        pitch: f32,
+        on_ground: bool,
+    },
 }
 
 use rs_protocol::protocol::packet::Packet;

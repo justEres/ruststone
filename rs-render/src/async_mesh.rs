@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::chunk::{ChunkColumnSnapshot, MeshData};
+use crate::chunk::{ChunkColumnSnapshot, MeshBatch};
 
 #[derive(Resource)]
 pub struct MeshAsyncResources {
@@ -52,12 +52,12 @@ pub struct MeshJob {
 }
 
 impl MeshJob {
-    pub fn build_mesh(self) -> MeshData {
+    pub fn build_mesh(self) -> MeshBatch {
         self.snapshot.build_mesh_data()
     }
 }
 
 pub struct MeshResult {
     pub chunk_key: (i32, i32),
-    pub mesh: MeshData,
+    pub mesh: MeshBatch,
 }
