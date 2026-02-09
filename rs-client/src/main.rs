@@ -67,6 +67,10 @@ fn main() {
         .insert_resource(sim_systems::LatencyEstimate::default())
         .insert_resource(sim_systems::FrameTimingState::default())
         .add_systems(First, sim_systems::frame_timing_start)
+        .add_systems(
+            Update,
+            sim_systems::update_timing_start.before(sim_systems::debug_toggle_system),
+        )
         .add_systems(Update, message_handler::handle_messages)
         .add_systems(
             Update,
@@ -78,8 +82,29 @@ fn main() {
             ),
         )
         .add_systems(
+            Update,
+            sim_systems::update_timing_end.after(sim_systems::apply_visual_transform_system),
+        )
+        .add_systems(
+            PostUpdate,
+            sim_systems::post_update_timing_start
+                .before(sim_systems::post_update_timing_end),
+        )
+        .add_systems(
+            PostUpdate,
+            sim_systems::post_update_timing_end.after(sim_systems::post_update_timing_start),
+        )
+        .add_systems(
             FixedUpdate,
             (sim_systems::net_event_apply_system, sim_systems::fixed_sim_tick_system).chain(),
+        )
+        .add_systems(
+            FixedUpdate,
+            sim_systems::fixed_update_timing_start.before(sim_systems::net_event_apply_system),
+        )
+        .add_systems(
+            FixedUpdate,
+            sim_systems::fixed_update_timing_end.after(sim_systems::fixed_sim_tick_system),
         )
         .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
         .add_systems(Last, sim_systems::frame_timing_end)
