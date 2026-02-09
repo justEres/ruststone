@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use crate::components::{LookAngles, Player, PlayerCamera, Velocity};
 
 const EYE_HEIGHT: f32 = 1.62;
+const DEFAULT_FOV_DEG: f32 = 110.0;
 
 pub fn spawn_player(
     mut commands: Commands,
@@ -28,6 +29,10 @@ pub fn spawn_player(
                     brightness: 1000.0,
                     ..Default::default()
                 },
+                Projection::Perspective(PerspectiveProjection {
+                    fov: DEFAULT_FOV_DEG.to_radians(),
+                    ..Default::default()
+                }),
                 Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
             ));
         });

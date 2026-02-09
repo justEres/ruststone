@@ -1,23 +1,27 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
 mod block_textures;
 mod camera;
 mod chunk;
 mod components;
+mod debug;
 mod input;
 mod world;
 
 pub use chunk::ChunkUpdateQueue;
-pub use components::{LookAngles, Player, PlayerCamera, Velocity, WorldRoot};
+pub use components::{ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot};
+pub use debug::RenderDebugSettings;
 
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<world::WorldSettings>()
+            .init_resource::<debug::RenderDebugSettings>()
             .init_resource::<chunk::ChunkUpdateQueue>()
             .init_resource::<chunk::ChunkRenderState>()
             .init_resource::<chunk::ChunkStore>()
@@ -29,6 +33,7 @@ impl Plugin for RenderPlugin {
                 Update,
                 (
                     input::apply_cursor_lock,
+                    debug::apply_render_debug_settings,
                     enqueue_chunk_meshes,
                 ),
             )
@@ -84,11 +89,14 @@ fn apply_mesh_results(
 
         let entry = state.entries.entry(key).or_insert_with(|| {
             let entity = commands
-                .spawn(SpatialBundle::from_transform(Transform::from_xyz(
-                    (key.0 * 16) as f32,
-                    0.0,
-                    (key.1 * 16) as f32,
-                )))
+                .spawn((
+                    Transform::from_xyz((key.0 * 16) as f32, 0.0, (key.1 * 16) as f32),
+                    GlobalTransform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    ChunkRoot { key },
+                ))
                 .id();
             chunk::ChunkEntry {
                 entity,
@@ -121,7 +129,11 @@ fn apply_mesh_results(
                     .spawn((
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material),
-                        SpatialBundle::default(),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                        Visibility::Inherited,
+                        InheritedVisibility::default(),
+                        ViewVisibility::default(),
                     ))
                     .id();
                 commands.entity(entry.entity).add_child(child);

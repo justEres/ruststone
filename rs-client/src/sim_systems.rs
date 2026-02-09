@@ -12,7 +12,11 @@ use crate::sim::collision::WorldCollisionMap;
 use crate::sim::movement::{simulate_tick, WorldCollision};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
-use crate::sim::{CurrentInput, DebugStats, PredictedFrame, SimClock, SimState, VisualCorrectionOffset};
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use rs_render::RenderDebugSettings;
+use crate::sim::{
+    CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimState, VisualCorrectionOffset,
+};
 
 #[derive(Resource)]
 pub struct PredictionHistory(pub PredictionBuffer);
@@ -35,8 +39,12 @@ pub fn input_collect_system(
     mut input: ResMut<CurrentInput>,
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
 ) {
-    if !matches!(app_state.0, ApplicationState::Connected) || ui_state.chat_open {
+    if !matches!(app_state.0, ApplicationState::Connected)
+        || ui_state.chat_open
+        || player_status.dead
+    {
         motion_events.clear();
         input.0.forward = 0.0;
         input.0.strafe = 0.0;
@@ -79,6 +87,19 @@ pub fn input_collect_system(
 
     input.0.sprint = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     input.0.sneak = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+}
+
+pub fn debug_toggle_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut debug_ui: ResMut<DebugUiState>,
+    ui_state: Res<UiState>,
+) {
+    if ui_state.chat_open {
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyD) {
+        debug_ui.open = !debug_ui.open;
+    }
 }
 
 pub fn fixed_sim_tick_system(
@@ -235,16 +256,53 @@ pub fn debug_overlay_system(
     debug: Res<DebugStats>,
     sim_clock: Res<SimClock>,
     history: Res<PredictionHistory>,
+    diagnostics: Res<DiagnosticsStore>,
+    mut debug_ui: ResMut<DebugUiState>,
+    mut render_debug: ResMut<RenderDebugSettings>,
 ) {
+    if !debug_ui.open {
+        return;
+    }
     let ctx = contexts.ctx_mut().unwrap();
-    egui::Window::new("Prediction Debug")
+    egui::Window::new("Debug")
         .default_pos(egui::pos2(12.0, 12.0))
         .show(ctx, |ui| {
-            ui.label(format!("tick: {}", sim_clock.tick));
-            ui.label(format!("history cap: {}", history.0.capacity()));
-            ui.label(format!("last correction: {:.4}", debug.last_correction));
-            ui.label(format!("last replay ticks: {}", debug.last_replay));
-            ui.label(format!("smoothing offset: {:.4}", debug.smoothing_offset_len));
-            ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
+            ui.checkbox(&mut debug_ui.show_prediction, "Prediction");
+            ui.checkbox(&mut debug_ui.show_performance, "Performance");
+            ui.checkbox(&mut debug_ui.show_render, "Render");
+
+            if debug_ui.show_performance {
+                ui.separator();
+                if let Some(fps) = diagnostics
+                    .get(&FrameTimeDiagnosticsPlugin::FPS)
+                    .and_then(|d| d.smoothed())
+                {
+                    ui.label(format!("fps: {:.1}", fps));
+                } else {
+                    ui.label("fps: n/a");
+                }
+            }
+
+            if debug_ui.show_render {
+                ui.separator();
+                ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                let mut dist = render_debug.render_distance_chunks as i32;
+                if ui
+                    .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
+                    .changed()
+                {
+                    render_debug.render_distance_chunks = dist;
+                }
+            }
+
+            if debug_ui.show_prediction {
+                ui.separator();
+                ui.label(format!("tick: {}", sim_clock.tick));
+                ui.label(format!("history cap: {}", history.0.capacity()));
+                ui.label(format!("last correction: {:.4}", debug.last_correction));
+                ui.label(format!("last replay ticks: {}", debug.last_replay));
+                ui.label(format!("smoothing offset: {:.4}", debug.smoothing_offset_len));
+                ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
+            }
         });
 }

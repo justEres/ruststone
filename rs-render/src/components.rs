@@ -23,3 +23,11 @@ impl Default for LookAngles {
 
 #[derive(Component)]
 pub struct WorldRoot;
+
+#[derive(Component)]
+pub struct ShadowCasterLight;
+
+#[derive(Component, Clone, Copy)]
+pub struct ChunkRoot {
+    pub key: (i32, i32),
+}

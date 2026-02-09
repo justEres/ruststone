@@ -1,9 +1,9 @@
-use bevy::{log::LogPlugin, prelude::*};
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, log::LogPlugin, prelude::*};
 use bevy_egui::EguiPrimaryContextPass;
 use bevy::time::Fixed;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, ToNet, UiState};
+use rs_utils::{AppState, ApplicationState, Chat, FromNet, PlayerStatus, ToNet, UiState};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
@@ -45,12 +45,14 @@ fn main() {
         )
         .insert_resource(Time::<Fixed>::from_seconds(0.05))
         .add_plugins(RenderPlugin)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(UiPlugin)
         .insert_resource(ToNet(tx_outgoing))
         .insert_resource(FromNet(rx_incoming))
         .insert_resource(AppState(ApplicationState::Disconnected))
         .insert_resource(Chat::default())
         .insert_resource(UiState::default())
+        .insert_resource(PlayerStatus::default())
         .insert_resource(net::events::NetEventQueue::default())
         .insert_resource(sim::SimClock::default())
         .insert_resource(sim::CurrentInput::default())
@@ -58,6 +60,7 @@ fn main() {
         .insert_resource(sim::VisualCorrectionOffset::default())
         .insert_resource(sim::DebugStats::default())
         .insert_resource(sim::SimReady::default())
+        .insert_resource(sim::DebugUiState::default())
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
@@ -65,6 +68,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                sim_systems::debug_toggle_system,
                 sim_systems::input_collect_system,
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,

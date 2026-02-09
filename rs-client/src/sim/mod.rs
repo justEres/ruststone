@@ -35,5 +35,24 @@ pub struct DebugStats {
 #[derive(Debug, Default, Resource)]
 pub struct SimReady(pub bool);
 
+#[derive(Debug, Resource)]
+pub struct DebugUiState {
+    pub open: bool,
+    pub show_prediction: bool,
+    pub show_performance: bool,
+    pub show_render: bool,
+}
+
+impl Default for DebugUiState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            show_prediction: true,
+            show_performance: true,
+            show_render: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
