@@ -6,7 +6,7 @@ use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
 use crate::chunk::{snapshot_for_chunk, ChunkStore};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
-use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, PerspectiveProjection, Projection, Vec3};
+use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::camera::CameraProjection;
 use bevy::render::primitives::{Aabb, Frustum};
 use bevy::render::view::ViewVisibility;
@@ -194,7 +194,7 @@ pub fn manual_frustum_cull(
     settings: Res<RenderDebugSettings>,
     camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
     mut params: ParamSet<(
-        Query<&Visibility, With<ChunkRoot>>,
+        Query<(Entity, &Visibility), With<ChunkRoot>>,
         Query<(&ChildOf, &GlobalTransform, &Aabb, &mut Visibility), With<Mesh3d>>,
     )>,
 ) {
@@ -205,10 +205,18 @@ pub fn manual_frustum_cull(
         return;
     };
     let frustum = compute_camera_frustum(&settings, projection, cam_transform);
+    let chunk_visibility: HashMap<Entity, Visibility> = {
+        let chunks = params.p0();
+        let mut map = HashMap::new();
+        for (entity, vis) in chunks.iter() {
+            map.insert(entity, *vis);
+        }
+        map
+    };
 
     for (parent, transform, aabb, mut visibility) in &mut params.p1() {
-        if let Ok(parent_vis) = params.p0().get(parent.parent()) {
-            if matches!(*parent_vis, Visibility::Hidden) {
+        if let Some(parent_vis) = chunk_visibility.get(&parent.parent()) {
+            if matches!(parent_vis, Visibility::Hidden) {
                 *visibility = Visibility::Hidden;
                 continue;
             }
