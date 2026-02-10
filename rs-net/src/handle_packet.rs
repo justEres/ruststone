@@ -1,5 +1,5 @@
 use rs_protocol::protocol::{Conn, packet::Packet};
-use rs_utils::{FromNetMessage, NetEntityKind, NetEntityMessage, PlayerPosition};
+use rs_utils::{BlockUpdate, FromNetMessage, NetEntityKind, NetEntityMessage, PlayerPosition};
 
 use crate::chunk_decode;
 
@@ -336,6 +336,65 @@ pub fn handle_packet(
                 entity_ids: ed.entity_ids.data,
             }));
         }
+        Packet::BlockChange_VarInt(bc) => {
+            let update = BlockUpdate {
+                x: bc.location.x,
+                y: bc.location.y,
+                z: bc.location.z,
+                block_id: block_state_to_id(bc.block_id.0),
+            };
+            let _ = to_main.send(FromNetMessage::BlockUpdates(vec![update]));
+        }
+        Packet::BlockChange_u8(bc) => {
+            let update = BlockUpdate {
+                x: bc.x,
+                y: bc.y as i32,
+                z: bc.z,
+                block_id: block_state_to_id(
+                    (bc.block_id.0 << 4) | (bc.block_metadata as i32 & 0xF),
+                ),
+            };
+            let _ = to_main.send(FromNetMessage::BlockUpdates(vec![update]));
+        }
+        Packet::MultiBlockChange_VarInt(mbc) => {
+            let mut updates = Vec::with_capacity(mbc.records.data.len());
+            for record in mbc.records.data {
+                let local_x = (record.xz >> 4) as i32;
+                let local_z = (record.xz & 0xF) as i32;
+                updates.push(BlockUpdate {
+                    x: mbc.chunk_x * 16 + local_x,
+                    y: record.y as i32,
+                    z: mbc.chunk_z * 16 + local_z,
+                    block_id: block_state_to_id(record.block_id.0),
+                });
+            }
+            if !updates.is_empty() {
+                let _ = to_main.send(FromNetMessage::BlockUpdates(updates));
+            }
+        }
+        Packet::MultiBlockChange_u16(mbc) => {
+            let mut updates = Vec::with_capacity(mbc.record_count as usize);
+            let mut cursor = std::io::Cursor::new(mbc.data);
+            use byteorder::{BigEndian, ReadBytesExt};
+            for _ in 0..mbc.record_count {
+                let Ok(record) = cursor.read_u32::<BigEndian>() else {
+                    break;
+                };
+                let id_meta = (record & 0x0000_FFFF) as i32;
+                let y = ((record >> 16) & 0xFF) as i32;
+                let local_z = ((record >> 24) & 0x0F) as i32;
+                let local_x = ((record >> 28) & 0x0F) as i32;
+                updates.push(BlockUpdate {
+                    x: mbc.chunk_x * 16 + local_x,
+                    y,
+                    z: mbc.chunk_z * 16 + local_z,
+                    block_id: block_state_to_id(id_meta),
+                });
+            }
+            if !updates.is_empty() {
+                let _ = to_main.send(FromNetMessage::BlockUpdates(updates));
+            }
+        }
         Packet::PlayerInfo(info) => {
             for detail in info.inner.players {
                 match detail {
@@ -403,4 +462,12 @@ fn server_yaw_to_client_yaw(yaw_deg: f32) -> f32 {
 
 fn server_pitch_to_client_pitch(pitch_deg: f32) -> f32 {
     -pitch_deg.to_radians()
+}
+
+fn block_state_to_id(block_state: i32) -> u16 {
+    if block_state <= 0 {
+        0
+    } else {
+        (block_state >> 4) as u16
+    }
 }

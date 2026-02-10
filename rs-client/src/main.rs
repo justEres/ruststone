@@ -95,6 +95,8 @@ fn main() {
                 sim_systems::input_collect_system,
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
+                sim_systems::world_interaction_system
+                    .after(sim_systems::apply_visual_transform_system),
             ),
         )
         .add_systems(

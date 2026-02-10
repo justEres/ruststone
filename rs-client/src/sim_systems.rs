@@ -3,23 +3,23 @@ use std::time::Instant;
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::time::Fixed;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{EguiContexts, egui};
 
 use rs_render::{LookAngles, Player, PlayerCamera};
 use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
 
 use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::movement::{effective_sprint, simulate_tick, WorldCollision};
+use crate::sim::movement::{WorldCollision, effective_sprint, simulate_tick};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
-use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
-use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::PerfTimings;
 use crate::sim::{
     CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
     VisualCorrectionOffset,
 };
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
+use rs_utils::PerfTimings;
 
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
@@ -120,10 +120,7 @@ pub fn frame_timing_start(
     timings.frame_delta_ms = time.delta_secs() * 1000.0;
 }
 
-pub fn frame_timing_end(
-    mut state: ResMut<FrameTimingState>,
-    mut timings: ResMut<PerfTimings>,
-) {
+pub fn frame_timing_end(mut state: ResMut<FrameTimingState>, mut timings: ResMut<PerfTimings>) {
     if let Some(start) = state.start.take() {
         timings.main_thread_ms = start.elapsed().as_secs_f32() * 1000.0;
     }
@@ -358,10 +355,122 @@ pub fn apply_visual_transform_system(
             } else {
                 EYE_HEIGHT_STAND
             };
-            camera_transform.translation.y += (target_eye_height - camera_transform.translation.y) * 0.5;
+            camera_transform.translation.y +=
+                (target_eye_height - camera_transform.translation.y) * 0.5;
         }
     }
     timings.apply_transform_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+pub fn world_interaction_system(
+    mouse: Res<ButtonInput<MouseButton>>,
+    app_state: Res<AppState>,
+    ui_state: Res<UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    to_net: Res<ToNet>,
+    collision_map: Res<WorldCollisionMap>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected)
+        || ui_state.chat_open
+        || ui_state.paused
+        || player_status.dead
+    {
+        return;
+    }
+
+    if !mouse.just_pressed(MouseButton::Left) && !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok(camera_transform) = camera_query.get_single() else {
+        return;
+    };
+    let origin = camera_transform.translation();
+    let dir = *camera_transform.forward();
+    let Some(hit) = raycast_block(&collision_map, origin, dir, 6.0) else {
+        return;
+    };
+    let face = normal_to_face_index(hit.normal);
+
+    if mouse.just_pressed(MouseButton::Left) {
+        let _ = to_net.0.send(ToNetMessage::DigStart {
+            x: hit.block.x,
+            y: hit.block.y,
+            z: hit.block.z,
+            face,
+        });
+        let _ = to_net.0.send(ToNetMessage::DigFinish {
+            x: hit.block.x,
+            y: hit.block.y,
+            z: hit.block.z,
+            face,
+        });
+    }
+
+    if mouse.just_pressed(MouseButton::Right) {
+        let _ = to_net.0.send(ToNetMessage::PlaceBlock {
+            x: hit.block.x,
+            y: hit.block.y,
+            z: hit.block.z,
+            face: face as i8,
+            cursor_x: 8,
+            cursor_y: 8,
+            cursor_z: 8,
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RayHit {
+    block: IVec3,
+    normal: IVec3,
+}
+
+fn raycast_block(
+    world: &WorldCollisionMap,
+    origin: Vec3,
+    direction: Vec3,
+    max_distance: f32,
+) -> Option<RayHit> {
+    let dir = direction.normalize_or_zero();
+    if dir.length_squared() == 0.0 {
+        return None;
+    }
+
+    let mut prev_cell = origin.floor().as_ivec3();
+    let step = 0.05f32;
+    let mut t = step;
+    while t <= max_distance {
+        let point = origin + dir * t;
+        let cell = point.floor().as_ivec3();
+        if cell != prev_cell {
+            let block_id = world.block_at(cell.x, cell.y, cell.z);
+            if block_id != 0 {
+                let normal = prev_cell - cell;
+                let normal = IVec3::new(normal.x.signum(), normal.y.signum(), normal.z.signum());
+                return Some(RayHit {
+                    block: cell,
+                    normal,
+                });
+            }
+            prev_cell = cell;
+        }
+        t += step;
+    }
+    None
+}
+
+fn normal_to_face_index(normal: IVec3) -> u8 {
+    match (normal.x, normal.y, normal.z) {
+        (0, -1, 0) => 0, // bottom
+        (0, 1, 0) => 1,  // top
+        (0, 0, -1) => 2, // north
+        (0, 0, 1) => 3,  // south
+        (-1, 0, 0) => 4, // west
+        (1, 0, 0) => 5,  // east
+        _ => 1,
+    }
 }
 
 pub fn debug_overlay_system(
@@ -417,7 +526,10 @@ pub fn debug_overlay_system(
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
                 ui.checkbox(&mut render_debug.fxaa_enabled, "FXAA");
-                ui.checkbox(&mut render_debug.use_greedy_meshing, "Binary greedy meshing");
+                ui.checkbox(
+                    &mut render_debug.use_greedy_meshing,
+                    "Binary greedy meshing",
+                );
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
@@ -443,7 +555,10 @@ pub fn debug_overlay_system(
                 ui.label(format!("history cap: {}", history.0.capacity()));
                 ui.label(format!("last correction: {:.4}", debug.last_correction));
                 ui.label(format!("last replay ticks: {}", debug.last_replay));
-                ui.label(format!("smoothing offset: {:.4}", debug.smoothing_offset_len));
+                ui.label(format!(
+                    "smoothing offset: {:.4}",
+                    debug.smoothing_offset_len
+                ));
                 ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
             }
 

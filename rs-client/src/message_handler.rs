@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
-use rs_render::ChunkUpdateQueue;
+use rs_render::{ChunkUpdateQueue, WorldUpdate};
 use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTimings, PlayerStatus,
 };
@@ -64,7 +64,13 @@ pub fn handle_messages(
             }
             FromNetMessage::ChunkData(chunk) => {
                 collision_map.update_chunk(chunk.clone());
-                chunk_updates.0.push(chunk);
+                chunk_updates.0.push(WorldUpdate::ChunkData(chunk));
+            }
+            FromNetMessage::BlockUpdates(updates) => {
+                for update in updates {
+                    collision_map.apply_block_update(update);
+                    chunk_updates.0.push(WorldUpdate::BlockUpdate(update));
+                }
             }
             FromNetMessage::UpdateHealth {
                 health,

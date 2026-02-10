@@ -10,7 +10,7 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
-use rs_utils::ChunkData;
+use rs_utils::{BlockUpdate, ChunkData};
 
 use crate::block_textures::{
     ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TEXTURES, BiomeTint, Face, TextureKey, atlas_tile_origin,
@@ -42,8 +42,14 @@ impl MaterialExtension for AtlasTextureExtension {
     }
 }
 
+#[derive(Clone)]
+pub enum WorldUpdate {
+    ChunkData(ChunkData),
+    BlockUpdate(BlockUpdate),
+}
+
 #[derive(Resource, Default)]
-pub struct ChunkUpdateQueue(pub Vec<ChunkData>);
+pub struct ChunkUpdateQueue(pub Vec<WorldUpdate>);
 
 #[derive(Resource, Default)]
 pub struct ChunkRenderState {
@@ -96,6 +102,22 @@ impl ChunkColumn {
             return;
         }
         self.sections[idx] = Some(blocks);
+    }
+
+    fn set_block(&mut self, local_x: usize, y: i32, local_z: usize, block_id: u16) {
+        if !(0..WORLD_HEIGHT).contains(&y) {
+            return;
+        }
+        let section_index = (y / SECTION_HEIGHT) as usize;
+        let local_y = (y % SECTION_HEIGHT) as usize;
+        if section_index >= self.sections.len() {
+            return;
+        }
+        let section = self.sections[section_index].get_or_insert_with(|| vec![0; 16 * 16 * 16]);
+        let idx = local_y * 16 * 16 + local_z * 16 + local_x;
+        if let Some(slot) = section.get_mut(idx) {
+            *slot = block_id;
+        }
     }
 }
 
@@ -370,6 +392,38 @@ pub fn update_store(store: &mut ChunkStore, chunk: ChunkData) {
     for section in chunk.sections {
         column.set_section(section.y, section.blocks);
     }
+}
+
+pub fn apply_block_update(store: &mut ChunkStore, update: BlockUpdate) -> Vec<(i32, i32)> {
+    if !(0..WORLD_HEIGHT).contains(&update.y) {
+        return Vec::new();
+    }
+
+    let chunk_x = update.x.div_euclid(CHUNK_SIZE);
+    let chunk_z = update.z.div_euclid(CHUNK_SIZE);
+    let local_x = update.x.rem_euclid(CHUNK_SIZE) as usize;
+    let local_z = update.z.rem_euclid(CHUNK_SIZE) as usize;
+
+    let column = store
+        .chunks
+        .entry((chunk_x, chunk_z))
+        .or_insert_with(ChunkColumn::new);
+    column.set_block(local_x, update.y, local_z, update.block_id);
+
+    let mut touched = vec![(chunk_x, chunk_z)];
+    if local_x == 0 {
+        touched.push((chunk_x - 1, chunk_z));
+    }
+    if local_x == (CHUNK_SIZE as usize - 1) {
+        touched.push((chunk_x + 1, chunk_z));
+    }
+    if local_z == 0 {
+        touched.push((chunk_x, chunk_z - 1));
+    }
+    if local_z == (CHUNK_SIZE as usize - 1) {
+        touched.push((chunk_x, chunk_z + 1));
+    }
+    touched
 }
 
 pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSnapshot {

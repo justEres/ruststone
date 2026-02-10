@@ -6,6 +6,6 @@ edition = "2024"
 [dependencies]
 bevy = { version = "0.16.0", features = ["dynamic_linking"] }
 crossbeam = "0.8.4"
+byteorder = "1.5"
 rs-protocol = { path = "../rs-protocol" }
 rs-utils = { version = "0.1.0", path = "../rs-utils" }
-
