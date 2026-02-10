@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use bevy::time::Fixed;
+use bevy_egui::{egui, EguiContexts};
 
 use rs_render::{LookAngles, Player, PlayerCamera};
 use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
@@ -16,7 +17,8 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::PerfTimings;
 use crate::sim::{
-    CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimState, VisualCorrectionOffset,
+    CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
+    VisualCorrectionOffset,
 };
 
 #[derive(Resource, Default)]
@@ -172,6 +174,7 @@ pub fn debug_toggle_system(
 
 pub fn fixed_sim_tick_system(
     mut sim_clock: ResMut<SimClock>,
+    mut sim_render: ResMut<SimRenderState>,
     mut sim_state: ResMut<SimState>,
     mut input: ResMut<CurrentInput>,
     mut history: ResMut<PredictionHistory>,
@@ -190,6 +193,7 @@ pub fn fixed_sim_tick_system(
     let world = WorldCollision::with_map(&collision_map);
     let tick = sim_clock.tick;
     let input_snapshot = input.0;
+    sim_render.previous = sim_state.current;
     let next_state = simulate_tick(&sim_state.current, &input_snapshot, &world);
 
     history.0.push(PredictedFrame {
@@ -221,6 +225,7 @@ pub fn fixed_sim_tick_system(
 
 pub fn net_event_apply_system(
     mut net_events: ResMut<NetEventQueue>,
+    mut sim_render: ResMut<SimRenderState>,
     mut sim_state: ResMut<SimState>,
     mut history: ResMut<PredictionHistory>,
     mut visual_offset: ResMut<VisualCorrectionOffset>,
@@ -262,6 +267,7 @@ pub fn net_event_apply_system(
         };
 
         if history.0.latest_tick().is_none() {
+            sim_render.previous = server_state;
             sim_state.current = server_state;
             visual_offset.0 = Vec3::ZERO;
             sim_ready.0 = true;
@@ -276,6 +282,7 @@ pub fn net_event_apply_system(
             client_tick.saturating_sub(1),
             &mut sim_state.current,
         ) {
+            sim_render.previous = sim_state.current;
             debug.last_correction = result.correction.length();
             debug.last_replay = result.replayed_ticks;
             if result.hard_teleport {
@@ -303,6 +310,9 @@ pub fn visual_smoothing_system(
 }
 
 pub fn apply_visual_transform_system(
+    fixed_time: Res<Time<Fixed>>,
+    input: Res<CurrentInput>,
+    sim_render: Res<SimRenderState>,
     sim_state: Res<SimState>,
     offset: Res<VisualCorrectionOffset>,
     mut player_query: Query<(&mut Transform, &mut LookAngles), With<Player>>,
@@ -310,11 +320,13 @@ pub fn apply_visual_transform_system(
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
+    let alpha = fixed_time.overstep_fraction().clamp(0.0, 1.0);
     if let Ok((mut player_transform, mut look)) = player_query.get_single_mut() {
-        let pos = sim_state.current.pos + offset.0;
+        let interpolated = sim_render.previous.pos.lerp(sim_state.current.pos, alpha);
+        let pos = interpolated + offset.0;
         player_transform.translation = pos;
-        look.yaw = sim_state.current.yaw;
-        look.pitch = sim_state.current.pitch;
+        look.yaw = input.0.yaw;
+        look.pitch = input.0.pitch;
         player_transform.rotation = Quat::from_axis_angle(Vec3::Y, look.yaw);
         if let Ok(mut camera_transform) = camera_query.get_single_mut() {
             camera_transform.rotation = Quat::from_axis_angle(Vec3::X, look.pitch);
@@ -375,6 +387,7 @@ pub fn debug_overlay_system(
             if debug_ui.show_render {
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                ui.checkbox(&mut render_debug.fxaa_enabled, "FXAA");
                 ui.checkbox(&mut render_debug.use_greedy_meshing, "Binary greedy meshing");
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");

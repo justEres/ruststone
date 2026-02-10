@@ -22,6 +22,11 @@ pub struct SimState {
 }
 
 #[derive(Debug, Default, Resource)]
+pub struct SimRenderState {
+    pub previous: PlayerSimState,
+}
+
+#[derive(Debug, Default, Resource)]
 pub struct VisualCorrectionOffset(pub Vec3);
 
 #[derive(Debug, Default, Resource)]

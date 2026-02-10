@@ -2,6 +2,7 @@ use bevy::app::Plugin;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::window::WindowFocused;
+use bevy::window::{PresentMode, PrimaryWindow};
 use bevy_egui::{
     egui::{self},
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
@@ -29,6 +30,7 @@ fn connect_ui(
     mut ui_state: ResMut<UiState>,
     player_status: Res<PlayerStatus>,
     mut render_debug: ResMut<RenderDebugSettings>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut window_events: EventReader<WindowFocused>,
     mut timings: ResMut<PerfTimings>,
 ) {
@@ -131,6 +133,15 @@ fn connect_ui(
                 ui.heading("Game Paused");
                 ui.add_space(8.0);
                 ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=120.0).text("FOV"));
+                if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
+                    if let Ok(mut window) = window_query.get_single_mut() {
+                        window.present_mode = if state.vsync_enabled {
+                            PresentMode::AutoVsync
+                        } else {
+                            PresentMode::AutoNoVsync
+                        };
+                    }
+                }
                 ui.add_space(8.0);
                 if ui.button("Video Settings (todo)").clicked() {}
                 if ui.button("Controls (todo)").clicked() {}
@@ -147,12 +158,14 @@ fn connect_ui(
 pub struct ConnectUiState {
     pub username: String,
     pub server_address: String,
+    pub vsync_enabled: bool,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
         Self {
             username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
+            vsync_enabled: false,
         }
     }
 }

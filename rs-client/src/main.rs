@@ -1,3 +1,4 @@
+use bevy::window::PresentMode;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, log::LogPlugin, prelude::*};
 use bevy_egui::EguiPrimaryContextPass;
 use bevy::time::Fixed;
@@ -36,6 +37,7 @@ fn main() {
                         title: "Ruststone Client".into(),
                         resolution: (1080., 720.).into(),
                         resizable: true,
+                        present_mode: PresentMode::AutoNoVsync,
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -58,6 +60,7 @@ fn main() {
         .insert_resource(sim::SimClock::default())
         .insert_resource(sim::CurrentInput::default())
         .insert_resource(sim::SimState::default())
+        .insert_resource(sim::SimRenderState::default())
         .insert_resource(sim::VisualCorrectionOffset::default())
         .insert_resource(sim::DebugStats::default())
         .insert_resource(sim::SimReady::default())
