@@ -63,6 +63,7 @@ pub fn input_collect_system(
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
         || ui_state.paused
+        || ui_state.inventory_open
         || player_status.dead
     {
         motion_events.clear();
@@ -167,7 +168,7 @@ pub fn debug_toggle_system(
     mut debug_ui: ResMut<DebugUiState>,
     ui_state: Res<UiState>,
 ) {
-    if ui_state.chat_open {
+    if ui_state.chat_open || ui_state.inventory_open {
         return;
     }
     if keys.just_pressed(KeyCode::KeyF) {
@@ -374,6 +375,7 @@ pub fn world_interaction_system(
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
         || ui_state.paused
+        || ui_state.inventory_open
         || player_status.dead
     {
         return;

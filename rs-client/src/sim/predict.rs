@@ -12,11 +12,14 @@ impl PredictionBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            frames: vec![PredictedFrame {
-                tick: 0,
-                input: InputState::default(),
-                state: PlayerSimState::default(),
-            }; capacity],
+            frames: vec![
+                PredictedFrame {
+                    tick: 0,
+                    input: InputState::default(),
+                    state: PlayerSimState::default(),
+                };
+                capacity
+            ],
             valid: vec![false; capacity],
             latest_tick: None,
         }

@@ -1,5 +1,8 @@
 use rs_protocol::protocol::{Conn, packet::Packet};
-use rs_utils::{BlockUpdate, FromNetMessage, NetEntityKind, NetEntityMessage, PlayerPosition};
+use rs_utils::{
+    BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
+    NetEntityKind, NetEntityMessage, PlayerPosition,
+};
 
 use crate::chunk_decode;
 
@@ -447,6 +450,86 @@ pub fn handle_packet(
                 food_saturation: health.food_saturation,
             });
         }
+        Packet::WindowOpen(open) => {
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowOpen(
+                InventoryWindowInfo {
+                    id: open.id,
+                    kind: open.ty,
+                    title: open.title.to_string(),
+                    slot_count: open.slot_count,
+                },
+            )));
+        }
+        Packet::WindowOpen_u8(open) => {
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowOpen(
+                InventoryWindowInfo {
+                    id: open.id,
+                    kind: format!("type_{}", open.ty),
+                    title: open.title.to_string(),
+                    slot_count: open.slot_count,
+                },
+            )));
+        }
+        Packet::WindowOpen_VarInt(open) => {
+            if (0..=u8::MAX as i32).contains(&open.id.0) {
+                let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowOpen(
+                    InventoryWindowInfo {
+                        id: open.id.0 as u8,
+                        kind: format!("type_{}", open.ty.0),
+                        title: open.title.to_string(),
+                        slot_count: 0,
+                    },
+                )));
+            }
+        }
+        Packet::WindowOpenHorse(open) => {
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowOpen(
+                InventoryWindowInfo {
+                    id: open.window_id,
+                    kind: "EntityHorse".to_string(),
+                    title: "Horse".to_string(),
+                    slot_count: open.number_of_slots.0.clamp(0, u8::MAX as i32) as u8,
+                },
+            )));
+        }
+        Packet::WindowClose(close) => {
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowClose {
+                id: close.id,
+            }));
+        }
+        Packet::WindowItems(items) => {
+            let converted = items
+                .items
+                .data
+                .into_iter()
+                .map(protocol_stack_to_inventory_item)
+                .collect();
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowItems {
+                id: items.id,
+                items: converted,
+            }));
+        }
+        Packet::WindowSetSlot(slot) => {
+            let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowSetSlot {
+                id: slot.id,
+                slot: slot.slot,
+                item: protocol_stack_to_inventory_item(slot.item),
+            }));
+        }
+        Packet::ConfirmTransaction(tx) => {
+            let _ = to_main.send(FromNetMessage::Inventory(
+                InventoryMessage::ConfirmTransaction {
+                    id: tx.id,
+                    action_number: tx.action_number,
+                    accepted: tx.accepted,
+                },
+            ));
+        }
+        Packet::SetCurrentHotbarSlot(slot) => {
+            let _ = to_main.send(FromNetMessage::Inventory(
+                InventoryMessage::SetCurrentHotbarSlot { slot: slot.slot },
+            ));
+        }
 
         _other => {}
     }
@@ -470,4 +553,17 @@ fn block_state_to_id(block_state: i32) -> u16 {
     } else {
         (block_state >> 4) as u16
     }
+}
+
+fn protocol_stack_to_inventory_item(
+    stack: Option<rs_protocol::item::Stack>,
+) -> Option<InventoryItemStack> {
+    stack.map(|s| InventoryItemStack {
+        item_id: s.id as i32,
+        count: s.count.clamp(0, u8::MAX as isize) as u8,
+        damage: s
+            .damage
+            .unwrap_or(0)
+            .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
+    })
 }

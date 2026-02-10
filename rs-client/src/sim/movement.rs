@@ -1,6 +1,6 @@
 use bevy::prelude::Vec3;
 
-use super::collision::{is_solid, WorldCollisionMap};
+use super::collision::{WorldCollisionMap, is_solid};
 use super::types::{InputState, PlayerSimState};
 
 const PLAYER_HALF_WIDTH: f32 = 0.3;
@@ -57,7 +57,11 @@ impl<'a> WorldCollision<'a> {
     }
 
     fn has_support_one_block_down(&self, pos: Vec3) -> bool {
-        let min = Vec3::new(pos.x - PLAYER_HALF_WIDTH, pos.y - 1.0, pos.z - PLAYER_HALF_WIDTH);
+        let min = Vec3::new(
+            pos.x - PLAYER_HALF_WIDTH,
+            pos.y - 1.0,
+            pos.z - PLAYER_HALF_WIDTH,
+        );
         let max = Vec3::new(
             pos.x + PLAYER_HALF_WIDTH,
             pos.y + PLAYER_HEIGHT - 1.0,
@@ -314,7 +318,11 @@ pub fn simulate_tick(
         }
     }
 
-    let mut wish = Vec3::new(input.strafe * MOVE_INPUT_DAMPING, 0.0, input.forward * MOVE_INPUT_DAMPING);
+    let mut wish = Vec3::new(
+        input.strafe * MOVE_INPUT_DAMPING,
+        0.0,
+        input.forward * MOVE_INPUT_DAMPING,
+    );
     if wish.length_squared() > 1.0 {
         wish = wish.normalize();
     }

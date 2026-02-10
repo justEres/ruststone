@@ -3,7 +3,7 @@
 use std::thread;
 
 use rs_protocol::protocol::Conn;
-use rs_utils::{FromNetMessage, ToNetMessage};
+use rs_utils::{FromNetMessage, InventoryItemStack, ToNetMessage};
 
 mod chunk_decode;
 mod handle_packet;
@@ -91,6 +91,48 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         },
                     );
                 }
+                ToNetMessage::HeldItemChange { slot } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::HeldItemChange { slot },
+                    );
+                }
+                ToNetMessage::ClickWindow {
+                    id,
+                    slot,
+                    button,
+                    mode,
+                    action_number,
+                    clicked_item,
+                } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::ClickWindow_u8 {
+                            id,
+                            slot,
+                            button,
+                            mode,
+                            action_number,
+                            clicked_item: clicked_item.map(to_protocol_stack),
+                        },
+                    );
+                }
+                ToNetMessage::ConfirmTransaction {
+                    id,
+                    action_number,
+                    accepted,
+                } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::ConfirmTransactionServerbound {
+                            id,
+                            action_number,
+                            accepted,
+                        },
+                    );
+                }
+                ToNetMessage::CloseWindow { id } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::CloseWindow { id },
+                    );
+                }
                 ToNetMessage::DigStart { x, y, z, face } => {
                     let _ = conn.write_packet(
                         rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
@@ -149,6 +191,14 @@ fn packet_handler_loop(mut conn: Conn, to_main: crossbeam::channel::Sender<FromN
             }
         }
     }
+}
+
+fn to_protocol_stack(item: InventoryItemStack) -> rs_protocol::item::Stack {
+    let mut stack = rs_protocol::item::Stack::default();
+    stack.id = item.item_id as isize;
+    stack.count = item.count as isize;
+    stack.damage = Some(item.damage as isize);
+    stack
 }
 
 fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Error>> {

@@ -4,14 +4,15 @@ use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::{ChunkUpdateQueue, WorldUpdate};
 use rs_utils::{
-    AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTimings, PlayerStatus,
+    AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
+    PerfTimings, PlayerStatus,
 };
 
 use crate::entities::RemoteEntityEventQueue;
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::{SimClock, SimReady, SimRenderState, SimState, VisualCorrectionOffset};
-use crate::sim_systems::{ActionState, PredictionHistory};
+use crate::sim_systems::PredictionHistory;
 
 const FLAG_REL_X: u8 = 0x01;
 const FLAG_REL_Y: u8 = 0x02;
@@ -34,8 +35,8 @@ pub fn handle_messages(
     mut sim_clock: ResMut<SimClock>,
     mut sim_ready: ResMut<SimReady>,
     mut history: ResMut<PredictionHistory>,
-    mut action_state: ResMut<ActionState>,
     mut visual_offset: ResMut<VisualCorrectionOffset>,
+    mut inventory_state: ResMut<InventoryState>,
 ) {
     let start = std::time::Instant::now();
     while let Ok(msg) = from_net.0.try_recv() {
@@ -45,18 +46,16 @@ pub fn handle_messages(
                 sim_clock.tick = 0;
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
-                action_state.sneaking = false;
-                action_state.sprinting = false;
                 sim_render.previous = sim_state.current;
                 visual_offset.0 = Vec3::ZERO;
+                inventory_state.reset();
                 println!("Connected to server");
             }
             FromNetMessage::Disconnected => {
                 *app_state = AppState(ApplicationState::Disconnected);
                 sim_ready.0 = false;
-                action_state.sneaking = false;
-                action_state.sprinting = false;
                 sim_render.previous = sim_state.current;
+                inventory_state.reset();
             }
             FromNetMessage::ChatMessage(msg) => {
                 chat.0.push_back(msg);
@@ -133,8 +132,52 @@ pub fn handle_messages(
             FromNetMessage::NetEntity(event) => {
                 remote_entity_events.push(event);
             }
+            FromNetMessage::Inventory(event) => {
+                apply_inventory_message(&mut inventory_state, event);
+            }
             _ => { /* Ignore other messages for now */ }
         }
     }
     timings.handle_messages_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+fn apply_inventory_message(inventory_state: &mut InventoryState, event: InventoryMessage) {
+    match event {
+        InventoryMessage::WindowOpen(open) => {
+            inventory_state.open_window = Some(open.clone());
+            inventory_state
+                .window_slots
+                .entry(open.id)
+                .or_insert_with(|| vec![None; open.slot_count as usize]);
+        }
+        InventoryMessage::WindowClose { id } => {
+            if inventory_state
+                .open_window
+                .as_ref()
+                .is_some_and(|window| window.id == id)
+            {
+                inventory_state.open_window = None;
+            }
+        }
+        InventoryMessage::WindowItems { id, items } => {
+            inventory_state.set_window_items(id, items);
+        }
+        InventoryMessage::WindowSetSlot { id, slot, item } => {
+            inventory_state.set_slot(id, slot, item);
+        }
+        InventoryMessage::ConfirmTransaction {
+            id,
+            action_number,
+            accepted,
+        } => {
+            if !accepted {
+                inventory_state.queue_confirm_ack(id, action_number);
+            }
+            let next = action_number.saturating_add(1);
+            inventory_state.next_action_number = next.max(0) as u16;
+        }
+        InventoryMessage::SetCurrentHotbarSlot { slot } => {
+            inventory_state.selected_hotbar_slot = slot.min(8);
+        }
+    }
 }
