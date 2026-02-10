@@ -103,9 +103,7 @@ pub fn input_collect_system(
         input.0.strafe -= 1.0;
     }
 
-    if keys.just_pressed(KeyCode::Space) {
-        input.0.jump = true;
-    }
+    input.0.jump = keys.pressed(KeyCode::Space);
 
     input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
