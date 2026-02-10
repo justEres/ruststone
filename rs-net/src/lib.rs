@@ -84,10 +84,10 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                 }
                 ToNetMessage::PlayerAction { action_id } => {
                     let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerAction_i32 {
-                            entity_id: 0,
-                            action_id,
-                            jump_boost: 0,
+                        rs_protocol::protocol::packet::play::serverbound::PlayerAction {
+                            entity_id: rs_protocol::protocol::VarInt(0),
+                            action_id: rs_protocol::protocol::VarInt(action_id as i32),
+                            jump_boost: rs_protocol::protocol::VarInt(0),
                         },
                     );
                 }
