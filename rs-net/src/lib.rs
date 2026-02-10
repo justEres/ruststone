@@ -82,6 +82,15 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         rs_protocol::protocol::packet::ClientStatus::PerformRespawn,
                     );
                 }
+                ToNetMessage::PlayerAction { action_id } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerAction_i32 {
+                            entity_id: 0,
+                            action_id,
+                            jump_boost: 0,
+                        },
+                    );
+                }
                 _ => {}
             }
         }
