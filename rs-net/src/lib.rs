@@ -193,6 +193,27 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         },
                     );
                 }
+                ToNetMessage::UseItem { held_item } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
+                            location: rs_protocol::shared::Position::new(-1, -1, -1),
+                            face: -1,
+                            hand: held_item.map(to_protocol_stack),
+                            cursor_x: 0,
+                            cursor_y: 0,
+                            cursor_z: 0,
+                        },
+                    );
+                }
+                ToNetMessage::DropHeldItem { full_stack } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                            status: if full_stack { 3 } else { 4 },
+                            location: rs_protocol::shared::Position::new(-1, -1, -1),
+                            face: 255,
+                        },
+                    );
+                }
                 _ => {}
             }
         }

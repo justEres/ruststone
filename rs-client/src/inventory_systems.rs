@@ -22,6 +22,14 @@ pub fn hotbar_input_system(
         return;
     }
 
+    if keys.just_pressed(KeyCode::KeyQ) {
+        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let _ = to_net
+            .0
+            .send(ToNetMessage::DropHeldItem { full_stack: ctrl });
+        return;
+    }
+
     let selected = if keys.just_pressed(KeyCode::Digit1) {
         Some(0)
     } else if keys.just_pressed(KeyCode::Digit2) {

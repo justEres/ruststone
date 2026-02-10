@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
+use crate::sim::collision::{WorldCollisionMap, is_solid};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use rs_render::PlayerCamera;
@@ -317,7 +318,16 @@ pub fn apply_remote_entity_events(
 pub fn draw_remote_entity_names(
     mut contexts: EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform), With<PlayerCamera>>,
-    names_query: Query<(&GlobalTransform, &RemoteEntityName, &RemoteVisual), With<RemoteEntity>>,
+    names_query: Query<
+        (
+            &GlobalTransform,
+            &RemoteEntityName,
+            &RemoteVisual,
+            &RemoteEntity,
+        ),
+        With<RemoteEntity>,
+    >,
+    collision_map: Res<WorldCollisionMap>,
 ) {
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
@@ -328,8 +338,13 @@ pub fn draw_remote_entity_names(
         egui::Id::new("remote_player_names"),
     ));
 
-    for (transform, name, visual) in &names_query {
+    let cam_pos = camera_transform.translation();
+    for (transform, name, visual, remote) in &names_query {
         let world_pos = transform.translation() + Vec3::Y * visual.name_y_offset;
+        let through_walls = remote.kind == NetEntityKind::Player;
+        if !through_walls && line_of_sight_blocked(&collision_map, cam_pos, world_pos) {
+            continue;
+        }
         let Ok(screen_pos) = camera.world_to_viewport(camera_transform, world_pos) else {
             continue;
         };
@@ -342,6 +357,26 @@ pub fn draw_remote_entity_names(
             egui::Color32::WHITE,
         );
     }
+}
+
+fn line_of_sight_blocked(world: &WorldCollisionMap, from: Vec3, to: Vec3) -> bool {
+    let delta = to - from;
+    let len = delta.length();
+    if len <= 0.05 {
+        return false;
+    }
+    let dir = delta / len;
+    let step = 0.1f32;
+    let mut t = 0.05f32;
+    while t < len - 0.05 {
+        let p = from + dir * t;
+        let cell = p.floor().as_ivec3();
+        if is_solid(world.block_at(cell.x, cell.y, cell.z)) {
+            return true;
+        }
+        t += step;
+    }
+    false
 }
 
 #[derive(Clone, Copy)]
