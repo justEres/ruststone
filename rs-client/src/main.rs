@@ -159,7 +159,7 @@ fn main() {
             sim_systems::fixed_update_timing_end.after(sim_systems::fixed_sim_tick_system),
         )
         .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
-        .add_systems(EguiPrimaryContextPass, entities::draw_remote_player_names)
+        .add_systems(EguiPrimaryContextPass, entities::draw_remote_entity_names)
         .add_systems(Last, sim_systems::frame_timing_end)
         .run();
 }

@@ -56,6 +56,72 @@ pub struct PlayerPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NetEntityKind {
     Player,
+    Item,
+    ExperienceOrb,
+    Mob(MobKind),
+    Object(ObjectKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MobKind {
+    Creeper,
+    Skeleton,
+    Spider,
+    Giant,
+    Zombie,
+    Slime,
+    Ghast,
+    PigZombie,
+    Enderman,
+    CaveSpider,
+    Silverfish,
+    Blaze,
+    MagmaCube,
+    EnderDragon,
+    Wither,
+    Bat,
+    Witch,
+    Endermite,
+    Guardian,
+    Pig,
+    Sheep,
+    Cow,
+    Chicken,
+    Squid,
+    Wolf,
+    Mooshroom,
+    SnowGolem,
+    Ocelot,
+    IronGolem,
+    Horse,
+    Rabbit,
+    Villager,
+    Unknown(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObjectKind {
+    Boat,
+    Minecart,
+    Arrow,
+    Snowball,
+    ItemFrame,
+    LeashKnot,
+    EnderPearl,
+    EnderEye,
+    Firework,
+    LargeFireball,
+    SmallFireball,
+    WitherSkull,
+    Egg,
+    SplashPotion,
+    ExpBottle,
+    FishingHook,
+    PrimedTnt,
+    ArmorStand,
+    EndCrystal,
+    FallingBlock,
+    Unknown(u8),
 }
 
 #[derive(Debug, Clone)]
