@@ -1,7 +1,7 @@
 use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
-    NetEntityKind, NetEntityMessage, PlayerPosition,
+    MobKind, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition,
 };
 
 use crate::chunk_decode;
@@ -226,7 +226,92 @@ pub fn handle_packet(
         }
         Packet::EntityMetadata(_em) => {}
         Packet::EntityProperties(_ep) => {}
-        Packet::SpawnMob_u8_i32_NoUUID(_sm) => {}
+        Packet::SpawnObject_i32_NoUUID(so) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: so.entity_id.0,
+                uuid: None,
+                kind: object_type_to_kind(so.ty),
+                pos: bevy::prelude::Vec3::new(
+                    f64::from(so.x) as f32,
+                    f64::from(so.y) as f32,
+                    f64::from(so.z) as f32,
+                ),
+                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(so.yaw)),
+                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(so.pitch)),
+                on_ground: None,
+            }));
+        }
+        Packet::SpawnObject_i32(so) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: so.entity_id.0,
+                uuid: Some(so.uuid),
+                kind: object_type_to_kind(so.ty),
+                pos: bevy::prelude::Vec3::new(
+                    f64::from(so.x) as f32,
+                    f64::from(so.y) as f32,
+                    f64::from(so.z) as f32,
+                ),
+                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(so.yaw)),
+                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(so.pitch)),
+                on_ground: None,
+            }));
+        }
+        Packet::SpawnExperienceOrb_i32(xp) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: xp.entity_id.0,
+                uuid: None,
+                kind: NetEntityKind::ExperienceOrb,
+                pos: bevy::prelude::Vec3::new(
+                    f64::from(xp.x) as f32,
+                    f64::from(xp.y) as f32,
+                    f64::from(xp.z) as f32,
+                ),
+                yaw: 0.0,
+                pitch: 0.0,
+                on_ground: None,
+            }));
+        }
+        Packet::SpawnMob_u8_i32_NoUUID(sm) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: sm.entity_id.0,
+                uuid: None,
+                kind: NetEntityKind::Mob(mob_type_to_kind(sm.ty)),
+                pos: bevy::prelude::Vec3::new(
+                    f64::from(sm.x) as f32,
+                    f64::from(sm.y) as f32,
+                    f64::from(sm.z) as f32,
+                ),
+                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sm.yaw)),
+                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sm.pitch)),
+                on_ground: None,
+            }));
+        }
+        Packet::SpawnMob_u8_i32(sm) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: sm.entity_id.0,
+                uuid: Some(sm.uuid),
+                kind: NetEntityKind::Mob(mob_type_to_kind(sm.ty)),
+                pos: bevy::prelude::Vec3::new(
+                    f64::from(sm.x) as f32,
+                    f64::from(sm.y) as f32,
+                    f64::from(sm.z) as f32,
+                ),
+                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sm.yaw)),
+                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sm.pitch)),
+                on_ground: None,
+            }));
+        }
+        Packet::SpawnMob_u8(sm) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+                entity_id: sm.entity_id.0,
+                uuid: Some(sm.uuid),
+                kind: NetEntityKind::Mob(mob_type_to_kind(sm.ty)),
+                pos: bevy::prelude::Vec3::new(sm.x as f32, sm.y as f32, sm.z as f32),
+                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sm.yaw)),
+                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sm.pitch)),
+                on_ground: None,
+            }));
+        }
         Packet::EntityHeadLook(_ehl) => {}
         Packet::EntityMove_i8(em) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::MoveDelta {
@@ -585,4 +670,69 @@ fn protocol_stack_to_inventory_item(
             .unwrap_or(0)
             .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
     })
+}
+
+fn mob_type_to_kind(ty: u8) -> MobKind {
+    match ty {
+        50 => MobKind::Creeper,
+        51 => MobKind::Skeleton,
+        52 => MobKind::Spider,
+        53 => MobKind::Giant,
+        54 => MobKind::Zombie,
+        55 => MobKind::Slime,
+        56 => MobKind::Ghast,
+        57 => MobKind::PigZombie,
+        58 => MobKind::Enderman,
+        59 => MobKind::CaveSpider,
+        60 => MobKind::Silverfish,
+        61 => MobKind::Blaze,
+        62 => MobKind::MagmaCube,
+        63 => MobKind::EnderDragon,
+        64 => MobKind::Wither,
+        65 => MobKind::Bat,
+        66 => MobKind::Witch,
+        67 => MobKind::Endermite,
+        68 => MobKind::Guardian,
+        90 => MobKind::Pig,
+        91 => MobKind::Sheep,
+        92 => MobKind::Cow,
+        93 => MobKind::Chicken,
+        94 => MobKind::Squid,
+        95 => MobKind::Wolf,
+        96 => MobKind::Mooshroom,
+        97 => MobKind::SnowGolem,
+        98 => MobKind::Ocelot,
+        99 => MobKind::IronGolem,
+        100 => MobKind::Horse,
+        101 => MobKind::Rabbit,
+        120 => MobKind::Villager,
+        other => MobKind::Unknown(other),
+    }
+}
+
+fn object_type_to_kind(ty: u8) -> NetEntityKind {
+    match ty {
+        2 => NetEntityKind::Item,
+        10 => NetEntityKind::Object(ObjectKind::Minecart),
+        1 => NetEntityKind::Object(ObjectKind::Boat),
+        60 => NetEntityKind::Object(ObjectKind::Arrow),
+        61 => NetEntityKind::Object(ObjectKind::Snowball),
+        71 => NetEntityKind::Object(ObjectKind::ItemFrame),
+        77 => NetEntityKind::Object(ObjectKind::LeashKnot),
+        65 => NetEntityKind::Object(ObjectKind::EnderPearl),
+        72 => NetEntityKind::Object(ObjectKind::EnderEye),
+        76 => NetEntityKind::Object(ObjectKind::Firework),
+        63 => NetEntityKind::Object(ObjectKind::LargeFireball),
+        64 => NetEntityKind::Object(ObjectKind::SmallFireball),
+        66 => NetEntityKind::Object(ObjectKind::WitherSkull),
+        62 => NetEntityKind::Object(ObjectKind::Egg),
+        73 => NetEntityKind::Object(ObjectKind::SplashPotion),
+        75 => NetEntityKind::Object(ObjectKind::ExpBottle),
+        90 => NetEntityKind::Object(ObjectKind::FishingHook),
+        50 => NetEntityKind::Object(ObjectKind::PrimedTnt),
+        78 => NetEntityKind::Object(ObjectKind::ArmorStand),
+        51 => NetEntityKind::Object(ObjectKind::EndCrystal),
+        70 => NetEntityKind::Object(ObjectKind::FallingBlock),
+        other => NetEntityKind::Object(ObjectKind::Unknown(other)),
+    }
 }
