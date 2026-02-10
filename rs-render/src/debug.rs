@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
 use crate::chunk::{ChunkStore, snapshot_for_chunk};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
+use bevy::core_pipeline::fxaa::Fxaa;
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
@@ -17,6 +18,7 @@ pub struct RenderDebugSettings {
     pub fov_deg: f32,
     pub use_greedy_meshing: bool,
     pub wireframe_enabled: bool,
+    pub fxaa_enabled: bool,
     pub manual_frustum_cull: bool,
     pub frustum_fov_debug: bool,
     pub frustum_fov_deg: f32,
@@ -30,6 +32,7 @@ impl Default for RenderDebugSettings {
             fov_deg: 110.0,
             use_greedy_meshing: true,
             wireframe_enabled: false,
+            fxaa_enabled: true,
             manual_frustum_cull: true,
             frustum_fov_debug: false,
             frustum_fov_deg: 110.0,
@@ -81,6 +84,7 @@ pub fn apply_render_debug_settings(
         Query<(&ChildOf, &mut Visibility), With<Mesh3d>>,
     )>,
     mut cameras: Query<&mut Projection, With<PlayerCamera>>,
+    mut fxaa_query: Query<&mut Fxaa, With<PlayerCamera>>,
     mut wireframe: ResMut<WireframeConfig>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
@@ -97,6 +101,9 @@ pub fn apply_render_debug_settings(
             }
         }
         wireframe.global = settings.wireframe_enabled;
+        for mut fxaa in &mut fxaa_query {
+            fxaa.enabled = settings.fxaa_enabled;
+        }
     }
 
     let Ok(player_transform) = player.get_single() else {

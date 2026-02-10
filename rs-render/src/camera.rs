@@ -1,4 +1,5 @@
 use bevy::core_pipeline::Skybox;
+use bevy::core_pipeline::fxaa::{Fxaa, Sensitivity};
 use bevy::prelude::*;
 
 use crate::components::{LookAngles, Player, PlayerCamera, Velocity};
@@ -28,6 +29,11 @@ pub fn spawn_player(
             parent.spawn((
                 Camera3d::default(),
                 PlayerCamera,
+                Fxaa {
+                    enabled: debug_settings.fxaa_enabled,
+                    edge_threshold: Sensitivity::Ultra,
+                    edge_threshold_min: Sensitivity::High,
+                },
                 Skybox {
                     image: skybox_handle,
                     brightness: 1000.0,

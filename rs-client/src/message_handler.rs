@@ -7,7 +7,7 @@ use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTi
 
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::{SimClock, SimReady, SimState, VisualCorrectionOffset};
+use crate::sim::{SimClock, SimReady, SimRenderState, SimState, VisualCorrectionOffset};
 use crate::sim_systems::PredictionHistory;
 
 const FLAG_REL_X: u8 = 0x01;
@@ -26,6 +26,7 @@ pub fn handle_messages(
     mut player_status: ResMut<PlayerStatus>,
     mut timings: ResMut<PerfTimings>,
     sim_state: Res<SimState>,
+    mut sim_render: ResMut<SimRenderState>,
     mut sim_clock: ResMut<SimClock>,
     mut sim_ready: ResMut<SimReady>,
     mut history: ResMut<PredictionHistory>,
@@ -39,11 +40,14 @@ pub fn handle_messages(
                 sim_clock.tick = 0;
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
+                sim_render.previous = sim_state.current;
                 visual_offset.0 = Vec3::ZERO;
                 println!("Connected to server");
             }
             FromNetMessage::Disconnected => {
                 *app_state = AppState(ApplicationState::Disconnected);
+                sim_ready.0 = false;
+                sim_render.previous = sim_state.current;
             }
             FromNetMessage::ChatMessage(msg) => {
                 chat.0.push_back(msg);
