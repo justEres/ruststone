@@ -164,6 +164,15 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         },
                     );
                 }
+                ToNetMessage::DigCancel { x, y, z, face } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                            status: 1,
+                            location: rs_protocol::shared::Position::new(x, y, z),
+                            face,
+                        },
+                    );
+                }
                 ToNetMessage::DigFinish { x, y, z, face } => {
                     let _ = conn.write_packet(
                         rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {

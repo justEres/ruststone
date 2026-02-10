@@ -58,6 +58,10 @@ impl Metadata {
         self.map.insert(key.index, val.wrap());
     }
 
+    pub fn get_raw(&self, index: i32) -> Option<&Value> {
+        self.map.get(&index)
+    }
+
     fn put_raw<T: MetaValue>(&mut self, index: i32, val: T) {
         self.map.insert(index, val.wrap());
     }

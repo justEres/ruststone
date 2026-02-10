@@ -1,4 +1,5 @@
 use rs_protocol::protocol::{Conn, packet::Packet};
+use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
     MobKind, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition,
@@ -224,7 +225,12 @@ pub fn handle_packet(
                 }));
             }
         }
-        Packet::EntityMetadata(_em) => {}
+        Packet::EntityMetadata(em) => {
+            handle_entity_metadata(em.entity_id.0, &em.metadata, to_main);
+        }
+        Packet::EntityMetadata_i32(em) => {
+            handle_entity_metadata(em.entity_id, &em.metadata, to_main);
+        }
         Packet::EntityProperties(_ep) => {}
         Packet::SpawnObject_i32_NoUUID(so) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
@@ -670,6 +676,122 @@ fn protocol_stack_to_inventory_item(
             .unwrap_or(0)
             .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
     })
+}
+
+fn handle_entity_metadata(
+    entity_id: i32,
+    metadata: &rs_protocol::types::Metadata,
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+) {
+    let Some(MetadataValue::OptionalItemStack(Some(stack))) = metadata.get_raw(10) else {
+        return;
+    };
+    let label = item_stack_label(stack);
+    let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetLabel {
+        entity_id,
+        label,
+    }));
+}
+
+fn item_stack_label(stack: &rs_protocol::item::Stack) -> String {
+    let name = stack
+        .meta
+        .display_name()
+        .map(|c| c.to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| item_name(stack.id as i32).to_string());
+    if stack.count > 1 {
+        format!("{name} x{}", stack.count)
+    } else {
+        name
+    }
+}
+
+fn item_name(item_id: i32) -> &'static str {
+    match item_id {
+        1 => "Stone",
+        2 => "Grass Block",
+        3 => "Dirt",
+        4 => "Cobblestone",
+        5 => "Wood Planks",
+        12 => "Sand",
+        13 => "Gravel",
+        17 => "Log",
+        18 => "Leaves",
+        20 => "Glass",
+        35 => "Wool",
+        41 => "Gold Block",
+        42 => "Iron Block",
+        45 => "Bricks",
+        49 => "Obsidian",
+        50 => "Torch",
+        54 => "Chest",
+        58 => "Crafting Table",
+        61 | 62 => "Furnace",
+        79 => "Ice",
+        80 => "Snow Block",
+        81 => "Cactus",
+        82 => "Clay",
+        87 => "Netherrack",
+        89 => "Glowstone",
+        256 => "Iron Shovel",
+        257 => "Iron Pickaxe",
+        258 => "Iron Axe",
+        259 => "Flint and Steel",
+        260 => "Apple",
+        261 => "Bow",
+        262 => "Arrow",
+        263 => "Coal",
+        264 => "Diamond",
+        265 => "Iron Ingot",
+        266 => "Gold Ingot",
+        267 => "Iron Sword",
+        268 => "Wooden Sword",
+        269 => "Wooden Shovel",
+        270 => "Wooden Pickaxe",
+        271 => "Wooden Axe",
+        272 => "Stone Sword",
+        273 => "Stone Shovel",
+        274 => "Stone Pickaxe",
+        275 => "Stone Axe",
+        276 => "Diamond Sword",
+        277 => "Diamond Shovel",
+        278 => "Diamond Pickaxe",
+        279 => "Diamond Axe",
+        280 => "Stick",
+        281 => "Bowl",
+        282 => "Mushroom Stew",
+        283 => "Golden Sword",
+        284 => "Golden Shovel",
+        285 => "Golden Pickaxe",
+        286 => "Golden Axe",
+        297 => "Bread",
+        320 => "Cooked Porkchop",
+        322 => "Golden Apple",
+        332 => "Snowball",
+        344 => "Egg",
+        346 => "Fishing Rod",
+        347 => "Clock",
+        354 => "Cake",
+        355 => "Bed",
+        357 => "Cookie",
+        359 => "Shears",
+        360 => "Melon Slice",
+        364 => "Steak",
+        368 => "Ender Pearl",
+        384 => "Bottle o' Enchanting",
+        386 => "Book",
+        387 => "Written Book",
+        388 => "Emerald",
+        391 => "Carrot",
+        393 => "Baked Potato",
+        403 => "Enchanted Book",
+        412 => "Rabbit Stew",
+        417 => "Iron Horse Armor",
+        418 => "Gold Horse Armor",
+        419 => "Diamond Horse Armor",
+        _ => "Item",
+    }
 }
 
 fn mob_type_to_kind(ty: u8) -> MobKind {

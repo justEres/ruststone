@@ -167,6 +167,10 @@ pub enum NetEntityMessage {
         entity_id: i32,
         velocity: Vec3,
     },
+    SetLabel {
+        entity_id: i32,
+        label: String,
+    },
     Destroy {
         entity_ids: Vec<i32>,
     },
@@ -187,6 +191,25 @@ pub struct PlayerStatus {
     pub food: i32,
     pub food_saturation: f32,
     pub dead: bool,
+}
+
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct BreakIndicator {
+    pub active: bool,
+    pub progress: f32,
+    pub elapsed_secs: f32,
+    pub total_secs: f32,
+}
+
+impl Default for BreakIndicator {
+    fn default() -> Self {
+        Self {
+            active: false,
+            progress: 0.0,
+            elapsed_secs: 0.0,
+            total_secs: 0.0,
+        }
+    }
 }
 
 impl Default for PlayerStatus {
@@ -650,6 +673,12 @@ pub enum ToNetMessage {
         id: u8,
     },
     DigStart {
+        x: i32,
+        y: i32,
+        z: i32,
+        face: u8,
+    },
+    DigCancel {
         x: i32,
         y: i32,
         z: i32,

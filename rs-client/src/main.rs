@@ -6,8 +6,8 @@ use clap::Parser;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
 use rs_utils::{
-    AppState, ApplicationState, Chat, FromNet, InventoryState, PerfTimings, PlayerStatus, ToNet,
-    UiState,
+    AppState, ApplicationState, BreakIndicator, Chat, FromNet, InventoryState, PerfTimings,
+    PlayerStatus, ToNet, UiState,
 };
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
@@ -87,6 +87,7 @@ fn main() {
         .insert_resource(UiState::default())
         .insert_resource(InventoryState::default())
         .insert_resource(PlayerStatus::default())
+        .insert_resource(BreakIndicator::default())
         .insert_resource(PerfTimings::default())
         .insert_resource(net::events::NetEventQueue::default())
         .insert_resource(entities::RemoteEntityEventQueue::default())

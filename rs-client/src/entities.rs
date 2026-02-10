@@ -47,6 +47,7 @@ pub struct RemoteEntityRegistry {
     pub by_server_id: HashMap<i32, Entity>,
     pub player_entity_by_uuid: HashMap<rs_protocol::protocol::UUID, i32>,
     pub player_name_by_uuid: HashMap<rs_protocol::protocol::UUID, String>,
+    pub pending_labels: HashMap<i32, String>,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -97,6 +98,7 @@ pub fn remote_entity_connection_sync(
     registry.local_entity_id = None;
     registry.player_entity_by_uuid.clear();
     registry.player_name_by_uuid.clear();
+    registry.pending_labels.clear();
 }
 
 pub fn apply_remote_entity_events(
@@ -118,6 +120,7 @@ pub fn apply_remote_entity_events(
         match event {
             NetEntityMessage::LocalPlayerId { entity_id } => {
                 registry.local_entity_id = Some(entity_id);
+                registry.pending_labels.remove(&entity_id);
                 if let Some(entity) = registry.by_server_id.remove(&entity_id) {
                     commands.entity(entity).despawn_recursive();
                     registry
@@ -160,7 +163,10 @@ pub fn apply_remote_entity_events(
                         .cloned()
                         .unwrap_or_else(|| format!("Player {}", entity_id))
                 } else {
-                    kind_label(kind).to_string()
+                    registry
+                        .pending_labels
+                        .remove(&entity_id)
+                        .unwrap_or_else(|| kind_label(kind).to_string())
                 };
 
                 if let Some(existing) = registry.by_server_id.get(&entity_id).copied() {
@@ -243,6 +249,15 @@ pub fn apply_remote_entity_events(
 
                 registry.by_server_id.insert(entity_id, spawn_cmd.id());
             }
+            NetEntityMessage::SetLabel { entity_id, label } => {
+                if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
+                    if let Ok(mut name_comp) = name_query.get_mut(entity) {
+                        name_comp.0 = label;
+                    }
+                } else {
+                    registry.pending_labels.insert(entity_id, label);
+                }
+            }
             NetEntityMessage::MoveDelta {
                 entity_id,
                 delta,
@@ -303,6 +318,7 @@ pub fn apply_remote_entity_events(
             NetEntityMessage::Velocity { .. } => {}
             NetEntityMessage::Destroy { entity_ids } => {
                 for entity_id in entity_ids {
+                    registry.pending_labels.remove(&entity_id);
                     if let Some(entity) = registry.by_server_id.remove(&entity_id) {
                         commands.entity(entity).despawn_recursive();
                     }
