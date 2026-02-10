@@ -151,6 +151,50 @@ fn connect_ui(
             });
     }
 
+    if matches!(app_state.0, ApplicationState::Connected)
+        && !ui_state.paused
+        && !ui_state.chat_open
+        && !player_status.dead
+    {
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("crosshair"),
+        ));
+        let center = ctx.screen_rect().center();
+        let stroke = egui::Stroke::new(1.5, egui::Color32::from_white_alpha(230));
+        let arm = 7.0;
+        let gap = 2.0;
+
+        painter.line_segment(
+            [
+                egui::pos2(center.x - arm, center.y),
+                egui::pos2(center.x - gap, center.y),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(center.x + gap, center.y),
+                egui::pos2(center.x + arm, center.y),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(center.x, center.y - arm),
+                egui::pos2(center.x, center.y - gap),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(center.x, center.y + gap),
+                egui::pos2(center.x, center.y + arm),
+            ],
+            stroke,
+        );
+    }
+
     timings.ui_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
