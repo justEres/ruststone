@@ -19,7 +19,7 @@ use crate::sim::{
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::{EntityUseAction, InventoryState, PerfTimings};
+use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
 use crate::entities::RemoteEntity;
 
@@ -50,6 +50,16 @@ pub struct LatencyEstimate {
 pub struct ActionState {
     pub sneaking: bool,
     pub sprinting: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct MiningState {
+    active: bool,
+    target_block: IVec3,
+    face: u8,
+    elapsed_secs: f32,
+    total_secs: f32,
+    finish_sent: bool,
 }
 
 pub fn input_collect_system(
@@ -368,15 +378,18 @@ pub fn apply_visual_transform_system(
 }
 
 pub fn world_interaction_system(
+    time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
     to_net: Res<ToNet>,
     inventory_state: Res<InventoryState>,
+    mut break_indicator: ResMut<BreakIndicator>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     remote_entities: Query<(&GlobalTransform, &RemoteEntity)>,
+    mut mining: Local<MiningState>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
@@ -384,16 +397,38 @@ pub fn world_interaction_system(
         || ui_state.inventory_open
         || player_status.dead
     {
+        if mining.active {
+            let _ = to_net.0.send(ToNetMessage::DigCancel {
+                x: mining.target_block.x,
+                y: mining.target_block.y,
+                z: mining.target_block.z,
+                face: mining.face,
+            });
+            *mining = MiningState::default();
+        }
+        *break_indicator = BreakIndicator::default();
         return;
     }
 
-    let left_click = mouse.just_pressed(MouseButton::Left);
+    let left_just_pressed = mouse.just_pressed(MouseButton::Left);
+    let left_held = mouse.pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
-    if !left_click && !right_click {
+    if !left_held && !right_click {
+        if mining.active {
+            let _ = to_net.0.send(ToNetMessage::DigCancel {
+                x: mining.target_block.x,
+                y: mining.target_block.y,
+                z: mining.target_block.z,
+                face: mining.face,
+            });
+            *mining = MiningState::default();
+        }
+        *break_indicator = BreakIndicator::default();
         return;
     }
 
     let Ok(camera_transform) = camera_query.get_single() else {
+        *break_indicator = BreakIndicator::default();
         return;
     };
     let origin = camera_transform.translation();
@@ -401,30 +436,103 @@ pub fn world_interaction_system(
     let block_hit = raycast_block(&collision_map, origin, dir, 6.0);
     let entity_hit = raycast_remote_entity(&remote_entities, origin, dir, 4.5);
 
-    if left_click {
+    if left_just_pressed {
         let _ = to_net.0.send(ToNetMessage::SwingArm);
+    }
+
+    if left_held {
         if let Some(entity) = nearest_entity_hit(entity_hit, block_hit) {
-            let _ = to_net.0.send(ToNetMessage::UseEntity {
-                target_id: entity.entity_id,
-                action: EntityUseAction::Attack,
-            });
-            return;
-        }
-        if let Some(hit) = block_hit {
+            if left_just_pressed {
+                let _ = to_net.0.send(ToNetMessage::UseEntity {
+                    target_id: entity.entity_id,
+                    action: EntityUseAction::Attack,
+                });
+            }
+            if mining.active {
+                let _ = to_net.0.send(ToNetMessage::DigCancel {
+                    x: mining.target_block.x,
+                    y: mining.target_block.y,
+                    z: mining.target_block.z,
+                    face: mining.face,
+                });
+                *mining = MiningState::default();
+            }
+            *break_indicator = BreakIndicator::default();
+        } else if let Some(hit) = block_hit {
             let face = normal_to_face_index(hit.normal);
-            let _ = to_net.0.send(ToNetMessage::DigStart {
-                x: hit.block.x,
-                y: hit.block.y,
-                z: hit.block.z,
-                face,
-            });
-            let _ = to_net.0.send(ToNetMessage::DigFinish {
-                x: hit.block.x,
-                y: hit.block.y,
-                z: hit.block.z,
-                face,
-            });
+            let block_id = collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
+            let held_item = inventory_state.hotbar_item(inventory_state.selected_hotbar_slot);
+            let total_secs = estimate_break_time_secs(block_id, held_item);
+
+            if !mining.active || mining.target_block != hit.block || mining.face != face {
+                if mining.active {
+                    let _ = to_net.0.send(ToNetMessage::DigCancel {
+                        x: mining.target_block.x,
+                        y: mining.target_block.y,
+                        z: mining.target_block.z,
+                        face: mining.face,
+                    });
+                }
+                *mining = MiningState {
+                    active: true,
+                    target_block: hit.block,
+                    face,
+                    elapsed_secs: 0.0,
+                    total_secs,
+                    finish_sent: false,
+                };
+                let _ = to_net.0.send(ToNetMessage::DigStart {
+                    x: hit.block.x,
+                    y: hit.block.y,
+                    z: hit.block.z,
+                    face,
+                });
+            } else {
+                mining.elapsed_secs += time.delta_secs();
+            }
+
+            let progress = if mining.total_secs > 0.0 {
+                (mining.elapsed_secs / mining.total_secs).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            *break_indicator = BreakIndicator {
+                active: true,
+                progress,
+                elapsed_secs: mining.elapsed_secs,
+                total_secs: mining.total_secs,
+            };
+
+            if !mining.finish_sent && progress >= 1.0 {
+                let _ = to_net.0.send(ToNetMessage::DigFinish {
+                    x: mining.target_block.x,
+                    y: mining.target_block.y,
+                    z: mining.target_block.z,
+                    face: mining.face,
+                });
+                mining.finish_sent = true;
+            }
+        } else {
+            if mining.active {
+                let _ = to_net.0.send(ToNetMessage::DigCancel {
+                    x: mining.target_block.x,
+                    y: mining.target_block.y,
+                    z: mining.target_block.z,
+                    face: mining.face,
+                });
+            }
+            *mining = MiningState::default();
+            *break_indicator = BreakIndicator::default();
         }
+    } else if mining.active {
+        let _ = to_net.0.send(ToNetMessage::DigCancel {
+            x: mining.target_block.x,
+            y: mining.target_block.y,
+            z: mining.target_block.z,
+            face: mining.face,
+        });
+        *mining = MiningState::default();
+        *break_indicator = BreakIndicator::default();
     }
 
     if right_click {
@@ -433,9 +541,7 @@ pub fn world_interaction_system(
                 target_id: entity.entity_id,
                 action: EntityUseAction::Interact,
             });
-            return;
-        }
-        if let Some(hit) = block_hit {
+        } else if let Some(hit) = block_hit {
             let face = normal_to_face_index(hit.normal);
             let _ = to_net.0.send(ToNetMessage::PlaceBlock {
                 x: hit.block.x,
@@ -464,6 +570,75 @@ struct RayHit {
 struct EntityHit {
     entity_id: i32,
     distance: f32,
+}
+
+fn estimate_break_time_secs(block_id: u16, held_item: Option<rs_utils::InventoryItemStack>) -> f32 {
+    let hardness = block_hardness(block_id);
+    if hardness <= 0.0 {
+        return 0.05;
+    }
+    let tool_mult = held_item
+        .map(|stack| tool_efficiency_multiplier(stack.item_id, block_id))
+        .unwrap_or(1.0);
+    let secs = (hardness * 1.5) / tool_mult.max(0.1);
+    secs.clamp(0.1, 10.0)
+}
+
+fn block_hardness(block_id: u16) -> f32 {
+    match block_id {
+        0 => 0.0,            // air
+        1 | 4 => 2.0,        // stone, cobble
+        2 => 0.6,            // grass
+        3 => 0.5,            // dirt
+        5 | 17 => 2.0,       // planks/log
+        12 => 0.5,           // sand
+        13 => 0.6,           // gravel
+        14 | 15 | 16 => 3.0, // ores
+        18 => 0.2,           // leaves
+        20 => 0.3,           // glass
+        24 | 45 => 0.8,      // sandstone, brick
+        49 => 50.0,          // obsidian
+        50 => 0.0,           // torch
+        54 => 2.5,           // chest
+        58 => 2.5,           // crafting
+        61 | 62 => 3.5,      // furnace
+        79 => 0.5,           // ice
+        80 => 0.2,           // snow block
+        81 => 0.4,           // cactus
+        82 => 0.6,           // clay
+        87 => 0.4,           // netherrack
+        88 => 0.5,           // soulsand
+        89 => 0.3,           // glowstone
+        _ => 1.0,
+    }
+}
+
+fn tool_efficiency_multiplier(item_id: i32, block_id: u16) -> f32 {
+    let is_pickaxe = matches!(item_id, 257 | 270 | 274 | 278 | 285);
+    let is_shovel = matches!(item_id, 256 | 269 | 273 | 277 | 284);
+    let is_axe = matches!(item_id, 258 | 271 | 275 | 279 | 286);
+
+    let tier_mult = match item_id {
+        269 | 270 | 271 => 2.0, // wood
+        273 | 274 | 275 => 4.0, // stone
+        256..=258 => 6.0,       // iron
+        277..=279 => 8.0,       // diamond
+        284..=286 => 12.0,      // gold
+        _ => 1.0,
+    };
+
+    let pick_blocks = matches!(
+        block_id,
+        1 | 4 | 14 | 15 | 16 | 21 | 22 | 24 | 41 | 42 | 45 | 49 | 56 | 57 | 61 | 62 | 73 | 74
+    );
+    let shovel_blocks = matches!(block_id, 2 | 3 | 12 | 13 | 80 | 82 | 88);
+    let axe_blocks = matches!(block_id, 5 | 17 | 47 | 53 | 54 | 58);
+
+    if (is_pickaxe && pick_blocks) || (is_shovel && shovel_blocks) || (is_axe && axe_blocks) {
+        tier_mult
+    } else {
+        1.0
+    }
 }
 
 fn nearest_entity_hit(

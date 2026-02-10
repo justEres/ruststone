@@ -12,8 +12,8 @@ use bevy_egui::{
 };
 use rs_render::RenderDebugSettings;
 use rs_utils::{
-    AppState, ApplicationState, Chat, InventoryItemStack, InventoryState, PerfTimings,
-    PlayerStatus, ToNet, ToNetMessage, UiState,
+    AppState, ApplicationState, BreakIndicator, Chat, InventoryItemStack, InventoryState,
+    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
 };
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
@@ -41,6 +41,7 @@ fn connect_ui(
     mut inventory_state: ResMut<InventoryState>,
     mut item_icons: ResMut<ItemIconCache>,
     player_status: Res<PlayerStatus>,
+    break_indicator: Res<BreakIndicator>,
     mut render_debug: ResMut<RenderDebugSettings>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut window_events: EventReader<WindowFocused>,
@@ -262,6 +263,29 @@ fn connect_ui(
             ],
             stroke,
         );
+
+        if break_indicator.active {
+            let bar_w = 100.0;
+            let bar_h = 6.0;
+            let y = center.y + arm + 10.0;
+            let bg_rect =
+                egui::Rect::from_center_size(egui::pos2(center.x, y), egui::vec2(bar_w, bar_h));
+            painter.rect(
+                bg_rect,
+                2.0,
+                egui::Color32::from_black_alpha(170),
+                egui::Stroke::new(1.0, egui::Color32::from_gray(110)),
+                egui::StrokeKind::Outside,
+            );
+            let fill_w = (bar_w - 2.0) * break_indicator.progress.clamp(0.0, 1.0);
+            if fill_w > 0.0 {
+                let fill_rect = egui::Rect::from_min_size(
+                    bg_rect.min + egui::vec2(1.0, 1.0),
+                    egui::vec2(fill_w, bar_h - 2.0),
+                );
+                painter.rect_filled(fill_rect, 1.0, egui::Color32::from_rgb(210, 210, 210));
+            }
+        }
     }
 
     timings.ui_ms = start.elapsed().as_secs_f32() * 1000.0;
