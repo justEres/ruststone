@@ -13,6 +13,7 @@ const JUMP_VEL: f32 = 0.42;
 const BASE_MOVE_SPEED: f32 = 0.1;
 const SPEED_IN_AIR: f32 = 0.02;
 const SLIPPERINESS_DEFAULT: f32 = 0.6;
+const SNEAK_EDGE_STEP: f32 = 0.05;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -50,6 +51,47 @@ impl<'a> WorldCollision<'a> {
             }
         }
         false
+    }
+
+    fn has_support_one_block_down(&self, pos: Vec3) -> bool {
+        let min = Vec3::new(pos.x - PLAYER_HALF_WIDTH, pos.y - 1.0, pos.z - PLAYER_HALF_WIDTH);
+        let max = Vec3::new(
+            pos.x + PLAYER_HALF_WIDTH,
+            pos.y + PLAYER_HEIGHT - 1.0,
+            pos.z + PLAYER_HALF_WIDTH,
+        );
+        self.aabb_collides(min, max)
+    }
+
+    pub fn clamp_sneak_edge_velocity(&self, pos: Vec3, vel: Vec3) -> Vec3 {
+        if self.map.is_none() {
+            return vel;
+        }
+
+        let mut dx = vel.x;
+        let mut dz = vel.z;
+
+        while dx.abs() > COLLISION_EPS
+            && !self.has_support_one_block_down(pos + Vec3::new(dx, 0.0, 0.0))
+        {
+            dx = step_toward_zero(dx);
+        }
+
+        while dz.abs() > COLLISION_EPS
+            && !self.has_support_one_block_down(pos + Vec3::new(0.0, 0.0, dz))
+        {
+            dz = step_toward_zero(dz);
+        }
+
+        while dx.abs() > COLLISION_EPS
+            && dz.abs() > COLLISION_EPS
+            && !self.has_support_one_block_down(pos + Vec3::new(dx, 0.0, dz))
+        {
+            dx = step_toward_zero(dx);
+            dz = step_toward_zero(dz);
+        }
+
+        Vec3::new(dx, vel.y, dz)
     }
 
     pub fn resolve(&self, mut pos: Vec3, mut vel: Vec3) -> (Vec3, Vec3, bool) {
@@ -293,6 +335,12 @@ pub fn simulate_tick(
 
     move_flying(&mut state.vel, wish.x, wish.z, f5, state.yaw);
 
+    if state.on_ground && input.sneak {
+        let clamped = world.clamp_sneak_edge_velocity(state.pos, state.vel);
+        state.vel.x = clamped.x;
+        state.vel.z = clamped.z;
+    }
+
     let (pos, vel, on_ground) = world.resolve(state.pos, state.vel);
     state.pos = pos;
     state.vel = vel;
@@ -325,4 +373,12 @@ fn move_flying(vel: &mut Vec3, strafe: f32, forward: f32, friction: f32, yaw: f3
     let dir = right_dir * strafe + forward_dir * forward;
     vel.x += dir.x;
     vel.z += dir.z;
+}
+
+fn step_toward_zero(v: f32) -> f32 {
+    if v > 0.0 {
+        (v - SNEAK_EDGE_STEP).max(0.0)
+    } else {
+        (v + SNEAK_EDGE_STEP).min(0.0)
+    }
 }
