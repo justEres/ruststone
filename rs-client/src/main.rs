@@ -2,6 +2,7 @@ use bevy::time::Fixed;
 use bevy::window::PresentMode;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, log::LogPlugin, prelude::*};
 use bevy_egui::EguiPrimaryContextPass;
+use clap::Parser;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
 use rs_utils::{
@@ -16,7 +17,19 @@ mod net;
 mod sim;
 mod sim_systems;
 
+const DEFAULT_DEBUG_USERNAME: &str = "RustyPlayer";
+const DEFAULT_DEBUG_ADDRESS: &str = "localhost:25565";
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about = "Ruststone client", long_about = None)]
+struct Cli {
+    /// Auto-connect using default debug settings (RustyPlayer @ localhost:25565)
+    #[arg(long, default_value_t = false)]
+    autoconnect: bool,
+}
+
 fn main() {
+    let cli = Cli::parse();
     tracing_subscriber::fmt().without_time().compact().init();
 
     info!("Starting ruststone");
@@ -31,6 +44,19 @@ fn main() {
             rs_net::start_networking(rx_outgoing, tx_incoming);
         })
         .expect("Failed to spawn networking thread");
+
+    if cli.autoconnect {
+        let _ = tx_outgoing.send(ToNetMessage::Connect {
+            username: DEFAULT_DEBUG_USERNAME.to_string(),
+            address: DEFAULT_DEBUG_ADDRESS.to_string(),
+        });
+    }
+
+    let initial_state = if cli.autoconnect {
+        ApplicationState::Connecting
+    } else {
+        ApplicationState::Disconnected
+    };
 
     App::new()
         .add_plugins(
@@ -54,7 +80,7 @@ fn main() {
         .add_plugins(UiPlugin)
         .insert_resource(ToNet(tx_outgoing))
         .insert_resource(FromNet(rx_incoming))
-        .insert_resource(AppState(ApplicationState::Disconnected))
+        .insert_resource(AppState(initial_state))
         .insert_resource(Chat::default())
         .insert_resource(UiState::default())
         .insert_resource(PlayerStatus::default())
