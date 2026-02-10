@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::Resource;
-use rs_utils::ChunkData;
+use rs_utils::{BlockUpdate, ChunkData};
 
 const CHUNK_SIZE: i32 = 16;
 const SECTION_HEIGHT: i32 = 16;
@@ -27,6 +27,22 @@ impl ChunkColumn {
             return;
         }
         self.sections[idx] = Some(blocks);
+    }
+
+    fn set_block(&mut self, local_x: usize, y: i32, local_z: usize, block_id: u16) {
+        if !(0..WORLD_HEIGHT).contains(&y) {
+            return;
+        }
+        let section_index = (y / SECTION_HEIGHT) as usize;
+        let local_y = (y % SECTION_HEIGHT) as usize;
+        if section_index >= self.sections.len() {
+            return;
+        }
+        let section = self.sections[section_index].get_or_insert_with(|| vec![0; 16 * 16 * 16]);
+        let idx = local_y * 16 * 16 + local_z * 16 + local_x;
+        if let Some(slot) = section.get_mut(idx) {
+            *slot = block_id;
+        }
     }
 }
 
@@ -76,13 +92,28 @@ impl WorldCollisionMap {
         let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
         *section.get(idx).unwrap_or(&0)
     }
+
+    pub fn apply_block_update(&mut self, update: BlockUpdate) {
+        if !(0..WORLD_HEIGHT).contains(&update.y) {
+            return;
+        }
+        let chunk_x = update.x.div_euclid(CHUNK_SIZE);
+        let chunk_z = update.z.div_euclid(CHUNK_SIZE);
+        let local_x = update.x.rem_euclid(CHUNK_SIZE) as usize;
+        let local_z = update.z.rem_euclid(CHUNK_SIZE) as usize;
+        let column = self
+            .chunks
+            .entry((chunk_x, chunk_z))
+            .or_insert_with(|| ChunkColumn::new(false));
+        column.set_block(local_x, update.y, local_z, update.block_id);
+    }
 }
 
 pub fn is_solid(block_id: u16) -> bool {
     match block_id {
-        0 => false,        // air
-        8 | 9 => false,    // water
-        10 | 11 => false,  // lava
+        0 => false,       // air
+        8 | 9 => false,   // water
+        10 | 11 => false, // lava
         _ => true,
     }
 }

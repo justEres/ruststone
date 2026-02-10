@@ -91,6 +91,44 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                         },
                     );
                 }
+                ToNetMessage::DigStart { x, y, z, face } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                            status: 0,
+                            location: rs_protocol::shared::Position::new(x, y, z),
+                            face,
+                        },
+                    );
+                }
+                ToNetMessage::DigFinish { x, y, z, face } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                            status: 2,
+                            location: rs_protocol::shared::Position::new(x, y, z),
+                            face,
+                        },
+                    );
+                }
+                ToNetMessage::PlaceBlock {
+                    x,
+                    y,
+                    z,
+                    face,
+                    cursor_x,
+                    cursor_y,
+                    cursor_z,
+                } => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
+                            location: rs_protocol::shared::Position::new(x, y, z),
+                            face,
+                            hand: None,
+                            cursor_x,
+                            cursor_y,
+                            cursor_z,
+                        },
+                    );
+                }
                 _ => {}
             }
         }

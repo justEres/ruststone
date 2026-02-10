@@ -14,7 +14,7 @@ pub mod debug;
 mod input;
 mod world;
 
-pub use chunk::ChunkUpdateQueue;
+pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
@@ -77,10 +77,19 @@ fn enqueue_chunk_meshes(
 
     let mut updated_keys = std::collections::HashSet::new();
     let raw_updates = queue.0.len() as u32;
-    for chunk in queue.0.drain(..) {
-        let key = (chunk.x, chunk.z);
-        chunk::update_store(&mut store, chunk);
-        updated_keys.insert(key);
+    for update in queue.0.drain(..) {
+        match update {
+            chunk::WorldUpdate::ChunkData(chunk) => {
+                let key = (chunk.x, chunk.z);
+                chunk::update_store(&mut store, chunk);
+                updated_keys.insert(key);
+            }
+            chunk::WorldUpdate::BlockUpdate(block_update) => {
+                for key in chunk::apply_block_update(&mut store, block_update) {
+                    updated_keys.insert(key);
+                }
+            }
+        }
     }
     let updates_len = updated_keys.len() as u32;
 

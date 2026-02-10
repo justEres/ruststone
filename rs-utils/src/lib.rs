@@ -35,6 +35,14 @@ pub struct ChunkData {
     pub biomes: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BlockUpdate {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub block_id: u16,
+}
+
 #[derive(Clone)]
 pub struct PlayerPosition {
     pub position: Option<(f64, f64, f64)>,
@@ -158,6 +166,27 @@ pub enum ToNetMessage {
     PlayerAction {
         action_id: i8,
     },
+    DigStart {
+        x: i32,
+        y: i32,
+        z: i32,
+        face: u8,
+    },
+    DigFinish {
+        x: i32,
+        y: i32,
+        z: i32,
+        face: u8,
+    },
+    PlaceBlock {
+        x: i32,
+        y: i32,
+        z: i32,
+        face: i8,
+        cursor_x: u8,
+        cursor_y: u8,
+        cursor_z: u8,
+    },
 }
 
 use rs_protocol::protocol::packet::Packet;
@@ -168,6 +197,7 @@ pub enum FromNetMessage {
     Packet(Packet),
     ChatMessage(String),
     ChunkData(ChunkData),
+    BlockUpdates(Vec<BlockUpdate>),
     PlayerPosition(PlayerPosition),
     UpdateHealth {
         health: f32,
