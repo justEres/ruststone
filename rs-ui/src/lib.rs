@@ -181,7 +181,7 @@ fn connect_ui(
     }
 
     if matches!(app_state.0, ApplicationState::Connected) && !player_status.dead {
-        draw_hotbar_ui(ctx, &inventory_state, &mut item_icons);
+        draw_hotbar_ui(ctx, &inventory_state, &player_status, &mut item_icons);
     }
 
     if matches!(app_state.0, ApplicationState::Connected)
@@ -286,8 +286,13 @@ impl Default for ConnectUiState {
 fn draw_hotbar_ui(
     ctx: &egui::Context,
     inventory_state: &InventoryState,
+    player_status: &PlayerStatus,
     item_icons: &mut ItemIconCache,
 ) {
+    let health_frac = (player_status.health / 20.0).clamp(0.0, 1.0);
+    let hunger_frac = (player_status.food as f32 / 20.0).clamp(0.0, 1.0);
+    let hotbar_width = INVENTORY_SLOT_SIZE * 9.0 + INVENTORY_SLOT_SPACING * 8.0;
+
     egui::Area::new(egui::Id::new("hotbar_overlay"))
         .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -12.0))
         .interactable(false)
@@ -297,6 +302,31 @@ fn draw_hotbar_ui(
                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(64)))
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
+                    let (bars_rect, _) = ui
+                        .allocate_exact_size(egui::vec2(hotbar_width, 10.0), egui::Sense::hover());
+                    let half_width = (hotbar_width - INVENTORY_SLOT_SPACING) * 0.5;
+                    let health_rect = egui::Rect::from_min_size(
+                        bars_rect.min,
+                        egui::vec2(half_width, bars_rect.height()),
+                    );
+                    let hunger_rect = egui::Rect::from_min_size(
+                        egui::pos2(health_rect.max.x + INVENTORY_SLOT_SPACING, bars_rect.min.y),
+                        egui::vec2(half_width, bars_rect.height()),
+                    );
+                    draw_stat_bar(
+                        ui.painter(),
+                        health_rect,
+                        health_frac,
+                        egui::Color32::from_rgb(170, 46, 46),
+                    );
+                    draw_stat_bar(
+                        ui.painter(),
+                        hunger_rect,
+                        hunger_frac,
+                        egui::Color32::from_rgb(181, 122, 43),
+                    );
+                    ui.add_space(4.0);
+
                     egui::Grid::new("hud_hotbar_grid")
                         .spacing(egui::Vec2::new(
                             INVENTORY_SLOT_SPACING,
@@ -320,6 +350,26 @@ fn draw_hotbar_ui(
                         });
                 });
         });
+}
+
+fn draw_stat_bar(painter: &egui::Painter, rect: egui::Rect, progress: f32, fill: egui::Color32) {
+    let stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(92));
+    painter.rect(
+        rect,
+        2.0,
+        egui::Color32::from_gray(28),
+        stroke,
+        egui::StrokeKind::Outside,
+    );
+    let width = (rect.width() - 2.0) * progress.clamp(0.0, 1.0);
+    if width <= 0.0 {
+        return;
+    }
+    let fill_rect = egui::Rect::from_min_size(
+        rect.min + egui::vec2(1.0, 1.0),
+        egui::vec2(width, rect.height() - 2.0),
+    );
+    painter.rect_filled(fill_rect, 1.5, fill);
 }
 
 fn draw_inventory_grid(

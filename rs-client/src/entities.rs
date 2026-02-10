@@ -240,6 +240,7 @@ pub fn apply_remote_entity_events(
                     }
                 }
             }
+            NetEntityMessage::Velocity { .. } => {}
             NetEntityMessage::Destroy { entity_ids } => {
                 for entity_id in entity_ids {
                     if let Some(entity) = registry.by_server_id.remove(&entity_id) {

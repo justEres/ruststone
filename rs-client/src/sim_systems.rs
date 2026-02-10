@@ -19,7 +19,9 @@ use crate::sim::{
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::PerfTimings;
+use rs_utils::{EntityUseAction, PerfTimings};
+
+use crate::entities::{RemoteEntity, RemotePlayer};
 
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
@@ -264,6 +266,10 @@ pub fn net_event_apply_system(
                 on_ground,
                 recv_instant,
             } => (pos, yaw, pitch, on_ground, recv_instant),
+            crate::net::events::NetEvent::ServerVelocity { velocity } => {
+                sim_state.current.vel = velocity;
+                continue;
+            }
         };
         if let Some(last_sent) = latency.last_sent {
             let rtt = recv_instant.saturating_duration_since(last_sent);
@@ -369,6 +375,7 @@ pub fn world_interaction_system(
     to_net: Res<ToNet>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    remote_players: Query<(&GlobalTransform, &RemoteEntity), With<RemotePlayer>>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
@@ -379,7 +386,9 @@ pub fn world_interaction_system(
         return;
     }
 
-    if !mouse.just_pressed(MouseButton::Left) && !mouse.just_pressed(MouseButton::Right) {
+    let left_click = mouse.just_pressed(MouseButton::Left);
+    let right_click = mouse.just_pressed(MouseButton::Right);
+    if !left_click && !right_click {
         return;
     }
 
@@ -388,36 +397,55 @@ pub fn world_interaction_system(
     };
     let origin = camera_transform.translation();
     let dir = *camera_transform.forward();
-    let Some(hit) = raycast_block(&collision_map, origin, dir, 6.0) else {
-        return;
-    };
-    let face = normal_to_face_index(hit.normal);
+    let block_hit = raycast_block(&collision_map, origin, dir, 6.0);
+    let entity_hit = raycast_remote_player(&remote_players, origin, dir, 4.5);
 
-    if mouse.just_pressed(MouseButton::Left) {
-        let _ = to_net.0.send(ToNetMessage::DigStart {
-            x: hit.block.x,
-            y: hit.block.y,
-            z: hit.block.z,
-            face,
-        });
-        let _ = to_net.0.send(ToNetMessage::DigFinish {
-            x: hit.block.x,
-            y: hit.block.y,
-            z: hit.block.z,
-            face,
-        });
+    if left_click {
+        let _ = to_net.0.send(ToNetMessage::SwingArm);
+        if let Some(entity) = nearest_entity_hit(entity_hit, block_hit) {
+            let _ = to_net.0.send(ToNetMessage::UseEntity {
+                target_id: entity.entity_id,
+                action: EntityUseAction::Attack,
+            });
+            return;
+        }
+        if let Some(hit) = block_hit {
+            let face = normal_to_face_index(hit.normal);
+            let _ = to_net.0.send(ToNetMessage::DigStart {
+                x: hit.block.x,
+                y: hit.block.y,
+                z: hit.block.z,
+                face,
+            });
+            let _ = to_net.0.send(ToNetMessage::DigFinish {
+                x: hit.block.x,
+                y: hit.block.y,
+                z: hit.block.z,
+                face,
+            });
+        }
     }
 
-    if mouse.just_pressed(MouseButton::Right) {
-        let _ = to_net.0.send(ToNetMessage::PlaceBlock {
-            x: hit.block.x,
-            y: hit.block.y,
-            z: hit.block.z,
-            face: face as i8,
-            cursor_x: 8,
-            cursor_y: 8,
-            cursor_z: 8,
-        });
+    if right_click {
+        if let Some(entity) = nearest_entity_hit(entity_hit, block_hit) {
+            let _ = to_net.0.send(ToNetMessage::UseEntity {
+                target_id: entity.entity_id,
+                action: EntityUseAction::Interact,
+            });
+            return;
+        }
+        if let Some(hit) = block_hit {
+            let face = normal_to_face_index(hit.normal);
+            let _ = to_net.0.send(ToNetMessage::PlaceBlock {
+                x: hit.block.x,
+                y: hit.block.y,
+                z: hit.block.z,
+                face: face as i8,
+                cursor_x: 8,
+                cursor_y: 8,
+                cursor_z: 8,
+            });
+        }
     }
 }
 
@@ -425,6 +453,25 @@ pub fn world_interaction_system(
 struct RayHit {
     block: IVec3,
     normal: IVec3,
+    distance: f32,
+}
+
+#[derive(Clone, Copy)]
+struct EntityHit {
+    entity_id: i32,
+    distance: f32,
+}
+
+fn nearest_entity_hit(
+    entity_hit: Option<EntityHit>,
+    block_hit: Option<RayHit>,
+) -> Option<EntityHit> {
+    match (entity_hit, block_hit) {
+        (Some(entity), Some(block)) if entity.distance <= block.distance => Some(entity),
+        (Some(_), Some(_)) => None,
+        (Some(entity), None) => Some(entity),
+        _ => None,
+    }
 }
 
 fn raycast_block(
@@ -452,6 +499,7 @@ fn raycast_block(
                 return Some(RayHit {
                     block: cell,
                     normal,
+                    distance: t,
                 });
             }
             prev_cell = cell;
@@ -459,6 +507,85 @@ fn raycast_block(
         t += step;
     }
     None
+}
+
+fn raycast_remote_player(
+    remote_players: &Query<(&GlobalTransform, &RemoteEntity), With<RemotePlayer>>,
+    origin: Vec3,
+    direction: Vec3,
+    max_distance: f32,
+) -> Option<EntityHit> {
+    let dir = direction.normalize_or_zero();
+    if dir.length_squared() == 0.0 {
+        return None;
+    }
+
+    let mut nearest: Option<EntityHit> = None;
+    for (transform, remote) in remote_players.iter() {
+        let feet = transform.translation() - Vec3::Y * 0.9;
+        let min = Vec3::new(feet.x - 0.3, feet.y, feet.z - 0.3);
+        let max = Vec3::new(feet.x + 0.3, feet.y + 1.8, feet.z + 0.3);
+        let Some(distance) = ray_aabb_distance(origin, dir, min, max, max_distance) else {
+            continue;
+        };
+
+        match nearest {
+            Some(current) if current.distance <= distance => {}
+            _ => {
+                nearest = Some(EntityHit {
+                    entity_id: remote.server_id,
+                    distance,
+                });
+            }
+        }
+    }
+
+    nearest
+}
+
+fn ray_aabb_distance(
+    origin: Vec3,
+    dir: Vec3,
+    min: Vec3,
+    max: Vec3,
+    max_distance: f32,
+) -> Option<f32> {
+    let mut t_min = 0.0f32;
+    let mut t_max = max_distance;
+
+    for axis in 0..3 {
+        let (origin_axis, dir_axis, min_axis, max_axis) = match axis {
+            0 => (origin.x, dir.x, min.x, max.x),
+            1 => (origin.y, dir.y, min.y, max.y),
+            _ => (origin.z, dir.z, min.z, max.z),
+        };
+
+        if dir_axis.abs() <= f32::EPSILON {
+            if origin_axis < min_axis || origin_axis > max_axis {
+                return None;
+            }
+            continue;
+        }
+
+        let inv = 1.0 / dir_axis;
+        let mut t1 = (min_axis - origin_axis) * inv;
+        let mut t2 = (max_axis - origin_axis) * inv;
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+
+        t_min = t_min.max(t1);
+        t_max = t_max.min(t2);
+        if t_max < t_min {
+            return None;
+        }
+    }
+
+    if t_min <= max_distance {
+        Some(t_min.max(0.0))
+    } else {
+        None
+    }
 }
 
 fn normal_to_face_index(normal: IVec3) -> u8 {

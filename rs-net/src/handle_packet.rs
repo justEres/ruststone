@@ -250,7 +250,26 @@ pub fn handle_packet(
                 on_ground: None,
             }));
         }
-        Packet::EntityVelocity(_ev) => {}
+        Packet::EntityVelocity(ev) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Velocity {
+                entity_id: ev.entity_id.0,
+                velocity: bevy::prelude::Vec3::new(
+                    ev.velocity_x as f32 / 8000.0,
+                    ev.velocity_y as f32 / 8000.0,
+                    ev.velocity_z as f32 / 8000.0,
+                ),
+            }));
+        }
+        Packet::EntityVelocity_i32(ev) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Velocity {
+                entity_id: ev.entity_id,
+                velocity: bevy::prelude::Vec3::new(
+                    ev.velocity_x as f32 / 8000.0,
+                    ev.velocity_y as f32 / 8000.0,
+                    ev.velocity_z as f32 / 8000.0,
+                ),
+            }));
+        }
         Packet::EntityTeleport_i32(et) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Teleport {
                 entity_id: et.entity_id.0,
