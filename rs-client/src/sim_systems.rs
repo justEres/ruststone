@@ -19,9 +19,9 @@ use crate::sim::{
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::{EntityUseAction, PerfTimings};
+use rs_utils::{EntityUseAction, InventoryState, PerfTimings};
 
-use crate::entities::{RemoteEntity, RemotePlayer};
+use crate::entities::RemoteEntity;
 
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
@@ -373,9 +373,10 @@ pub fn world_interaction_system(
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
     to_net: Res<ToNet>,
+    inventory_state: Res<InventoryState>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
-    remote_players: Query<(&GlobalTransform, &RemoteEntity), With<RemotePlayer>>,
+    remote_entities: Query<(&GlobalTransform, &RemoteEntity)>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
@@ -398,7 +399,7 @@ pub fn world_interaction_system(
     let origin = camera_transform.translation();
     let dir = *camera_transform.forward();
     let block_hit = raycast_block(&collision_map, origin, dir, 6.0);
-    let entity_hit = raycast_remote_player(&remote_players, origin, dir, 4.5);
+    let entity_hit = raycast_remote_entity(&remote_entities, origin, dir, 4.5);
 
     if left_click {
         let _ = to_net.0.send(ToNetMessage::SwingArm);
@@ -445,6 +446,9 @@ pub fn world_interaction_system(
                 cursor_y: 8,
                 cursor_z: 8,
             });
+        } else {
+            let held_item = inventory_state.hotbar_item(inventory_state.selected_hotbar_slot);
+            let _ = to_net.0.send(ToNetMessage::UseItem { held_item });
         }
     }
 }
@@ -509,8 +513,8 @@ fn raycast_block(
     None
 }
 
-fn raycast_remote_player(
-    remote_players: &Query<(&GlobalTransform, &RemoteEntity), With<RemotePlayer>>,
+fn raycast_remote_entity(
+    remote_entities: &Query<(&GlobalTransform, &RemoteEntity)>,
     origin: Vec3,
     direction: Vec3,
     max_distance: f32,
@@ -521,10 +525,16 @@ fn raycast_remote_player(
     }
 
     let mut nearest: Option<EntityHit> = None;
-    for (transform, remote) in remote_players.iter() {
-        let feet = transform.translation() - Vec3::Y * 0.9;
-        let min = Vec3::new(feet.x - 0.3, feet.y, feet.z - 0.3);
-        let max = Vec3::new(feet.x + 0.3, feet.y + 1.8, feet.z + 0.3);
+    for (transform, remote) in remote_entities.iter() {
+        let (half_w, height) = match remote.kind {
+            rs_utils::NetEntityKind::Player | rs_utils::NetEntityKind::Mob(_) => (0.3, 1.8),
+            rs_utils::NetEntityKind::Item => (0.22, 0.35),
+            rs_utils::NetEntityKind::ExperienceOrb => (0.18, 0.28),
+            rs_utils::NetEntityKind::Object(_) => (0.28, 0.56),
+        };
+        let feet = transform.translation() - Vec3::Y * (height * 0.5);
+        let min = Vec3::new(feet.x - half_w, feet.y, feet.z - half_w);
+        let max = Vec3::new(feet.x + half_w, feet.y + height, feet.z + half_w);
         let Some(distance) = ray_aabb_distance(origin, dir, min, max, max_distance) else {
             continue;
         };

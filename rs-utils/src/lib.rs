@@ -670,6 +670,12 @@ pub enum ToNetMessage {
         cursor_y: u8,
         cursor_z: u8,
     },
+    UseItem {
+        held_item: Option<InventoryItemStack>,
+    },
+    DropHeldItem {
+        full_stack: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
