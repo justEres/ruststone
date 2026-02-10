@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
-use crate::chunk::{snapshot_for_chunk, ChunkStore};
+use crate::chunk::{ChunkStore, snapshot_for_chunk};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
@@ -44,7 +44,9 @@ pub struct MeshingToggleState {
 
 impl Default for MeshingToggleState {
     fn default() -> Self {
-        Self { last_use_greedy: true }
+        Self {
+            last_use_greedy: true,
+        }
     }
 }
 
@@ -236,10 +238,11 @@ pub fn manual_frustum_cull(
         // Fast path: chunk sub-meshes are unscaled, so use translation directly.
         let center = transform.translation() + Vec3::from(aabb.center);
         let half = Vec3::from(aabb.half_extents);
-        let radius = half.length();
+        let cull_pad = 2.0;
+        let radius = half.length() + cull_pad;
         let to_center = center - cam_pos;
         let z = to_center.dot(*forward);
-        if z < -radius {
+        if z < -radius - cull_pad {
             *visibility = Visibility::Hidden;
             continue;
         }
@@ -247,8 +250,8 @@ pub fn manual_frustum_cull(
         let y = to_center.dot(*up).abs();
         let visible = x <= z * tan_x + radius
             && y <= z * tan_y + radius
-            && z <= far + radius
-            && z >= near - radius;
+            && z <= far + radius + cull_pad
+            && z >= near - radius - cull_pad;
         *visibility = if visible {
             Visibility::Inherited
         } else {
