@@ -11,6 +11,8 @@ use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
+const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
+
 #[derive(Resource, Debug, Clone)]
 pub struct RenderDebugSettings {
     pub shadows_enabled: bool,
@@ -248,6 +250,13 @@ pub fn manual_frustum_cull(
         let cull_pad = 2.0;
         let radius = half.length() + cull_pad;
         let to_center = center - cam_pos;
+        if to_center.length_squared()
+            <= (MANUAL_CULL_NEAR_DISABLE_DISTANCE + radius)
+                * (MANUAL_CULL_NEAR_DISABLE_DISTANCE + radius)
+        {
+            *visibility = Visibility::Inherited;
+            continue;
+        }
         let z = to_center.dot(*forward);
         if z < -radius - cull_pad {
             *visibility = Visibility::Hidden;
