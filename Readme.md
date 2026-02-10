@@ -16,13 +16,15 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - Connect/login/play loop against 1.8.9 servers.
 - Chunk + block updates wired into world state and remeshing.
 - Local player movement send + server correction handling.
-- Remote player scaffolding (spawn/move/teleport/destroy + name rendering).
-- Chat, health/death/respawn flow.
+- Remote entity scaffolding for players, mobs, objects, dropped items and XP orbs.
+- Entity click interactions (attack/interact), knockback velocity ingest, item use in air.
+- Chat, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
 
 ### UI (egui)
 - Connect screen, chat, pause menu, debug menu, death screen.
-- Crosshair.
+- Crosshair + block break progress indicator.
 - Survival inventory/hotbar window scaffolding with server-synced item stacks.
+- Inventory item textures loaded from the client texture pack.
 - Inventory interactions implemented for common survival actions:
   - left/right click
   - shift-click
@@ -56,15 +58,15 @@ Legend:
 | --- | --- | --- | --- |
 | `0x00` | `KeepAliveServerbound_VarInt` | Implemented | Reply path for keepalive. |
 | `0x01` | `ChatMessage` | Implemented | Chat send. |
-| `0x02` | `UseEntity_Handsfree` | Not implemented |  |
+| `0x02` | `UseEntity_Handsfree` | Implemented | Attack/interact entity packets. |
 | `0x03` | `Player` | Not implemented |  |
 | `0x04` | `PlayerPosition` | Not implemented |  |
 | `0x05` | `PlayerLook` | Not implemented |  |
 | `0x06` | `PlayerPositionLook` | Implemented | Main movement send packet. |
-| `0x07` | `PlayerDigging_u8` | Implemented | Start/finish dig currently used. |
-| `0x08` | `PlayerBlockPlacement_u8_Item` | Implemented | Place block. |
+| `0x07` | `PlayerDigging_u8` | Implemented | Start/cancel/finish dig + drop item/stack actions. |
+| `0x08` | `PlayerBlockPlacement_u8_Item` | Implemented | Place block + right-click-air item use path. |
 | `0x09` | `HeldItemChange` | Implemented | Hotbar select + wheel/number keys. |
-| `0x0A` | `ArmSwing_Handsfree` | Not implemented |  |
+| `0x0A` | `ArmSwing_Handsfree` | Implemented | Left-click swing animation packet. |
 | `0x0B` | `PlayerAction` | Implemented | Sneak/sprint action toggles. |
 | `0x0C` | `SteerVehicle` | Not implemented |  |
 | `0x0D` | `CloseWindow` | Implemented | Inventory window close. |
@@ -99,11 +101,11 @@ Legend:
 | `0x0B` | `Animation` | Not implemented |  |
 | `0x0C` | `SpawnPlayer_i32_HeldItem` | Implemented | Also handles other spawn player variants. |
 | `0x0D` | `CollectItem_nocount` | Not implemented |  |
-| `0x0E` | `SpawnObject_i32_NoUUID` | Not implemented |  |
-| `0x0F` | `SpawnMob_u8_i32_NoUUID` | Partial | Parsed, ignored. |
+| `0x0E` | `SpawnObject_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
+| `0x0F` | `SpawnMob_u8_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
 | `0x10` | `SpawnPainting_NoUUID` | Not implemented |  |
-| `0x11` | `SpawnExperienceOrb_i32` | Not implemented |  |
-| `0x12` | `EntityVelocity` | Partial | Parsed, ignored. |
+| `0x11` | `SpawnExperienceOrb_i32` | Implemented | Spawned as placeholder orb visuals. |
+| `0x12` | `EntityVelocity` | Implemented | Local player/server entity knockback velocity applied. |
 | `0x13` | `EntityDestroy` | Implemented | Also handles `EntityDestroy_u8`. |
 | `0x14` | `Entity` | Not implemented |  |
 | `0x15` | `EntityMove_i8` | Implemented | Also handles alternate move variants. |
@@ -113,7 +115,7 @@ Legend:
 | `0x19` | `EntityHeadLook` | Partial | Parsed, ignored. |
 | `0x1A` | `EntityStatus` | Not implemented |  |
 | `0x1B` | `EntityAttach_leashed` | Not implemented |  |
-| `0x1C` | `EntityMetadata` | Partial | Parsed, ignored. |
+| `0x1C` | `EntityMetadata` | Partial | Parsed for dropped-item labels from stack metadata. |
 | `0x1D` | `EntityEffect` | Not implemented |  |
 | `0x1E` | `EntityRemoveEffect` | Not implemented |  |
 | `0x1F` | `SetExperience` | Not implemented |  |
@@ -162,7 +164,8 @@ Legend:
 
 ## Known gaps
 
-- Item icon sprite rendering in UI is still placeholder text labels.
+- Breaking indicator is currently a local estimate and not yet server-confirmed timing.
+- Dropped item labels currently rely on metadata parsing plus static fallback naming (not full translation/NBT naming parity).
 - Inventory drag-splitting (`mode 5`) not implemented yet.
 - Many play packets are still intentionally unimplemented (see matrix above).
 - Protocol support target is currently `1.8.9` only.
