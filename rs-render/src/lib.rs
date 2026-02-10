@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
 use bevy::prelude::*;
-use bevy::pbr::wireframe::WireframePlugin;
 use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
@@ -15,44 +15,49 @@ mod input;
 mod world;
 
 pub use chunk::ChunkUpdateQueue;
-pub use components::{ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot};
+pub use components::{
+    ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
+};
 pub use debug::RenderDebugSettings;
 
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<world::WorldSettings>()
-            .init_resource::<debug::RenderDebugSettings>()
-            .init_resource::<debug::MeshingToggleState>()
-            .init_resource::<debug::RenderPerfStats>()
-            .init_resource::<chunk::ChunkUpdateQueue>()
-            .init_resource::<chunk::ChunkRenderState>()
-            .init_resource::<chunk::ChunkStore>()
-            .init_resource::<chunk::ChunkRenderAssets>()
-            .init_resource::<async_mesh::MeshAsyncResources>()
-            .init_resource::<async_mesh::MeshInFlight>()
-            .add_plugins(WireframePlugin::default())
-            .add_systems(Startup, (world::setup_world, camera::spawn_player))
-            .add_systems(
-                Update,
-                (
-                    input::apply_cursor_lock,
-                    debug::apply_render_debug_settings,
-                    debug::remesh_on_meshing_toggle,
-                    enqueue_chunk_meshes,
-                ),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    apply_mesh_results.before(VisibilitySystems::CheckVisibility),
-                    debug::manual_frustum_cull
-                        .after(apply_mesh_results)
-                        .before(VisibilitySystems::CheckVisibility),
-                    debug::gather_render_stats.after(VisibilitySystems::CheckVisibility),
-                ),
-            );
+        app.add_plugins((
+            WireframePlugin::default(),
+            MaterialPlugin::<chunk::ChunkAtlasMaterial>::default(),
+        ))
+        .init_resource::<world::WorldSettings>()
+        .init_resource::<debug::RenderDebugSettings>()
+        .init_resource::<debug::MeshingToggleState>()
+        .init_resource::<debug::RenderPerfStats>()
+        .init_resource::<chunk::ChunkUpdateQueue>()
+        .init_resource::<chunk::ChunkRenderState>()
+        .init_resource::<chunk::ChunkStore>()
+        .init_resource::<chunk::ChunkRenderAssets>()
+        .init_resource::<async_mesh::MeshAsyncResources>()
+        .init_resource::<async_mesh::MeshInFlight>()
+        .add_systems(Startup, (world::setup_world, camera::spawn_player))
+        .add_systems(
+            Update,
+            (
+                input::apply_cursor_lock,
+                debug::apply_render_debug_settings,
+                debug::remesh_on_meshing_toggle,
+                enqueue_chunk_meshes,
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                apply_mesh_results.before(VisibilitySystems::CheckVisibility),
+                debug::manual_frustum_cull
+                    .after(apply_mesh_results)
+                    .before(VisibilitySystems::CheckVisibility),
+                debug::gather_render_stats.after(VisibilitySystems::CheckVisibility),
+            ),
+        );
     }
 }
 
@@ -146,7 +151,10 @@ fn apply_mesh_results(
         });
 
         let mut active_keys = std::collections::HashSet::new();
-        let chunk::MeshBatch { opaque, transparent } = mesh_batch;
+        let chunk::MeshBatch {
+            opaque,
+            transparent,
+        } = mesh_batch;
         for (group, data, material) in [
             (
                 chunk::MaterialGroup::Opaque,
@@ -170,16 +178,20 @@ fn apply_mesh_results(
                     *existing = mesh;
                 } else {
                     let handle = meshes.add(mesh);
-                    commands.entity(submesh.entity).insert(Mesh3d(handle.clone()));
+                    commands
+                        .entity(submesh.entity)
+                        .insert(Mesh3d(handle.clone()));
                     submesh.mesh = handle;
                 }
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
                     let half = (max - min) * 0.5;
-                    commands.entity(submesh.entity).insert(bevy::render::primitives::Aabb {
-                        center: center.into(),
-                        half_extents: half.into(),
-                    });
+                    commands
+                        .entity(submesh.entity)
+                        .insert(bevy::render::primitives::Aabb {
+                            center: center.into(),
+                            half_extents: half.into(),
+                        });
                 }
             } else {
                 let handle = meshes.add(mesh);
@@ -197,10 +209,12 @@ fn apply_mesh_results(
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
                     let half = (max - min) * 0.5;
-                    commands.entity(child).insert(bevy::render::primitives::Aabb {
-                        center: center.into(),
-                        half_extents: half.into(),
-                    });
+                    commands
+                        .entity(child)
+                        .insert(bevy::render::primitives::Aabb {
+                            center: center.into(),
+                            half_extents: half.into(),
+                        });
                 }
                 commands.entity(entry.entity).add_child(child);
                 entry.submeshes.insert(

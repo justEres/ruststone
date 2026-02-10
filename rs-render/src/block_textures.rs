@@ -249,102 +249,35 @@ pub fn texture_path(key: TextureKey) -> &'static str {
 }
 
 pub fn uv_for_texture(key: TextureKey) -> [[f32; 2]; 4] {
-    atlas_uv_for_texture(key)
+    base_uv_for_texture(key)
+}
+
+pub fn atlas_tile_origin(key: TextureKey) -> [f32; 2] {
+    let idx = atlas_index(key) as u32;
+    let col = idx % ATLAS_COLUMNS;
+    let row = idx / ATLAS_COLUMNS;
+    [
+        col as f32 / ATLAS_COLUMNS as f32,
+        row as f32 / ATLAS_ROWS as f32,
+    ]
 }
 
 pub fn is_transparent_texture(key: TextureKey) -> bool {
     matches!(key, TextureKey::Water | TextureKey::Lava)
 }
 
-fn atlas_uv_for_texture(key: TextureKey) -> [[f32; 2]; 4] {
-    let idx = atlas_index(key) as u32;
-    let col = idx % ATLAS_COLUMNS;
-    let row = idx / ATLAS_COLUMNS;
-    let u0 = col as f32 / ATLAS_COLUMNS as f32;
-    let v0 = row as f32 / ATLAS_ROWS as f32;
-    let u1 = (col + 1) as f32 / ATLAS_COLUMNS as f32;
-    let v1 = (row + 1) as f32 / ATLAS_ROWS as f32;
-
-    let base = base_uv_for_texture(key);
-    [
-        [u0 + base[0][0] * (u1 - u0), v0 + base[0][1] * (v1 - v0)],
-        [u0 + base[1][0] * (u1 - u0), v0 + base[1][1] * (v1 - v0)],
-        [u0 + base[2][0] * (u1 - u0), v0 + base[2][1] * (v1 - v0)],
-        [u0 + base[3][0] * (u1 - u0), v0 + base[3][1] * (v1 - v0)],
-    ]
-}
-
 fn base_uv_for_texture(key: TextureKey) -> [[f32; 2]; 4] {
     match key {
-        TextureKey::GrassSide => [
-            [0.0, 1.0],
-            [1.0, 1.0],
-            [1.0, 0.0],
-            [0.0, 0.0],
-        ],
-        _ => [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 1.0],
-        ],
+        TextureKey::GrassSide => [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+        _ => [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
     }
 }
 
 fn atlas_index(key: TextureKey) -> usize {
-    match key {
-        TextureKey::Stone => 0,
-        TextureKey::Dirt => 1,
-        TextureKey::GrassTop => 2,
-        TextureKey::GrassSide => 3,
-        TextureKey::Cobblestone => 4,
-        TextureKey::Planks => 5,
-        TextureKey::Bedrock => 6,
-        TextureKey::Sand => 7,
-        TextureKey::Gravel => 8,
-        TextureKey::GoldOre => 9,
-        TextureKey::IronOre => 10,
-        TextureKey::CoalOre => 11,
-        TextureKey::LogOak => 12,
-        TextureKey::LeavesOak => 13,
-        TextureKey::Sponge => 14,
-        TextureKey::Glass => 15,
-        TextureKey::LapisOre => 16,
-        TextureKey::LapisBlock => 17,
-        TextureKey::SandstoneTop => 18,
-        TextureKey::SandstoneSide => 19,
-        TextureKey::SandstoneBottom => 20,
-        TextureKey::NoteBlock => 21,
-        TextureKey::GoldBlock => 22,
-        TextureKey::IronBlock => 23,
-        TextureKey::Brick => 24,
-        TextureKey::TntTop => 25,
-        TextureKey::TntSide => 26,
-        TextureKey::TntBottom => 27,
-        TextureKey::MossyCobble => 28,
-        TextureKey::Obsidian => 29,
-        TextureKey::DiamondOre => 30,
-        TextureKey::DiamondBlock => 31,
-        TextureKey::CraftingTop => 32,
-        TextureKey::CraftingSide => 33,
-        TextureKey::CraftingFront => 34,
-        TextureKey::FurnaceTop => 35,
-        TextureKey::FurnaceSide => 36,
-        TextureKey::FurnaceFront => 37,
-        TextureKey::Ladder => 38,
-        TextureKey::CactusTop => 39,
-        TextureKey::CactusSide => 40,
-        TextureKey::CactusBottom => 41,
-        TextureKey::Clay => 42,
-        TextureKey::Snow => 43,
-        TextureKey::SnowBlock => 44,
-        TextureKey::Ice => 45,
-        TextureKey::SoulSand => 46,
-        TextureKey::Glowstone => 47,
-        TextureKey::Netherrack => 48,
-        TextureKey::Water => 49,
-        TextureKey::Lava => 50,
-    }
+    ATLAS_TEXTURES
+        .iter()
+        .position(|candidate| *candidate == key)
+        .expect("atlas texture key missing from atlas texture list")
 }
 
 #[derive(Clone, Copy)]

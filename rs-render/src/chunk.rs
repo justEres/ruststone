@@ -2,22 +2,45 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use image::{imageops, DynamicImage, ImageBuffer, Rgba};
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
+};
+use image::{DynamicImage, ImageBuffer, Rgba, imageops};
 use rs_utils::ChunkData;
 
 use crate::block_textures::{
-    biome_tint, is_transparent_texture, texture_for_face, texture_path, uv_for_texture, BiomeTint,
-    Face, TextureKey, ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TEXTURES,
+    ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TEXTURES, BiomeTint, Face, TextureKey, atlas_tile_origin,
+    biome_tint, is_transparent_texture, texture_for_face, texture_path, uv_for_texture,
 };
 
 const CHUNK_SIZE: i32 = 16;
 const SECTION_HEIGHT: i32 = 16;
 const WORLD_HEIGHT: i32 = 256;
 const TEXTURE_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
+const ATLAS_PBR_SHADER_PATH: &str = "shaders/atlas_pbr.wgsl";
+
+pub type ChunkAtlasMaterial = ExtendedMaterial<StandardMaterial, AtlasTextureExtension>;
+
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct AtlasTextureExtension {
+    #[texture(100)]
+    #[sampler(101)]
+    pub atlas: Handle<Image>,
+}
+
+impl MaterialExtension for AtlasTextureExtension {
+    fn fragment_shader() -> ShaderRef {
+        ATLAS_PBR_SHADER_PATH.into()
+    }
+
+    fn deferred_fragment_shader() -> ShaderRef {
+        ATLAS_PBR_SHADER_PATH.into()
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct ChunkUpdateQueue(pub Vec<ChunkData>);
@@ -126,6 +149,7 @@ pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    pub uvs_b: Vec<[f32; 2]>,
     pub colors: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
     pub bounds_min: Option<Vec3>,
@@ -138,6 +162,7 @@ impl MeshData {
             positions: Vec::new(),
             normals: Vec::new(),
             uvs: Vec::new(),
+            uvs_b: Vec::new(),
             colors: Vec::new(),
             indices: Vec::new(),
             bounds_min: None,
@@ -170,8 +195,8 @@ impl MeshData {
 
 #[derive(Resource)]
 pub struct ChunkRenderAssets {
-    pub opaque_material: Handle<StandardMaterial>,
-    pub transparent_material: Handle<StandardMaterial>,
+    pub opaque_material: Handle<ChunkAtlasMaterial>,
+    pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
 }
 
@@ -179,29 +204,39 @@ impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
         let mut atlas_image = load_or_build_atlas();
         let mut sampler = ImageSamplerDescriptor::nearest();
-        sampler.address_mode_u = ImageAddressMode::Repeat;
-        sampler.address_mode_v = ImageAddressMode::Repeat;
-        sampler.address_mode_w = ImageAddressMode::Repeat;
+        sampler.address_mode_u = ImageAddressMode::ClampToEdge;
+        sampler.address_mode_v = ImageAddressMode::ClampToEdge;
+        sampler.address_mode_w = ImageAddressMode::ClampToEdge;
         atlas_image.sampler = ImageSampler::Descriptor(sampler);
         let atlas_handle = {
             let mut images = world.resource_mut::<Assets<Image>>();
             images.add(atlas_image)
         };
-        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
 
-        let opaque_material = materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(atlas_handle.clone()),
-            perceptual_roughness: 1.0,
-            ..default()
+        let opaque_material = materials.add(ChunkAtlasMaterial {
+            base: StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: None,
+                perceptual_roughness: 1.0,
+                ..default()
+            },
+            extension: AtlasTextureExtension {
+                atlas: atlas_handle.clone(),
+            },
         });
-        let transparent_material = materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 1.0, 1.0, 0.8),
-            base_color_texture: Some(atlas_handle.clone()),
-            perceptual_roughness: 1.0,
-            alpha_mode: AlphaMode::Blend,
-            cull_mode: None,
-            ..default()
+        let transparent_material = materials.add(ChunkAtlasMaterial {
+            base: StandardMaterial {
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.8),
+                base_color_texture: None,
+                perceptual_roughness: 1.0,
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                ..default()
+            },
+            extension: AtlasTextureExtension {
+                atlas: atlas_handle.clone(),
+            },
         });
 
         Self {
@@ -217,7 +252,7 @@ fn assets_root() -> PathBuf {
 }
 
 fn atlas_cache_path() -> PathBuf {
-    assets_root().join("texturepack/atlas_cache.png")
+    assets_root().join("texturepack/atlas_cache_v2.png")
 }
 
 fn texture_root_path() -> PathBuf {
@@ -261,9 +296,8 @@ fn load_or_build_atlas() -> Image {
         imageops::overlay(atlas_buf, &rgba, x.into(), y.into());
     }
 
-    let atlas = atlas.unwrap_or_else(|| {
-        ImageBuffer::from_pixel(ATLAS_COLUMNS, ATLAS_ROWS, Rgba([0, 0, 0, 0]))
-    });
+    let atlas = atlas
+        .unwrap_or_else(|| ImageBuffer::from_pixel(ATLAS_COLUMNS, ATLAS_ROWS, Rgba([0, 0, 0, 0])));
 
     if let Some(parent) = cache_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -306,13 +340,17 @@ pub fn apply_mesh_data(mesh: &mut Mesh, data: MeshData) {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, data.uvs_b);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, data.colors);
     mesh.insert_indices(Indices::U32(data.indices));
 }
 
 pub fn build_mesh_from_data(data: MeshData) -> (Mesh, Option<(Vec3, Vec3)>) {
     let bounds = data.bounds();
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     apply_mesh_data(&mut mesh, data);
     (mesh, bounds)
 }
@@ -344,10 +382,17 @@ pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSna
             }
         }
     }
-    ChunkColumnSnapshot { center_key: key, columns }
+    ChunkColumnSnapshot {
+        center_key: key,
+        columns,
+    }
 }
 
-fn build_chunk_mesh_culled(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshBatch {
+fn build_chunk_mesh_culled(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
     let Some(column) = snapshot.columns.get(&(chunk_x, chunk_z)) else {
@@ -403,7 +448,11 @@ struct GreedyQuad {
     h: u32,
 }
 
-fn build_chunk_mesh_greedy(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32) -> MeshBatch {
+fn build_chunk_mesh_greedy(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
     let Some(column) = snapshot.columns.get(&(chunk_x, chunk_z)) else {
@@ -509,6 +558,7 @@ fn add_greedy_quad(
 ) {
     let data = batch.data_for(texture);
     let base_index = data.positions.len() as u32;
+    let tile_origin = atlas_tile_origin(texture);
 
     let u0 = quad.x as f32;
     let v0 = quad.y as f32;
@@ -520,24 +570,14 @@ fn add_greedy_quad(
             let y = (base_y + axis + 1) as f32;
             (
                 [0.0, 1.0, 0.0],
-                [
-                    [u0, y, v0],
-                    [u1, y, v0],
-                    [u1, y, v1],
-                    [u0, y, v1],
-                ],
+                [[u0, y, v0], [u1, y, v0], [u1, y, v1], [u0, y, v1]],
             )
         }
         Face::NegY => {
             let y = (base_y + axis) as f32;
             (
                 [0.0, -1.0, 0.0],
-                [
-                    [u0, y, v1],
-                    [u1, y, v1],
-                    [u1, y, v0],
-                    [u0, y, v0],
-                ],
+                [[u0, y, v1], [u1, y, v1], [u1, y, v0], [u0, y, v0]],
             )
         }
         Face::PosX => {
@@ -546,12 +586,7 @@ fn add_greedy_quad(
             let y1 = (base_y as f32) + v1;
             (
                 [1.0, 0.0, 0.0],
-                [
-                    [x, y0, u0],
-                    [x, y0, u1],
-                    [x, y1, u1],
-                    [x, y1, u0],
-                ],
+                [[x, y0, u0], [x, y0, u1], [x, y1, u1], [x, y1, u0]],
             )
         }
         Face::NegX => {
@@ -560,12 +595,7 @@ fn add_greedy_quad(
             let y1 = (base_y as f32) + v1;
             (
                 [-1.0, 0.0, 0.0],
-                [
-                    [x, y0, u1],
-                    [x, y0, u0],
-                    [x, y1, u0],
-                    [x, y1, u1],
-                ],
+                [[x, y0, u1], [x, y0, u0], [x, y1, u0], [x, y1, u1]],
             )
         }
         Face::PosZ => {
@@ -574,12 +604,7 @@ fn add_greedy_quad(
             let y1 = (base_y as f32) + v1;
             (
                 [0.0, 0.0, 1.0],
-                [
-                    [u1, y0, z],
-                    [u0, y0, z],
-                    [u0, y1, z],
-                    [u1, y1, z],
-                ],
+                [[u1, y0, z], [u0, y0, z], [u0, y1, z], [u1, y1, z]],
             )
         }
         Face::NegZ => {
@@ -588,12 +613,7 @@ fn add_greedy_quad(
             let y1 = (base_y as f32) + v1;
             (
                 [0.0, 0.0, -1.0],
-                [
-                    [u0, y0, z],
-                    [u1, y0, z],
-                    [u1, y1, z],
-                    [u0, y1, z],
-                ],
+                [[u0, y0, z], [u1, y0, z], [u1, y1, z], [u0, y1, z]],
             )
         }
     };
@@ -605,7 +625,9 @@ fn add_greedy_quad(
 
     let base_uvs = uv_for_texture(texture);
     for uv in base_uvs {
-        data.uvs.push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
+        data.uvs
+            .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
+        data.uvs_b.push(tile_origin);
     }
     let color = tint_color(texture, tint);
     data.colors.extend_from_slice(&[color, color, color, color]);
@@ -666,42 +688,84 @@ fn add_block_faces(
     tint: BiomeTint,
 ) {
     let faces = [
-        (Face::PosX, 1, 0, 0, [1.0, 0.0, 0.0], [
+        (
+            Face::PosX,
+            1,
+            0,
+            0,
             [1.0, 0.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [1.0, 1.0, 0.0],
-        ]),
-        (Face::NegX, -1, 0, 0, [-1.0, 0.0, 0.0], [
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 0.0],
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0, 0.0],
+            ],
+        ),
+        (
+            Face::NegX,
+            -1,
+            0,
+            0,
+            [-1.0, 0.0, 0.0],
+            [
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0],
+            ],
+        ),
+        (
+            Face::PosY,
+            0,
+            1,
+            0,
             [0.0, 1.0, 0.0],
-            [0.0, 1.0, 1.0],
-        ]),
-        (Face::PosY, 0, 1, 0, [0.0, 1.0, 0.0], [
-            [0.0, 1.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [1.0, 1.0, 1.0],
-            [0.0, 1.0, 1.0],
-        ]),
-        (Face::NegY, 0, -1, 0, [0.0, -1.0, 0.0], [
+            [
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [1.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0],
+            ],
+        ),
+        (
+            Face::NegY,
+            0,
+            -1,
+            0,
+            [0.0, -1.0, 0.0],
+            [
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        ),
+        (
+            Face::PosZ,
+            0,
+            0,
+            1,
             [0.0, 0.0, 1.0],
-            [1.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ]),
-        (Face::PosZ, 0, 0, 1, [0.0, 0.0, 1.0], [
-            [1.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0],
-        ]),
-        (Face::NegZ, 0, 0, -1, [0.0, 0.0, -1.0], [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ]),
+            [
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0],
+            ],
+        ),
+        (
+            Face::NegZ,
+            0,
+            0,
+            -1,
+            [0.0, 0.0, -1.0],
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+        ),
     ];
 
     for (face, dx, dy, dz, normal, verts) in faces {
@@ -719,6 +783,8 @@ fn add_block_faces(
         }
         let uvs = uv_for_texture(texture);
         data.uvs.extend_from_slice(&uvs);
+        let tile_origin = atlas_tile_origin(texture);
+        data.uvs_b.extend_from_slice(&[tile_origin; 4]);
         let color = tint_color(texture, tint);
         data.colors.extend_from_slice(&[color, color, color, color]);
         data.indices.extend_from_slice(&[
@@ -752,7 +818,14 @@ fn biome_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, 
     *biomes.get(idx).unwrap_or(&1)
 }
 
-fn block_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, y: i32, z: i32) -> u16 {
+fn block_at(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> u16 {
     if y < 0 || y >= WORLD_HEIGHT {
         return 0;
     }
