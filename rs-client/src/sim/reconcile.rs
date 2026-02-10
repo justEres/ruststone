@@ -1,6 +1,6 @@
 use bevy::prelude::Vec3;
 
-use super::movement::{simulate_tick, WorldCollision};
+use super::movement::{WorldCollision, simulate_tick};
 use super::predict::PredictionBuffer;
 use super::types::{InputState, PlayerSimState};
 
@@ -66,7 +66,10 @@ pub fn reconcile(
     })
 }
 
-fn find_frame<'a>(buffer: &'a PredictionBuffer, tick: u32) -> Option<&'a super::types::PredictedFrame> {
+fn find_frame<'a>(
+    buffer: &'a PredictionBuffer,
+    tick: u32,
+) -> Option<&'a super::types::PredictedFrame> {
     if let Some(frame) = buffer.get_by_tick(tick) {
         return Some(frame);
     }

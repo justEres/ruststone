@@ -17,7 +17,11 @@ pub fn collect_player_input(
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
 ) {
-    if !matches!(app_state.0, ApplicationState::Connected) || ui_state.chat_open {
+    if !matches!(app_state.0, ApplicationState::Connected)
+        || ui_state.chat_open
+        || ui_state.inventory_open
+        || ui_state.paused
+    {
         *input = PlayerInput::default();
         motion_events.clear();
         return;
@@ -64,7 +68,8 @@ pub fn apply_cursor_lock(
 
     let should_lock = matches!(app_state.0, ApplicationState::Connected)
         && !ui_state.chat_open
-        && !ui_state.paused;
+        && !ui_state.paused
+        && !ui_state.inventory_open;
 
     if should_lock {
         if window.cursor_options.grab_mode != CursorGrabMode::Locked {

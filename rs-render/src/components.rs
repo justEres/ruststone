@@ -17,7 +17,10 @@ pub struct LookAngles {
 
 impl Default for LookAngles {
     fn default() -> Self {
-        Self { yaw: 0.0, pitch: 0.0 }
+        Self {
+            yaw: 0.0,
+            pitch: 0.0,
+        }
     }
 }
 

@@ -17,10 +17,7 @@ impl Default for WorldSettings {
     }
 }
 
-pub fn setup_world(
-    mut commands: Commands,
-    _settings: Res<WorldSettings>,
-) {
+pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
     let _root = commands.spawn((WorldRoot, Transform::default(), GlobalTransform::default()));
 
     commands.spawn((

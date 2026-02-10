@@ -6,12 +6,14 @@ use clap::Parser;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
 use rs_utils::{
-    AppState, ApplicationState, Chat, FromNet, PerfTimings, PlayerStatus, ToNet, UiState,
+    AppState, ApplicationState, Chat, FromNet, InventoryState, PerfTimings, PlayerStatus, ToNet,
+    UiState,
 };
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
 mod entities;
+mod inventory_systems;
 mod message_handler;
 mod net;
 mod sim;
@@ -83,6 +85,7 @@ fn main() {
         .insert_resource(AppState(initial_state))
         .insert_resource(Chat::default())
         .insert_resource(UiState::default())
+        .insert_resource(InventoryState::default())
         .insert_resource(PlayerStatus::default())
         .insert_resource(PerfTimings::default())
         .insert_resource(net::events::NetEventQueue::default())
@@ -118,6 +121,8 @@ fn main() {
             Update,
             (
                 sim_systems::debug_toggle_system,
+                inventory_systems::hotbar_input_system,
+                inventory_systems::inventory_transaction_ack_system,
                 sim_systems::input_collect_system,
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,

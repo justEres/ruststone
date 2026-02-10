@@ -1,4 +1,4 @@
-use super::movement::{simulate_tick, WorldCollision};
+use super::movement::{WorldCollision, simulate_tick};
 use super::predict::PredictionBuffer;
 use super::reconcile::reconcile;
 use super::types::{InputState, PlayerSimState, PredictedFrame};
