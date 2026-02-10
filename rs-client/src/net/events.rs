@@ -12,6 +12,9 @@ pub enum NetEvent {
         on_ground: bool,
         recv_instant: Instant,
     },
+    ServerVelocity {
+        velocity: Vec3,
+    },
 }
 
 #[derive(Default, Resource)]

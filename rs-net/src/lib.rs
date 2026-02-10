@@ -3,7 +3,7 @@
 use std::thread;
 
 use rs_protocol::protocol::Conn;
-use rs_utils::{FromNetMessage, InventoryItemStack, ToNetMessage};
+use rs_utils::{EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 
 mod chunk_decode;
 mod handle_packet;
@@ -88,6 +88,28 @@ fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiv
                             entity_id: rs_protocol::protocol::VarInt(0),
                             action_id: rs_protocol::protocol::VarInt(action_id as i32),
                             jump_boost: rs_protocol::protocol::VarInt(0),
+                        },
+                    );
+                }
+                ToNetMessage::SwingArm => {
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::ArmSwing_Handsfree {
+                            empty: (),
+                        },
+                    );
+                }
+                ToNetMessage::UseEntity { target_id, action } => {
+                    let ty = match action {
+                        EntityUseAction::Interact => 0,
+                        EntityUseAction::Attack => 1,
+                    };
+                    let _ = conn.write_packet(
+                        rs_protocol::protocol::packet::play::serverbound::UseEntity_Handsfree {
+                            target_id: rs_protocol::protocol::VarInt(target_id),
+                            ty: rs_protocol::protocol::VarInt(ty),
+                            target_x: 0.0,
+                            target_y: 0.0,
+                            target_z: 0.0,
                         },
                     );
                 }

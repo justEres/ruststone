@@ -97,6 +97,10 @@ pub enum NetEntityMessage {
         pitch: f32,
         on_ground: Option<bool>,
     },
+    Velocity {
+        entity_id: i32,
+        velocity: Vec3,
+    },
     Destroy {
         entity_ids: Vec<i32>,
     },
@@ -555,6 +559,11 @@ pub enum ToNetMessage {
     PlayerAction {
         action_id: i8,
     },
+    SwingArm,
+    UseEntity {
+        target_id: i32,
+        action: EntityUseAction,
+    },
     HeldItemChange {
         slot: i16,
     },
@@ -595,6 +604,12 @@ pub enum ToNetMessage {
         cursor_y: u8,
         cursor_z: u8,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityUseAction {
+    Interact,
+    Attack,
 }
 
 use rs_protocol::protocol::packet::Packet;

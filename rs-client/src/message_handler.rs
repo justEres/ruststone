@@ -8,10 +8,10 @@ use rs_utils::{
     PerfTimings, PlayerStatus,
 };
 
-use crate::entities::RemoteEntityEventQueue;
+use crate::entities::{RemoteEntityEventQueue, RemoteEntityRegistry};
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::{SimClock, SimReady, SimRenderState, SimState, VisualCorrectionOffset};
+use crate::sim::{SimClock, SimReady, SimRenderState, SimState};
 use crate::sim_systems::PredictionHistory;
 
 const FLAG_REL_X: u8 = 0x01;
@@ -27,6 +27,7 @@ pub fn handle_messages(
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
     mut remote_entity_events: ResMut<RemoteEntityEventQueue>,
+    remote_entity_registry: Res<RemoteEntityRegistry>,
     mut collision_map: ResMut<WorldCollisionMap>,
     mut player_status: ResMut<PlayerStatus>,
     mut timings: ResMut<PerfTimings>,
@@ -35,7 +36,6 @@ pub fn handle_messages(
     mut sim_clock: ResMut<SimClock>,
     mut sim_ready: ResMut<SimReady>,
     mut history: ResMut<PredictionHistory>,
-    mut visual_offset: ResMut<VisualCorrectionOffset>,
     mut inventory_state: ResMut<InventoryState>,
 ) {
     let start = std::time::Instant::now();
@@ -47,7 +47,6 @@ pub fn handle_messages(
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
                 sim_render.previous = sim_state.current;
-                visual_offset.0 = Vec3::ZERO;
                 inventory_state.reset();
                 println!("Connected to server");
             }
@@ -130,6 +129,16 @@ pub fn handle_messages(
                 });
             }
             FromNetMessage::NetEntity(event) => {
+                if let rs_utils::NetEntityMessage::Velocity {
+                    entity_id,
+                    velocity,
+                } = &event
+                    && remote_entity_registry.local_entity_id == Some(*entity_id)
+                {
+                    net_events.push(NetEvent::ServerVelocity {
+                        velocity: *velocity,
+                    });
+                }
                 remote_entity_events.push(event);
             }
             FromNetMessage::Inventory(event) => {
