@@ -3,8 +3,11 @@ use std::time::Instant;
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::ChunkUpdateQueue;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTimings, PlayerStatus};
+use rs_utils::{
+    AppState, ApplicationState, Chat, FromNet, FromNetMessage, PerfTimings, PlayerStatus,
+};
 
+use crate::entities::RemoteEntityEventQueue;
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::{SimClock, SimReady, SimRenderState, SimState, VisualCorrectionOffset};
@@ -22,6 +25,7 @@ pub fn handle_messages(
     mut chat: ResMut<Chat>,
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
+    mut remote_entity_events: ResMut<RemoteEntityEventQueue>,
     mut collision_map: ResMut<WorldCollisionMap>,
     mut player_status: ResMut<PlayerStatus>,
     mut timings: ResMut<PerfTimings>,
@@ -119,6 +123,9 @@ pub fn handle_messages(
                     on_ground,
                     recv_instant: Instant::now(),
                 });
+            }
+            FromNetMessage::NetEntity(event) => {
+                remote_entity_events.push(event);
             }
             _ => { /* Ignore other messages for now */ }
         }

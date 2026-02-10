@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 
-use bevy::ecs::resource::Resource;
+use bevy::{ecs::resource::Resource, prelude::Vec3};
 use crossbeam::channel::{Receiver, Sender};
+use rs_protocol::protocol::UUID;
 
 #[derive(Resource)]
 pub struct AppState(pub ApplicationState);
@@ -41,6 +42,55 @@ pub struct PlayerPosition {
     pub pitch: Option<f32>,
     pub flags: Option<u8>,
     pub on_ground: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NetEntityKind {
+    Player,
+}
+
+#[derive(Debug, Clone)]
+pub enum NetEntityMessage {
+    LocalPlayerId {
+        entity_id: i32,
+    },
+    PlayerInfoAdd {
+        uuid: UUID,
+        name: String,
+    },
+    PlayerInfoRemove {
+        uuid: UUID,
+    },
+    Spawn {
+        entity_id: i32,
+        uuid: Option<UUID>,
+        kind: NetEntityKind,
+        pos: Vec3,
+        yaw: f32,
+        pitch: f32,
+        on_ground: Option<bool>,
+    },
+    MoveDelta {
+        entity_id: i32,
+        delta: Vec3,
+        on_ground: Option<bool>,
+    },
+    Look {
+        entity_id: i32,
+        yaw: f32,
+        pitch: f32,
+        on_ground: Option<bool>,
+    },
+    Teleport {
+        entity_id: i32,
+        pos: Vec3,
+        yaw: f32,
+        pitch: f32,
+        on_ground: Option<bool>,
+    },
+    Destroy {
+        entity_ids: Vec<i32>,
+    },
 }
 
 #[derive(Resource)]
@@ -89,7 +139,10 @@ pub struct PerfTimings {
 }
 
 pub enum ToNetMessage {
-    Connect { username: String, address: String },
+    Connect {
+        username: String,
+        address: String,
+    },
     Disconnect,
     Shutdown,
     ChatMessage(String),
@@ -121,4 +174,5 @@ pub enum FromNetMessage {
         food: i32,
         food_saturation: f32,
     },
+    NetEntity(NetEntityMessage),
 }

@@ -1,13 +1,16 @@
+use bevy::time::Fixed;
 use bevy::window::PresentMode;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, log::LogPlugin, prelude::*};
 use bevy_egui::EguiPrimaryContextPass;
-use bevy::time::Fixed;
 use rs_render::RenderPlugin;
 use rs_ui::UiPlugin;
-use rs_utils::{AppState, ApplicationState, Chat, FromNet, PerfTimings, PlayerStatus, ToNet, UiState};
+use rs_utils::{
+    AppState, ApplicationState, Chat, FromNet, PerfTimings, PlayerStatus, ToNet, UiState,
+};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
+mod entities;
 mod message_handler;
 mod net;
 mod sim;
@@ -57,6 +60,8 @@ fn main() {
         .insert_resource(PlayerStatus::default())
         .insert_resource(PerfTimings::default())
         .insert_resource(net::events::NetEventQueue::default())
+        .insert_resource(entities::RemoteEntityEventQueue::default())
+        .insert_resource(entities::RemoteEntityRegistry::default())
         .insert_resource(sim::SimClock::default())
         .insert_resource(sim::CurrentInput::default())
         .insert_resource(sim::SimState::default())
@@ -79,6 +84,13 @@ fn main() {
         .add_systems(
             Update,
             (
+                entities::remote_entity_connection_sync.after(message_handler::handle_messages),
+                entities::apply_remote_entity_events.after(entities::remote_entity_connection_sync),
+            ),
+        )
+        .add_systems(
+            Update,
+            (
                 sim_systems::debug_toggle_system,
                 sim_systems::input_collect_system,
                 sim_systems::visual_smoothing_system,
@@ -91,8 +103,7 @@ fn main() {
         )
         .add_systems(
             PostUpdate,
-            sim_systems::post_update_timing_start
-                .before(sim_systems::post_update_timing_end),
+            sim_systems::post_update_timing_start.before(sim_systems::post_update_timing_end),
         )
         .add_systems(
             PostUpdate,
@@ -100,7 +111,11 @@ fn main() {
         )
         .add_systems(
             FixedUpdate,
-            (sim_systems::net_event_apply_system, sim_systems::fixed_sim_tick_system).chain(),
+            (
+                sim_systems::net_event_apply_system,
+                sim_systems::fixed_sim_tick_system,
+            )
+                .chain(),
         )
         .add_systems(
             FixedUpdate,
@@ -111,6 +126,7 @@ fn main() {
             sim_systems::fixed_update_timing_end.after(sim_systems::fixed_sim_tick_system),
         )
         .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
+        .add_systems(EguiPrimaryContextPass, entities::draw_remote_player_names)
         .add_systems(Last, sim_systems::frame_timing_end)
         .run();
 }
