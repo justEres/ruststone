@@ -102,6 +102,9 @@ pub enum ToNetMessage {
         pitch: f32,
         on_ground: bool,
     },
+    PlayerAction {
+        action_id: i8,
+    },
 }
 
 use rs_protocol::protocol::packet::Packet;

@@ -10,7 +10,7 @@ use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
 
 use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::movement::{simulate_tick, WorldCollision};
+use crate::sim::movement::{effective_sprint, simulate_tick, WorldCollision};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
@@ -42,6 +42,12 @@ impl Default for PredictionHistory {
 pub struct LatencyEstimate {
     pub one_way_ticks: u32,
     pub last_sent: Option<Instant>,
+}
+
+#[derive(Default, Resource)]
+pub struct ActionState {
+    pub sneaking: bool,
+    pub sprinting: bool,
 }
 
 pub fn input_collect_system(
@@ -179,6 +185,7 @@ pub fn fixed_sim_tick_system(
     mut input: ResMut<CurrentInput>,
     mut history: ResMut<PredictionHistory>,
     mut latency: ResMut<LatencyEstimate>,
+    mut action_state: ResMut<ActionState>,
     collision_map: Res<WorldCollisionMap>,
     app_state: Res<AppState>,
     to_net: Res<ToNet>,
@@ -207,6 +214,20 @@ pub fn fixed_sim_tick_system(
     input.0.jump = false;
 
     if matches!(app_state.0, ApplicationState::Connected) {
+        let current_sneak = input_snapshot.sneak;
+        let current_sprint = effective_sprint(&input_snapshot);
+
+        if current_sneak != action_state.sneaking {
+            let action_id = if current_sneak { 0 } else { 1 };
+            let _ = to_net.0.send(ToNetMessage::PlayerAction { action_id });
+            action_state.sneaking = current_sneak;
+        }
+        if current_sprint != action_state.sprinting {
+            let action_id = if current_sprint { 3 } else { 4 };
+            let _ = to_net.0.send(ToNetMessage::PlayerAction { action_id });
+            action_state.sprinting = current_sprint;
+        }
+
         let pos = sim_state.current.pos;
         let yaw = (std::f32::consts::PI - sim_state.current.yaw).to_degrees();
         let pitch = -sim_state.current.pitch.to_degrees();
@@ -320,6 +341,8 @@ pub fn apply_visual_transform_system(
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
+    const EYE_HEIGHT_STAND: f32 = 1.62;
+    const EYE_HEIGHT_SNEAK: f32 = 1.54;
     let alpha = fixed_time.overstep_fraction().clamp(0.0, 1.0);
     if let Ok((mut player_transform, mut look)) = player_query.get_single_mut() {
         let interpolated = sim_render.previous.pos.lerp(sim_state.current.pos, alpha);
@@ -330,6 +353,12 @@ pub fn apply_visual_transform_system(
         player_transform.rotation = Quat::from_axis_angle(Vec3::Y, look.yaw);
         if let Ok(mut camera_transform) = camera_query.get_single_mut() {
             camera_transform.rotation = Quat::from_axis_angle(Vec3::X, look.pitch);
+            let target_eye_height = if input.0.sneak {
+                EYE_HEIGHT_SNEAK
+            } else {
+                EYE_HEIGHT_STAND
+            };
+            camera_transform.translation.y += (target_eye_height - camera_transform.translation.y) * 0.5;
         }
     }
     timings.apply_transform_ms = start.elapsed().as_secs_f32() * 1000.0;

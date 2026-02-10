@@ -68,6 +68,7 @@ fn main() {
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
+        .insert_resource(sim_systems::ActionState::default())
         .insert_resource(sim_systems::FrameTimingState::default())
         .add_systems(First, sim_systems::frame_timing_start)
         .add_systems(

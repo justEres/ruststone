@@ -14,6 +14,9 @@ const BASE_MOVE_SPEED: f32 = 0.1;
 const SPEED_IN_AIR: f32 = 0.02;
 const SLIPPERINESS_DEFAULT: f32 = 0.6;
 const SNEAK_EDGE_STEP: f32 = 0.05;
+const MOVE_INPUT_DAMPING: f32 = 0.98;
+const SNEAK_INPUT_SCALE: f32 = 0.3;
+const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -298,11 +301,12 @@ pub fn simulate_tick(
     let mut state = *prev;
     state.yaw = input.yaw;
     state.pitch = input.pitch;
+    let sprinting = effective_sprint(input);
 
     if state.on_ground && input.jump {
         state.vel.y = JUMP_VEL;
         state.on_ground = false;
-        if input.sprint {
+        if sprinting {
             let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
             let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
             state.vel.x += forward.x * 0.2;
@@ -310,16 +314,16 @@ pub fn simulate_tick(
         }
     }
 
-    let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
+    let mut wish = Vec3::new(input.strafe * MOVE_INPUT_DAMPING, 0.0, input.forward * MOVE_INPUT_DAMPING);
     if wish.length_squared() > 1.0 {
         wish = wish.normalize();
     }
     if input.sneak {
-        wish.x *= 0.3;
-        wish.z *= 0.3;
+        wish.x *= SNEAK_INPUT_SCALE;
+        wish.z *= SNEAK_INPUT_SCALE;
     }
 
-    let move_speed = BASE_MOVE_SPEED * if input.sprint { 1.3 } else { 1.0 };
+    let move_speed = BASE_MOVE_SPEED * if sprinting { 1.3 } else { 1.0 };
 
     let mut f4 = 0.91f32;
     if state.on_ground {
@@ -330,7 +334,7 @@ pub fn simulate_tick(
     let f5 = if state.on_ground {
         move_speed * f
     } else {
-        SPEED_IN_AIR * if input.sprint { 1.3 } else { 1.0 }
+        SPEED_IN_AIR * if sprinting { 1.3 } else { 1.0 }
     };
 
     move_flying(&mut state.vel, wish.x, wish.z, f5, state.yaw);
@@ -373,6 +377,10 @@ fn move_flying(vel: &mut Vec3, strafe: f32, forward: f32, friction: f32, yaw: f3
     let dir = right_dir * strafe + forward_dir * forward;
     vel.x += dir.x;
     vel.z += dir.z;
+}
+
+pub fn effective_sprint(input: &InputState) -> bool {
+    input.sprint && !input.sneak && input.forward >= SPRINT_FORWARD_THRESHOLD
 }
 
 fn step_toward_zero(v: f32) -> f32 {
