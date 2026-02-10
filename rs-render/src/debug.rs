@@ -280,7 +280,7 @@ fn camera_fov_params(
         fov_y = settings.frustum_fov_deg.max(1.0).to_radians();
     }
     // Expand FOV to reduce border clipping artifacts.
-    fov_y = (fov_y * 1.35).min(std::f32::consts::PI - 0.01);
+    fov_y = (fov_y * 1.40).min(std::f32::consts::PI - 0.01);
     aspect = aspect.max(0.01);
     near = near.max(0.01);
     far = far.max(near + 0.01);
