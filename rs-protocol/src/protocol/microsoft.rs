@@ -74,10 +74,17 @@ impl AccountImpl for MicrosoftAccount {
             .body(join)
             .send()?;
 
-        if res.status() == reqwest::StatusCode::NO_CONTENT {
+        let status = res.status();
+        if status == reqwest::StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            Err(super::Error::Err("Failed to auth with server".to_owned()))
+            let body = res
+                .text()
+                .unwrap_or_else(|_| "<failed to read response body>".to_string());
+            Err(super::Error::Err(format!(
+                "Failed to auth with server (status={} body={})",
+                status, body
+            )))
         }
     }
 

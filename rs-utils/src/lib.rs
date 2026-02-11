@@ -132,6 +132,7 @@ pub enum NetEntityMessage {
     PlayerInfoAdd {
         uuid: UUID,
         name: String,
+        skin_url: Option<String>,
     },
     PlayerInfoRemove {
         uuid: UUID,

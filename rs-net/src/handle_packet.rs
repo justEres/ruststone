@@ -1,3 +1,4 @@
+use base64::Engine;
 use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
@@ -219,9 +220,18 @@ pub fn handle_packet(
                 on_ground: None,
             }));
             if let Some(uuid) = parsed_uuid {
+                let skin_url = extract_skin_url_from_spawn_properties(&sp.properties.data);
+                println!(
+                    "NET SpawnPlayer_i32_HeldItem_String name={} uuid={:?} props={} skin_url={:?}",
+                    sp.name,
+                    uuid,
+                    sp.properties.data.len(),
+                    skin_url
+                );
                 let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::PlayerInfoAdd {
                     uuid,
                     name: sp.name,
+                    skin_url,
                 }));
             }
         }
@@ -511,9 +521,26 @@ pub fn handle_packet(
         Packet::PlayerInfo(info) => {
             for detail in info.inner.players {
                 match detail {
-                    rs_protocol::protocol::packet::PlayerDetail::Add { uuid, name, .. } => {
+                    rs_protocol::protocol::packet::PlayerDetail::Add {
+                        uuid,
+                        name,
+                        properties,
+                        ..
+                    } => {
+                        let skin_url = extract_skin_url_from_player_properties(&properties);
+                        println!(
+                            "NET PlayerInfo::Add name={} uuid={:?} props={} skin_url={:?}",
+                            name,
+                            uuid,
+                            properties.len(),
+                            skin_url
+                        );
                         let _ = to_main.send(FromNetMessage::NetEntity(
-                            NetEntityMessage::PlayerInfoAdd { uuid, name },
+                            NetEntityMessage::PlayerInfoAdd {
+                                uuid,
+                                name,
+                                skin_url,
+                            },
                         ));
                     }
                     rs_protocol::protocol::packet::PlayerDetail::Remove { uuid } => {
@@ -792,6 +819,52 @@ fn item_name(item_id: i32) -> &'static str {
         419 => "Diamond Horse Armor",
         _ => "Item",
     }
+}
+
+fn extract_skin_url_from_player_properties(
+    properties: &[rs_protocol::protocol::packet::PlayerProperty],
+) -> Option<String> {
+    extract_skin_url_from_properties(
+        properties
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.as_str())),
+    )
+}
+
+fn extract_skin_url_from_spawn_properties(
+    properties: &[rs_protocol::protocol::packet::SpawnProperty],
+) -> Option<String> {
+    extract_skin_url_from_properties(
+        properties
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.as_str())),
+    )
+}
+
+fn extract_skin_url_from_properties<'a>(
+    properties: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Option<String> {
+    for (name, value) in properties {
+        if name != "textures" {
+            continue;
+        }
+        let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_slice::<serde_json::Value>(&decoded) else {
+            continue;
+        };
+        let Some(url) = json.pointer("/textures/SKIN/url").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if url.starts_with("http://textures.minecraft.net/texture/")
+            || url.starts_with("https://textures.minecraft.net/texture/")
+        {
+            let normalized = url.replacen("http://", "https://", 1);
+            return Some(normalized);
+        }
+    }
+    None
 }
 
 fn mob_type_to_kind(ty: u8) -> MobKind {
