@@ -12,7 +12,8 @@ use bevy_egui::{EguiContexts, egui};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::PlayerCamera;
 use rs_utils::{
-    AppState, ApplicationState, MobKind, NetEntityKind, NetEntityMessage, ObjectKind,
+    AppState, ApplicationState, MobKind, NetEntityAnimation, NetEntityKind, NetEntityMessage,
+    ObjectKind,
     PlayerSkinModel,
 };
 use tracing::{info, warn};
@@ -152,6 +153,8 @@ pub struct RemotePlayerSkinMaterials(pub Vec<Handle<StandardMaterial>>);
 pub struct RemotePlayerAnimation {
     pub previous_pos: Vec3,
     pub walk_phase: f32,
+    pub swing_progress: f32,
+    pub hurt_progress: f32,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -161,6 +164,28 @@ pub struct RemotePlayerSkinModel(pub PlayerSkinModel);
 pub struct RemoteVisual {
     pub y_offset: f32,
     pub name_y_offset: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct RemotePoseState {
+    pub sneaking: bool,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteMotionSmoothing {
+    pub target_translation: Vec3,
+    pub estimated_velocity: Vec3,
+    pub last_server_update_secs: f64,
+}
+
+impl RemoteMotionSmoothing {
+    fn new(target_translation: Vec3, now_secs: f64) -> Self {
+        Self {
+            target_translation,
+            estimated_velocity: Vec3::ZERO,
+            last_server_update_secs: now_secs,
+        }
+    }
 }
 
 pub fn remote_entity_connection_sync(
@@ -190,17 +215,21 @@ pub fn remote_entity_connection_sync(
 
 pub fn apply_remote_entity_events(
     mut commands: Commands,
+    time: Res<Time>,
     mut queue: ResMut<RemoteEntityEventQueue>,
     mut registry: ResMut<RemoteEntityRegistry>,
     mut skin_downloader: ResMut<RemoteSkinDownloader>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut transform_query: Query<&mut Transform>,
+    mut smoothing_query: Query<&mut RemoteMotionSmoothing>,
     mut entity_query: Query<(&mut RemoteEntity, &mut RemoteEntityLook)>,
+    mut player_anim_query: Query<&mut RemotePlayerAnimation>,
     mut name_query: Query<&mut RemoteEntityName>,
     visual_query: Query<&RemoteVisual>,
     texture_debug: Res<PlayerTextureDebugSettings>,
 ) {
+    let now_secs = time.elapsed_secs_f64();
     for event in queue.drain() {
         match event {
             NetEntityMessage::LocalPlayerId { entity_id } => {
@@ -324,6 +353,8 @@ pub fn apply_remote_entity_events(
                     RemoteEntityLook { yaw, pitch },
                     RemoteEntityName(display_name),
                     visual,
+                    RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs),
+                    RemotePoseState::default(),
                 ));
                 let root = spawn_cmd.id();
 
@@ -349,6 +380,8 @@ pub fn apply_remote_entity_events(
                         RemotePlayerAnimation {
                             previous_pos: pos,
                             walk_phase: 0.0,
+                            swing_progress: 1.0,
+                            hurt_progress: 1.0,
                         },
                         RemotePlayerSkinModel(player_skin_model),
                     ));
@@ -392,7 +425,11 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok(mut transform) = transform_query.get_mut(entity) {
+                    if let Ok(mut smoothing) = smoothing_query.get_mut(entity) {
+                        let previous = smoothing.target_translation;
+                        let next = previous + delta;
+                        update_motion_velocity(&mut smoothing, previous, next, now_secs);
+                    } else if let Ok(mut transform) = transform_query.get_mut(entity) {
                         transform.translation += delta;
                     }
                     if let Ok((mut remote_entity, _)) = entity_query.get_mut(entity)
@@ -412,13 +449,6 @@ pub fn apply_remote_entity_events(
                     if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
                         look.yaw = yaw;
                         look.pitch = pitch;
-                        if let Ok(mut transform) = transform_query.get_mut(entity) {
-                            transform.rotation = if remote_entity.kind == NetEntityKind::Player {
-                                player_root_rotation(yaw)
-                            } else {
-                                Quat::from_axis_angle(Vec3::Y, yaw)
-                            };
-                        }
                         if let Some(on_ground) = on_ground {
                             remote_entity.on_ground = on_ground;
                         }
@@ -434,11 +464,24 @@ pub fn apply_remote_entity_events(
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
                     if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
+                        let target = pos
+                            + Vec3::Y
+                                * visual_query
+                                    .get(entity)
+                                    .map_or(PLAYER_Y_OFFSET, |v| v.y_offset);
+                        if let Ok(mut smoothing) = smoothing_query.get_mut(entity) {
+                            let previous = smoothing.target_translation;
+                            update_motion_velocity(&mut smoothing, previous, target, now_secs);
+                            // Big teleports should still snap to avoid long catch-up.
+                            if let Ok(mut transform) = transform_query.get_mut(entity)
+                                && transform.translation.distance_squared(target) > 64.0
+                            {
+                                transform.translation = target;
+                            }
+                        } else if let Ok(mut transform) = transform_query.get_mut(entity) {
+                            transform.translation = target;
+                        }
                         if let Ok(mut transform) = transform_query.get_mut(entity) {
-                            let y_offset = visual_query
-                                .get(entity)
-                                .map_or(PLAYER_Y_OFFSET, |v| v.y_offset);
-                            transform.translation = pos + Vec3::Y * y_offset;
                             transform.rotation = if remote_entity.kind == NetEntityKind::Player {
                                 player_root_rotation(yaw)
                             } else {
@@ -452,6 +495,34 @@ pub fn apply_remote_entity_events(
                 }
             }
             NetEntityMessage::Velocity { .. } => {}
+            NetEntityMessage::Pose {
+                entity_id,
+                sneaking,
+            } => {
+                if let Some(entity) = registry.by_server_id.get(&entity_id).copied()
+                    && let Ok(mut commands_entity) = commands.get_entity(entity)
+                {
+                    commands_entity.insert(RemotePoseState { sneaking });
+                }
+            }
+            NetEntityMessage::Animation {
+                entity_id,
+                animation,
+            } => {
+                if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
+                    if let Ok(mut anim) = player_anim_query.get_mut(entity) {
+                        match animation {
+                            NetEntityAnimation::SwingMainArm => {
+                                anim.swing_progress = 0.0;
+                            }
+                            NetEntityAnimation::TakeDamage => {
+                                anim.hurt_progress = 0.0;
+                            }
+                            NetEntityAnimation::LeaveBed | NetEntityAnimation::Unknown(_) => {}
+                        }
+                    }
+                }
+            }
             NetEntityMessage::Destroy { entity_ids } => {
                 for entity_id in entity_ids {
                     registry.pending_labels.remove(&entity_id);
@@ -464,6 +535,54 @@ pub fn apply_remote_entity_events(
                 }
             }
         }
+    }
+}
+
+fn update_motion_velocity(
+    smoothing: &mut RemoteMotionSmoothing,
+    previous: Vec3,
+    next: Vec3,
+    now_secs: f64,
+) {
+    let dt = (now_secs - smoothing.last_server_update_secs).max(1.0 / 120.0) as f32;
+    smoothing.estimated_velocity = (next - previous) / dt;
+    smoothing.target_translation = next;
+    smoothing.last_server_update_secs = now_secs;
+}
+
+pub fn smooth_remote_entity_motion(
+    time: Res<Time>,
+    mut query: Query<
+        (
+            &RemoteEntity,
+            &RemoteEntityLook,
+            &mut Transform,
+            &RemoteMotionSmoothing,
+        ),
+        With<RemoteEntity>,
+    >,
+) {
+    let dt = time.delta_secs().max(1e-4);
+    let now_secs = time.elapsed_secs_f64();
+    for (remote, look, mut transform, smoothing) in &mut query {
+        // Extrapolate a little bit from the last known velocity to hide packet spacing.
+        let extrapolate = ((now_secs - smoothing.last_server_update_secs) as f32).clamp(0.0, 0.1);
+        let desired_pos = smoothing.target_translation + smoothing.estimated_velocity * extrapolate;
+        let delta = desired_pos - transform.translation;
+        if delta.length_squared() > 64.0 {
+            transform.translation = desired_pos;
+        } else {
+            let pos_alpha = 1.0 - (-18.0 * dt).exp();
+            transform.translation += delta * pos_alpha;
+        }
+
+        let desired_rot = if remote.kind == NetEntityKind::Player {
+            player_root_rotation(look.yaw)
+        } else {
+            Quat::from_axis_angle(Vec3::Y, look.yaw)
+        };
+        let rot_alpha = 1.0 - (-22.0 * dt).exp();
+        transform.rotation = transform.rotation.slerp(desired_rot, rot_alpha);
     }
 }
 
@@ -718,6 +837,7 @@ pub fn animate_remote_player_models(
         (
             &Transform,
             &RemoteEntityLook,
+            &RemotePoseState,
             &RemotePlayerModelParts,
             &mut RemotePlayerAnimation,
         ),
@@ -726,40 +846,53 @@ pub fn animate_remote_player_models(
     mut part_transforms: Query<&mut Transform, Without<RemotePlayer>>,
 ) {
     let dt = time.delta_secs().max(1e-4);
-    for (root_transform, look, parts, mut anim) in &mut roots {
+    for (root_transform, look, pose, parts, mut anim) in &mut roots {
         let pos = root_transform.translation;
         let horizontal_delta = Vec2::new(pos.x - anim.previous_pos.x, pos.z - anim.previous_pos.z);
         let speed = (horizontal_delta.length() / dt).min(8.0);
         let stride = (speed / 4.0).clamp(0.0, 1.0);
         anim.walk_phase += speed * dt * 2.5;
+        anim.swing_progress = (anim.swing_progress + dt * 3.6).min(1.0);
+        anim.hurt_progress = (anim.hurt_progress + dt * 4.0).min(1.0);
         anim.previous_pos = pos;
 
         let swing = anim.walk_phase.sin() * 0.7 * stride;
         let head_pitch = look.pitch.clamp(-1.4, 1.4);
+        let sneak_amount = if pose.sneaking { 1.0 } else { 0.0 };
+        let arm_attack = if anim.swing_progress < 1.0 {
+            (anim.swing_progress * std::f32::consts::PI).sin() * 1.2
+        } else {
+            0.0
+        };
+        let hurt_tilt = if anim.hurt_progress < 1.0 {
+            (1.0 - anim.hurt_progress) * 0.12
+        } else {
+            0.0
+        };
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-            t.translation = Vec3::new(0.0, 1.75, 0.0);
-            t.rotation = Quat::from_rotation_x(-head_pitch);
+            t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
+            t.rotation = Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-            t.translation = Vec3::new(0.0, 1.125, 0.0);
-            t.rotation = Quat::IDENTITY;
+            t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
+            t.rotation = Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
             t.translation = Vec3::new(-0.375, 1.125, 0.0);
-            t.rotation = Quat::from_rotation_x(swing);
+            t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
             t.translation = Vec3::new(0.375, 1.125, 0.0);
-            t.rotation = Quat::from_rotation_x(-swing);
+            t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-            t.translation = Vec3::new(-0.125, 0.375, 0.0);
-            t.rotation = Quat::from_rotation_x(-swing);
+            t.translation = Vec3::new(-0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+            t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-            t.translation = Vec3::new(0.125, 0.375, 0.0);
-            t.rotation = Quat::from_rotation_x(swing);
+            t.translation = Vec3::new(0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+            t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
         }
     }
 }
@@ -1133,8 +1266,9 @@ fn map_from_named_faces(
     SkinFaceMap {
         down: bottom,
         up: top,
-        north: front,
-        south: back,
+        // Model root is rotated 180deg, so swap front/back UV assignment here.
+        north: back,
+        south: front,
         west: left,
         east: right,
     }
@@ -1366,6 +1500,7 @@ fn uv_rect(rect: SkinUvRect, flip_u: bool, flip_v: bool) -> [[f32; 2]; 4] {
 }
 
 fn player_root_rotation(yaw: f32) -> Quat {
+    // Align model forward/back with Minecraft protocol-facing direction.
     Quat::from_axis_angle(Vec3::Y, yaw + std::f32::consts::PI)
 }
 

@@ -122,8 +122,11 @@ fn main() {
                 entities::apply_remote_player_skins.after(entities::remote_skin_download_tick),
                 entities::rebuild_remote_player_meshes_on_texture_debug_change
                     .after(entities::apply_remote_player_skins),
-                entities::animate_remote_player_models
+                entities::smooth_remote_entity_motion
+                    .after(entities::apply_remote_entity_events)
                     .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
+                entities::animate_remote_player_models
+                    .after(entities::smooth_remote_entity_motion),
             ),
         )
         .add_systems(
