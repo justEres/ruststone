@@ -7,7 +7,8 @@ use rs_protocol::protocol::UUID;
 pub mod registry;
 pub use registry::{
     BlockFace, BlockModelKind, TEXTUREPACK_BLOCKS_BASE, TEXTUREPACK_ITEMS_BASE, block_model_kind,
-    block_name, block_registry_key, block_texture_name, item_name, item_registry_key,
+    block_name, block_registry_key, block_state_id, block_state_meta, block_texture_name,
+    item_name, item_registry_key,
 };
 
 #[derive(Resource)]
@@ -221,6 +222,9 @@ pub struct PlayerStatus {
     pub health: f32,
     pub food: i32,
     pub food_saturation: f32,
+    pub experience_bar: f32,
+    pub level: i32,
+    pub total_experience: i32,
     pub dead: bool,
 }
 
@@ -249,6 +253,9 @@ impl Default for PlayerStatus {
             health: 20.0,
             food: 20,
             food_saturation: 5.0,
+            experience_bar: 0.0,
+            level: 0,
+            total_experience: 0,
             dead: false,
         }
     }
@@ -758,6 +765,11 @@ pub enum FromNetMessage {
         health: f32,
         food: i32,
         food_saturation: f32,
+    },
+    UpdateExperience {
+        experience_bar: f32,
+        level: i32,
+        total_experience: i32,
     },
     Inventory(InventoryMessage),
     NetEntity(NetEntityMessage),

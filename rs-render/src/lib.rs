@@ -105,6 +105,7 @@ fn enqueue_chunk_meshes(
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
             texture_mapping: assets.texture_mapping.clone(),
+            biome_tints: assets.biome_tints.clone(),
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);

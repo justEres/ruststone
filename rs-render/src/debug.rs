@@ -160,6 +160,7 @@ pub fn remesh_on_meshing_toggle(
             snapshot,
             use_greedy: settings.use_greedy_meshing,
             texture_mapping: assets.texture_mapping.clone(),
+            biome_tints: assets.biome_tints.clone(),
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);

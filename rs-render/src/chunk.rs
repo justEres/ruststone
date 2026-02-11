@@ -11,13 +11,15 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
-use rs_utils::{BlockModelKind, BlockUpdate, ChunkData, block_model_kind};
+use rs_utils::{
+    BlockModelKind, BlockUpdate, ChunkData, block_model_kind, block_state_id, block_state_meta,
+};
 
 use crate::block_models::{BlockModelResolver, default_model_roots};
 use crate::block_textures::{
-    ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TILE_CAPACITY, AtlasBlockMapping, BiomeTint, Face,
-    atlas_tile_origin, biome_tint, build_block_texture_mapping, is_grass_block, is_leaves_block,
-    is_transparent_block, is_water_block, uv_for_texture,
+    ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TILE_CAPACITY, AtlasBlockMapping, BiomeTint,
+    BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
+    classify_tint, is_transparent_block, uv_for_texture,
 };
 
 const CHUNK_SIZE: i32 = 16;
@@ -135,11 +137,24 @@ impl ChunkColumnSnapshot {
         &self,
         use_greedy: bool,
         texture_mapping: &AtlasBlockMapping,
+        biome_tints: &BiomeTintResolver,
     ) -> MeshBatch {
         if use_greedy {
-            build_chunk_mesh_greedy(self, self.center_key.0, self.center_key.1, texture_mapping)
+            build_chunk_mesh_greedy(
+                self,
+                self.center_key.0,
+                self.center_key.1,
+                texture_mapping,
+                biome_tints,
+            )
         } else {
-            build_chunk_mesh_culled(self, self.center_key.0, self.center_key.1, texture_mapping)
+            build_chunk_mesh_culled(
+                self,
+                self.center_key.0,
+                self.center_key.1,
+                texture_mapping,
+                biome_tints,
+            )
         }
     }
 }
@@ -232,11 +247,12 @@ pub struct ChunkRenderAssets {
     pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
     pub texture_mapping: Arc<AtlasBlockMapping>,
+    pub biome_tints: Arc<BiomeTintResolver>,
 }
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
-        let (mut atlas_image, texture_mapping) = load_or_build_atlas();
+        let (mut atlas_image, texture_mapping, biome_tints) = load_or_build_atlas();
         let mut sampler = ImageSamplerDescriptor::nearest();
         sampler.address_mode_u = ImageAddressMode::ClampToEdge;
         sampler.address_mode_v = ImageAddressMode::ClampToEdge;
@@ -292,6 +308,7 @@ impl FromWorld for ChunkRenderAssets {
             transparent_material,
             atlas: atlas_handle,
             texture_mapping,
+            biome_tints,
         }
     }
 }
@@ -304,7 +321,7 @@ fn texture_root_path() -> PathBuf {
     assets_root().join(TEXTURE_BASE)
 }
 
-fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>) {
+fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolver>) {
     let textures_root = texture_root_path();
     let mut texture_names = collect_texture_names(&textures_root);
     texture_names.sort();
@@ -369,9 +386,13 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>) {
         &name_to_index,
         Some(&mut model_resolver),
     ));
+    let biome_tints = Arc::new(BiomeTintResolver::load(
+        &assets_root().join("texturepack/assets/minecraft"),
+    ));
     (
         bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas)),
         mapping,
+        biome_tints,
     )
 }
 
@@ -515,6 +536,7 @@ fn build_chunk_mesh_culled(
     chunk_x: i32,
     chunk_z: i32,
     texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
@@ -532,16 +554,17 @@ fn build_chunk_mesh_culled(
                 for x in 0..CHUNK_SIZE {
                     let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
                     let block_id = section_blocks[idx];
-                    if block_id == 0 {
+                    if block_type(block_id) == 0 {
                         continue;
                     }
 
-                    let tint = biome_tint(biome_at(snapshot, chunk_x, chunk_z, x, z));
+                    let tint = biome_tint_at(snapshot, chunk_x, chunk_z, x, z, biome_tints);
                     if is_custom_block(block_id) {
                         add_custom_block(
                             &mut batch,
                             snapshot,
                             texture_mapping,
+                            biome_tints,
                             chunk_x,
                             chunk_z,
                             x,
@@ -557,6 +580,7 @@ fn build_chunk_mesh_culled(
                         &mut batch,
                         snapshot,
                         texture_mapping,
+                        biome_tints,
                         chunk_x,
                         chunk_z,
                         x,
@@ -593,6 +617,7 @@ fn build_chunk_mesh_greedy(
     chunk_x: i32,
     chunk_z: i32,
     texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
@@ -613,14 +638,15 @@ fn build_chunk_mesh_greedy(
                 for x in 0..CHUNK_SIZE {
                     let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
                     let block_id = section_blocks[idx];
-                    if block_id == 0 || !is_custom_block(block_id) {
+                    if block_type(block_id) == 0 || !is_custom_block(block_id) {
                         continue;
                     }
-                    let tint = biome_tint(biome_at(snapshot, chunk_x, chunk_z, x, z));
+                    let tint = biome_tint_at(snapshot, chunk_x, chunk_z, x, z, biome_tints);
                     add_custom_block(
                         &mut batch,
                         snapshot,
                         texture_mapping,
+                        biome_tints,
                         chunk_x,
                         chunk_z,
                         x,
@@ -648,7 +674,7 @@ fn build_chunk_mesh_greedy(
                     for x in 0..CHUNK_SIZE {
                         let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
                         let block_id = section_blocks[idx];
-                        if block_id == 0 {
+                        if block_type(block_id) == 0 {
                             continue;
                         }
                         if is_custom_block(block_id) {
@@ -669,12 +695,12 @@ fn build_chunk_mesh_greedy(
                             continue;
                         }
 
-                        let texture_index = texture_mapping.texture_index(block_id, face);
+                        let texture_index = texture_mapping.texture_index_for_state(block_id, face);
                         let biome_id = biome_at(snapshot, chunk_x, chunk_z, x, z);
-                        let tint_key = if is_grass_block(block_id)
-                            || is_leaves_block(block_id)
-                            || is_water_block(block_id)
-                        {
+                        let tint_key = if !matches!(
+                            classify_tint(block_id, None),
+                            TintClass::None | TintClass::FoliageFixed(_)
+                        ) {
                             biome_id
                         } else {
                             0
@@ -700,7 +726,7 @@ fn build_chunk_mesh_greedy(
                 for (key, data) in plane {
                     let quads = greedy_mesh_binary_plane(data, 16);
                     for quad in quads {
-                        let tint = biome_tint(key.tint_key);
+                        let tint = biome_tints.tint_for_biome(key.tint_key);
                         add_greedy_quad(
                             &mut batch,
                             face,
@@ -803,7 +829,7 @@ fn add_greedy_quad(
             .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
         data.uvs_b.push(tile_origin);
     }
-    let color = tint_color(block_id, tint);
+    let color = tint_color_untargeted(block_id, tint);
     data.colors.extend_from_slice(&[color, color, color, color]);
     data.indices.extend_from_slice(&[
         base_index,
@@ -854,6 +880,7 @@ fn add_block_faces(
     batch: &mut MeshBatch,
     snapshot: &ChunkColumnSnapshot,
     texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -949,7 +976,7 @@ fn add_block_faces(
             continue;
         }
 
-        let texture_index = texture_mapping.texture_index(block_id, face);
+        let texture_index = texture_mapping.texture_index_for_state(block_id, face);
         let data = batch.data_for(block_id);
         let base_index = data.positions.len() as u32;
         for vert in verts {
@@ -960,7 +987,17 @@ fn add_block_faces(
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let color = tint_color(block_id, tint);
+        let color = tint_color(
+            block_id,
+            tint,
+            snapshot,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            biome_tints,
+        );
         data.colors.extend_from_slice(&[color, color, color, color]);
         data.indices.extend_from_slice(&[
             base_index,
@@ -973,35 +1010,82 @@ fn add_block_faces(
     }
 }
 
-fn tint_color(block_id: u16, tint: BiomeTint) -> [f32; 4] {
-    if is_grass_block(block_id) {
-        return tint.grass;
+#[allow(clippy::too_many_arguments)]
+fn tint_color(
+    block_id: u16,
+    tint: BiomeTint,
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    biome_tints: &BiomeTintResolver,
+) -> [f32; 4] {
+    let below = if block_type(block_id) == 175 {
+        Some(block_at(snapshot, chunk_x, chunk_z, x, y - 1, z))
+    } else {
+        None
+    };
+    match classify_tint(block_id, below) {
+        TintClass::Grass => tint.grass,
+        TintClass::Foliage => tint.foliage,
+        TintClass::Water => tint.water,
+        TintClass::FoliageFixed(rgb) => {
+            let r = ((rgb >> 16) & 0xFF) as f32 / 255.0;
+            let g = ((rgb >> 8) & 0xFF) as f32 / 255.0;
+            let b = (rgb & 0xFF) as f32 / 255.0;
+            [r, g, b, 1.0]
+        }
+        TintClass::None => {
+            let _ = biome_tints;
+            [1.0, 1.0, 1.0, 1.0]
+        }
     }
-    if is_leaves_block(block_id) {
-        return tint.foliage;
+}
+
+fn tint_color_untargeted(block_id: u16, tint: BiomeTint) -> [f32; 4] {
+    match classify_tint(block_id, None) {
+        TintClass::Grass => tint.grass,
+        TintClass::Foliage => tint.foliage,
+        TintClass::Water => tint.water,
+        TintClass::FoliageFixed(rgb) => [
+            ((rgb >> 16) & 0xFF) as f32 / 255.0,
+            ((rgb >> 8) & 0xFF) as f32 / 255.0,
+            (rgb & 0xFF) as f32 / 255.0,
+            1.0,
+        ],
+        TintClass::None => [1.0, 1.0, 1.0, 1.0],
     }
-    if is_water_block(block_id) {
-        return tint.water;
-    }
-    [1.0, 1.0, 1.0, 1.0]
 }
 
 fn add_cross_plant(
     batch: &mut MeshBatch,
-    _snapshot: &ChunkColumnSnapshot,
+    snapshot: &ChunkColumnSnapshot,
     texture_mapping: &AtlasBlockMapping,
-    _chunk_x: i32,
-    _chunk_z: i32,
+    biome_tints: &BiomeTintResolver,
+    chunk_x: i32,
+    chunk_z: i32,
     x: i32,
     y: i32,
     z: i32,
     block_id: u16,
     tint: BiomeTint,
 ) {
-    let texture_index = texture_mapping.texture_index(block_id, Face::PosZ);
+    let texture_index = texture_mapping.texture_index_for_state(block_id, Face::PosZ);
     let tile_origin = atlas_tile_origin(texture_index);
     let uvs = uv_for_texture();
-    let color = tint_color(block_id, tint);
+    let color = tint_color(
+        block_id,
+        tint,
+        snapshot,
+        chunk_x,
+        chunk_z,
+        x,
+        y,
+        z,
+        biome_tints,
+    );
     let data = batch.data_for(block_id);
 
     let x0 = x as f32;
@@ -1084,6 +1168,7 @@ fn add_custom_block(
     batch: &mut MeshBatch,
     snapshot: &ChunkColumnSnapshot,
     texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -1092,11 +1177,12 @@ fn add_custom_block(
     block_id: u16,
     tint: BiomeTint,
 ) {
-    match block_model_kind(block_id) {
+    match block_model_kind(block_type(block_id)) {
         BlockModelKind::Cross => add_cross_plant(
             batch,
             snapshot,
             texture_mapping,
+            biome_tints,
             chunk_x,
             chunk_z,
             x,
@@ -1109,6 +1195,7 @@ fn add_custom_block(
             batch,
             snapshot,
             texture_mapping,
+            biome_tints,
             chunk_x,
             chunk_z,
             x,
@@ -1121,11 +1208,20 @@ fn add_custom_block(
             batch,
             Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
             texture_mapping,
+            biome_tints,
             x,
             y,
             z,
-            [0.0, 0.0, 0.0],
-            [1.0, 0.5, 1.0],
+            if (block_meta(block_id) & 0x8) != 0 {
+                [0.0, 0.5, 0.0]
+            } else {
+                [0.0, 0.0, 0.0]
+            },
+            if (block_meta(block_id) & 0x8) != 0 {
+                [1.0, 1.0, 1.0]
+            } else {
+                [1.0, 0.5, 1.0]
+            },
             block_id,
             tint,
         ),
@@ -1134,6 +1230,7 @@ fn add_custom_block(
                 batch,
                 None,
                 texture_mapping,
+                biome_tints,
                 x,
                 y,
                 z,
@@ -1146,6 +1243,7 @@ fn add_custom_block(
                 batch,
                 None,
                 texture_mapping,
+                biome_tints,
                 x,
                 y,
                 z,
@@ -1158,6 +1256,7 @@ fn add_custom_block(
                 batch,
                 None,
                 texture_mapping,
+                biome_tints,
                 x,
                 y,
                 z,
@@ -1172,6 +1271,7 @@ fn add_custom_block(
                 batch,
                 None,
                 texture_mapping,
+                biome_tints,
                 x,
                 y,
                 z,
@@ -1184,6 +1284,7 @@ fn add_custom_block(
                 batch,
                 None,
                 texture_mapping,
+                biome_tints,
                 x,
                 y,
                 z,
@@ -1202,6 +1303,7 @@ fn add_box(
     batch: &mut MeshBatch,
     neighbor_ctx: Option<(&ChunkColumnSnapshot, i32, i32, i32, i32, i32, u16)>,
     texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
     x: i32,
     y: i32,
     z: i32,
@@ -1307,7 +1409,7 @@ fn add_box(
             }
         }
 
-        let texture_index = texture_mapping.texture_index(block_id, face);
+        let texture_index = texture_mapping.texture_index_for_state(block_id, face);
         let data = batch.data_for(block_id);
         let base_index = data.positions.len() as u32;
         for vert in verts {
@@ -1318,7 +1420,21 @@ fn add_box(
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let color = tint_color(block_id, tint);
+        let color = if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
+            tint_color(
+                block_id,
+                tint,
+                snapshot,
+                chunk_x,
+                chunk_z,
+                bx,
+                by,
+                bz,
+                biome_tints,
+            )
+        } else {
+            tint_color_untargeted(block_id, tint)
+        };
         data.colors.extend_from_slice(&[color, color, color, color]);
         data.indices.extend_from_slice(&[
             base_index,
@@ -1333,7 +1449,7 @@ fn add_box(
 
 fn is_custom_block(block_id: u16) -> bool {
     matches!(
-        block_model_kind(block_id),
+        block_model_kind(block_type(block_id)),
         BlockModelKind::Cross
             | BlockModelKind::Slab
             | BlockModelKind::Fence
@@ -1351,6 +1467,67 @@ fn biome_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, 
     };
     let idx = (z as usize & 15) * 16 + (x as usize & 15);
     *biomes.get(idx).unwrap_or(&1)
+}
+
+fn biome_tint_at(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    z: i32,
+    resolver: &BiomeTintResolver,
+) -> BiomeTint {
+    let mut grass = [0.0f32; 3];
+    let mut foliage = [0.0f32; 3];
+    let mut water = [0.0f32; 3];
+    let mut count = 0.0f32;
+
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let wx = x + dx;
+            let wz = z + dz;
+            let mut cx = chunk_x;
+            let mut cz = chunk_z;
+            let mut lx = wx;
+            let mut lz = wz;
+            if lx < 0 {
+                cx -= 1;
+                lx += 16;
+            } else if lx >= 16 {
+                cx += 1;
+                lx -= 16;
+            }
+            if lz < 0 {
+                cz -= 1;
+                lz += 16;
+            } else if lz >= 16 {
+                cz += 1;
+                lz -= 16;
+            }
+            let bt = resolver.tint_for_biome(biome_at(snapshot, cx, cz, lx, lz));
+            grass[0] += bt.grass[0];
+            grass[1] += bt.grass[1];
+            grass[2] += bt.grass[2];
+            foliage[0] += bt.foliage[0];
+            foliage[1] += bt.foliage[1];
+            foliage[2] += bt.foliage[2];
+            water[0] += bt.water[0];
+            water[1] += bt.water[1];
+            water[2] += bt.water[2];
+            count += 1.0;
+        }
+    }
+
+    BiomeTint {
+        grass: [grass[0] / count, grass[1] / count, grass[2] / count, 1.0],
+        foliage: [
+            foliage[0] / count,
+            foliage[1] / count,
+            foliage[2] / count,
+            1.0,
+        ],
+        water: [water[0] / count, water[1] / count, water[2] / count, 1.0],
+    }
 }
 
 fn block_at(
@@ -1387,30 +1564,46 @@ fn block_at(
     }
 
     let Some(column) = snapshot.columns.get(&(target_chunk_x, target_chunk_z)) else {
-        return 1;
+        return block_state_from_id(1);
     };
 
     let section_index = (y / SECTION_HEIGHT) as usize;
     let local_y = (y % SECTION_HEIGHT) as usize;
 
     let Some(section) = column.sections.get(section_index).and_then(|v| v.as_ref()) else {
-        return if column.full { 0 } else { 1 };
+        return if column.full {
+            0
+        } else {
+            block_state_from_id(1)
+        };
     };
 
     let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
     section[idx]
 }
 
+fn block_type(block_state: u16) -> u16 {
+    block_state_id(block_state)
+}
+
+fn block_meta(block_state: u16) -> u8 {
+    block_state_meta(block_state)
+}
+
+const fn block_state_from_id(block_id: u16) -> u16 {
+    block_id << 4
+}
+
 fn is_liquid(block_id: u16) -> bool {
-    matches!(block_id, 8 | 9 | 10 | 11)
+    matches!(block_type(block_id), 8 | 9 | 10 | 11)
 }
 
 fn render_group_for_block(block_id: u16) -> MaterialGroup {
-    if is_transparent_block(block_id) {
+    if is_transparent_block(block_type(block_id)) {
         return MaterialGroup::Transparent;
     }
     if matches!(
-        block_model_kind(block_id),
+        block_model_kind(block_type(block_id)),
         BlockModelKind::Cross | BlockModelKind::Pane | BlockModelKind::TorchLike
     ) {
         return MaterialGroup::Cutout;
@@ -1419,7 +1612,7 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
 }
 
 fn is_occluding_block(block_id: u16) -> bool {
-    if block_id == 0 {
+    if block_type(block_id) == 0 {
         return false;
     }
     if is_liquid(block_id) {
@@ -1429,7 +1622,7 @@ fn is_occluding_block(block_id: u16) -> bool {
 }
 
 fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
-    if neighbor_id == 0 {
+    if block_type(neighbor_id) == 0 {
         return false;
     }
     if is_liquid(neighbor_id) {

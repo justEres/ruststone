@@ -480,7 +480,7 @@ pub fn handle_packet(
                 x: bc.location.x,
                 y: bc.location.y,
                 z: bc.location.z,
-                block_id: block_state_to_id(bc.block_id.0),
+                block_id: block_state_to_id_meta(bc.block_id.0),
             };
             let _ = to_main.send(FromNetMessage::BlockUpdates(vec![update]));
         }
@@ -489,7 +489,7 @@ pub fn handle_packet(
                 x: bc.x,
                 y: bc.y as i32,
                 z: bc.z,
-                block_id: block_state_to_id(
+                block_id: block_state_to_id_meta(
                     (bc.block_id.0 << 4) | (bc.block_metadata as i32 & 0xF),
                 ),
             };
@@ -504,7 +504,7 @@ pub fn handle_packet(
                     x: mbc.chunk_x * 16 + local_x,
                     y: record.y as i32,
                     z: mbc.chunk_z * 16 + local_z,
-                    block_id: block_state_to_id(record.block_id.0),
+                    block_id: block_state_to_id_meta(record.block_id.0),
                 });
             }
             if !updates.is_empty() {
@@ -527,7 +527,7 @@ pub fn handle_packet(
                     x: mbc.chunk_x * 16 + local_x,
                     y,
                     z: mbc.chunk_z * 16 + local_z,
-                    block_id: block_state_to_id(id_meta),
+                    block_id: block_state_to_id_meta(id_meta),
                 });
             }
             if !updates.is_empty() {
@@ -604,6 +604,20 @@ pub fn handle_packet(
                 health: health.health,
                 food: health.food as i32,
                 food_saturation: health.food_saturation,
+            });
+        }
+        Packet::SetExperience(exp) => {
+            let _ = to_main.send(FromNetMessage::UpdateExperience {
+                experience_bar: exp.experience_bar,
+                level: exp.level.0,
+                total_experience: exp.total_experience.0,
+            });
+        }
+        Packet::SetExperience_i16(exp) => {
+            let _ = to_main.send(FromNetMessage::UpdateExperience {
+                experience_bar: exp.experience_bar,
+                level: exp.level as i32,
+                total_experience: exp.total_experience as i32,
             });
         }
         Packet::WindowOpen(open) => {
@@ -703,11 +717,11 @@ fn server_pitch_to_client_pitch(pitch_deg: f32) -> f32 {
     -pitch_deg.to_radians()
 }
 
-fn block_state_to_id(block_state: i32) -> u16 {
+fn block_state_to_id_meta(block_state: i32) -> u16 {
     if block_state <= 0 {
         0
     } else {
-        (block_state >> 4) as u16
+        (block_state as u32 & 0xFFFF) as u16
     }
 }
 

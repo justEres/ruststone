@@ -277,6 +277,7 @@ pub fn net_event_apply_system(
 ) {
     let start = std::time::Instant::now();
     let world = WorldCollision::with_map(&collision_map);
+    const FORCE_TELEPORT_DISTANCE: f32 = 8.0;
     for event in net_events.drain() {
         let (pos, yaw, pitch, on_ground, recv_instant) = match event {
             crate::net::events::NetEvent::ServerPosLook {
@@ -308,6 +309,18 @@ pub fn net_event_apply_system(
             yaw,
             pitch,
         };
+
+        // Large server position jumps (respawn/teleport) should snap immediately.
+        if (server_state.pos - sim_state.current.pos).length() >= FORCE_TELEPORT_DISTANCE {
+            sim_render.previous = server_state;
+            sim_state.current = server_state;
+            history.0 = PredictionHistory::default().0;
+            visual_offset.0 = Vec3::ZERO;
+            sim_ready.0 = true;
+            debug.last_correction = 0.0;
+            debug.last_replay = 0;
+            continue;
+        }
 
         if history.0.latest_tick().is_none() {
             sim_render.previous = server_state;
@@ -395,6 +408,7 @@ pub fn world_interaction_system(
     player_status: Res<rs_utils::PlayerStatus>,
     to_net: Res<ToNet>,
     inventory_state: Res<InventoryState>,
+    sim_state: Res<SimState>,
     mut break_indicator: ResMut<BreakIndicator>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -553,6 +567,10 @@ pub fn world_interaction_system(
             });
         } else if let Some(hit) = block_hit {
             let face = normal_to_face_index(hit.normal);
+            let place_pos = hit.block + hit.normal;
+            if placement_intersects_player(place_pos, sim_state.current.pos) {
+                return;
+            }
             let _ = to_net.0.send(ToNetMessage::PlaceBlock {
                 x: hit.block.x,
                 y: hit.block.y,
@@ -567,6 +585,31 @@ pub fn world_interaction_system(
             let _ = to_net.0.send(ToNetMessage::UseItem { held_item });
         }
     }
+}
+
+fn placement_intersects_player(block_pos: IVec3, player_feet: Vec3) -> bool {
+    const PLAYER_HALF_WIDTH: f32 = 0.3;
+    const PLAYER_HEIGHT: f32 = 1.8;
+    let player_min = Vec3::new(
+        player_feet.x - PLAYER_HALF_WIDTH,
+        player_feet.y,
+        player_feet.z - PLAYER_HALF_WIDTH,
+    );
+    let player_max = Vec3::new(
+        player_feet.x + PLAYER_HALF_WIDTH,
+        player_feet.y + PLAYER_HEIGHT,
+        player_feet.z + PLAYER_HALF_WIDTH,
+    );
+
+    let block_min = Vec3::new(block_pos.x as f32, block_pos.y as f32, block_pos.z as f32);
+    let block_max = block_min + Vec3::ONE;
+
+    player_min.x < block_max.x
+        && player_max.x > block_min.x
+        && player_min.y < block_max.y
+        && player_max.y > block_min.y
+        && player_min.z < block_max.z
+        && player_max.z > block_min.z
 }
 
 #[derive(Clone, Copy)]
