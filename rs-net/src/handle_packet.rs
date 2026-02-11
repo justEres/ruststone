@@ -3,7 +3,7 @@ use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
-    MobKind, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition,
+    MobKind, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel,
 };
 
 use crate::chunk_decode;
@@ -220,18 +220,21 @@ pub fn handle_packet(
                 on_ground: None,
             }));
             if let Some(uuid) = parsed_uuid {
-                let skin_url = extract_skin_url_from_spawn_properties(&sp.properties.data);
+                let (skin_url, skin_model) =
+                    extract_skin_info_from_spawn_properties(&sp.properties.data);
                 println!(
-                    "NET SpawnPlayer_i32_HeldItem_String name={} uuid={:?} props={} skin_url={:?}",
+                    "NET SpawnPlayer_i32_HeldItem_String name={} uuid={:?} props={} skin_url={:?} skin_model={:?}",
                     sp.name,
                     uuid,
                     sp.properties.data.len(),
-                    skin_url
+                    skin_url,
+                    skin_model
                 );
                 let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::PlayerInfoAdd {
                     uuid,
                     name: sp.name,
                     skin_url,
+                    skin_model,
                 }));
             }
         }
@@ -527,19 +530,22 @@ pub fn handle_packet(
                         properties,
                         ..
                     } => {
-                        let skin_url = extract_skin_url_from_player_properties(&properties);
+                        let (skin_url, skin_model) =
+                            extract_skin_info_from_player_properties(&properties);
                         println!(
-                            "NET PlayerInfo::Add name={} uuid={:?} props={} skin_url={:?}",
+                            "NET PlayerInfo::Add name={} uuid={:?} props={} skin_url={:?} skin_model={:?}",
                             name,
                             uuid,
                             properties.len(),
-                            skin_url
+                            skin_url,
+                            skin_model
                         );
                         let _ = to_main.send(FromNetMessage::NetEntity(
                             NetEntityMessage::PlayerInfoAdd {
                                 uuid,
                                 name,
                                 skin_url,
+                                skin_model,
                             },
                         ));
                     }
@@ -821,29 +827,29 @@ fn item_name(item_id: i32) -> &'static str {
     }
 }
 
-fn extract_skin_url_from_player_properties(
+fn extract_skin_info_from_player_properties(
     properties: &[rs_protocol::protocol::packet::PlayerProperty],
-) -> Option<String> {
-    extract_skin_url_from_properties(
+) -> (Option<String>, PlayerSkinModel) {
+    extract_skin_info_from_properties(
         properties
             .iter()
             .map(|p| (p.name.as_str(), p.value.as_str())),
     )
 }
 
-fn extract_skin_url_from_spawn_properties(
+fn extract_skin_info_from_spawn_properties(
     properties: &[rs_protocol::protocol::packet::SpawnProperty],
-) -> Option<String> {
-    extract_skin_url_from_properties(
+) -> (Option<String>, PlayerSkinModel) {
+    extract_skin_info_from_properties(
         properties
             .iter()
             .map(|p| (p.name.as_str(), p.value.as_str())),
     )
 }
 
-fn extract_skin_url_from_properties<'a>(
+fn extract_skin_info_from_properties<'a>(
     properties: impl Iterator<Item = (&'a str, &'a str)>,
-) -> Option<String> {
+) -> (Option<String>, PlayerSkinModel) {
     for (name, value) in properties {
         if name != "textures" {
             continue;
@@ -857,14 +863,21 @@ fn extract_skin_url_from_properties<'a>(
         let Some(url) = json.pointer("/textures/SKIN/url").and_then(|v| v.as_str()) else {
             continue;
         };
+        let skin_model = match json
+            .pointer("/textures/SKIN/metadata/model")
+            .and_then(|v| v.as_str())
+        {
+            Some("slim") => PlayerSkinModel::Slim,
+            _ => PlayerSkinModel::Classic,
+        };
         if url.starts_with("http://textures.minecraft.net/texture/")
             || url.starts_with("https://textures.minecraft.net/texture/")
         {
             let normalized = url.replacen("http://", "https://", 1);
-            return Some(normalized);
+            return (Some(normalized), skin_model);
         }
     }
-    None
+    (None, PlayerSkinModel::Classic)
 }
 
 fn mob_type_to_kind(ty: u8) -> MobKind {

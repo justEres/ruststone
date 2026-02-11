@@ -62,6 +62,13 @@ pub enum NetEntityKind {
     Object(ObjectKind),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PlayerSkinModel {
+    #[default]
+    Classic,
+    Slim,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MobKind {
     Creeper,
@@ -133,6 +140,7 @@ pub enum NetEntityMessage {
         uuid: UUID,
         name: String,
         skin_url: Option<String>,
+        skin_model: PlayerSkinModel,
     },
     PlayerInfoRemove {
         uuid: UUID,

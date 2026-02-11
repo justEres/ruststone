@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::thread;
 
 use crate::sim::collision::{WorldCollisionMap, is_solid};
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::mesh::Indices;
 use bevy::render::render_asset::RenderAssetUsages;
@@ -10,7 +11,10 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_egui::{EguiContexts, egui};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::PlayerCamera;
-use rs_utils::{AppState, ApplicationState, MobKind, NetEntityKind, NetEntityMessage, ObjectKind};
+use rs_utils::{
+    AppState, ApplicationState, MobKind, NetEntityKind, NetEntityMessage, ObjectKind,
+    PlayerSkinModel,
+};
 use tracing::{info, warn};
 
 const PLAYER_SCALE: Vec3 = Vec3::ONE;
@@ -99,6 +103,7 @@ pub struct RemoteEntityRegistry {
     pub player_entity_by_uuid: HashMap<rs_protocol::protocol::UUID, i32>,
     pub player_name_by_uuid: HashMap<rs_protocol::protocol::UUID, String>,
     pub player_skin_url_by_uuid: HashMap<rs_protocol::protocol::UUID, String>,
+    pub player_skin_model_by_uuid: HashMap<rs_protocol::protocol::UUID, PlayerSkinModel>,
     pub pending_labels: HashMap<i32, String>,
 }
 
@@ -170,6 +175,7 @@ pub fn remote_entity_connection_sync(
     registry.player_entity_by_uuid.clear();
     registry.player_name_by_uuid.clear();
     registry.player_skin_url_by_uuid.clear();
+    registry.player_skin_model_by_uuid.clear();
     registry.pending_labels.clear();
 }
 
@@ -201,14 +207,18 @@ pub fn apply_remote_entity_events(
                 uuid,
                 name,
                 skin_url,
+                skin_model,
             } => {
                 info!(
-                    "ENTITY PlayerInfoAdd name={} uuid={:?} skin_url={:?}",
-                    name, uuid, skin_url
+                    "ENTITY PlayerInfoAdd name={} uuid={:?} skin_url={:?} skin_model={:?}",
+                    name, uuid, skin_url, skin_model
                 );
                 registry
                     .player_name_by_uuid
                     .insert(uuid.clone(), name.clone());
+                registry
+                    .player_skin_model_by_uuid
+                    .insert(uuid.clone(), skin_model);
                 if let Some(url) = skin_url {
                     skin_downloader.request(url.clone());
                     registry.player_skin_url_by_uuid.insert(uuid.clone(), url);
@@ -224,6 +234,7 @@ pub fn apply_remote_entity_events(
             }
             NetEntityMessage::PlayerInfoRemove { uuid } => {
                 registry.player_name_by_uuid.remove(&uuid);
+                registry.player_skin_model_by_uuid.remove(&uuid);
             }
             NetEntityMessage::Spawn {
                 entity_id,
@@ -263,6 +274,11 @@ pub fn apply_remote_entity_events(
                 } else {
                     None
                 };
+                let player_skin_model = uuid
+                    .as_ref()
+                    .and_then(|id| registry.player_skin_model_by_uuid.get(id))
+                    .copied()
+                    .unwrap_or(PlayerSkinModel::Classic);
                 let display_name = if kind == NetEntityKind::Player {
                     uuid.as_ref()
                         .and_then(|id| registry.player_name_by_uuid.get(id))
@@ -307,6 +323,7 @@ pub fn apply_remote_entity_events(
                         &mut meshes,
                         &mut materials,
                         player_skin,
+                        player_skin_model,
                     );
                     commands.entity(root).add_child(parts.head);
                     commands.entity(root).add_child(parts.body);
@@ -546,6 +563,10 @@ pub fn remote_skin_download_tick(
             RenderAssetUsages::default(),
         );
         image.data = Some(downloaded.rgba);
+        let mut sampler = ImageSamplerDescriptor::nearest();
+        sampler.address_mode_u = ImageAddressMode::ClampToEdge;
+        sampler.address_mode_v = ImageAddressMode::ClampToEdge;
+        image.sampler = ImageSampler::Descriptor(sampler);
         let handle = images.add(image);
         downloader.loaded.insert(downloaded.skin_url, handle);
     }
@@ -635,6 +656,7 @@ fn spawn_remote_player_model(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     player_skin: Option<Handle<Image>>,
+    skin_model: PlayerSkinModel,
 ) -> (RemotePlayerModelParts, Vec<Handle<StandardMaterial>>) {
     let base_mat = materials.add(StandardMaterial {
         base_color: if player_skin.is_some() {
@@ -670,7 +692,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_left_arm_meshes(),
+        player_left_arm_meshes(skin_model),
         Vec3::new(-0.375, 1.125, 0.0),
     );
     let arm_right = spawn_player_part(
@@ -678,7 +700,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_right_arm_meshes(),
+        player_right_arm_meshes(skin_model),
         Vec3::new(0.375, 1.125, 0.0),
     );
     let leg_left = spawn_player_part(
@@ -765,17 +787,25 @@ fn player_body_meshes() -> Vec<Mesh> {
     ]
 }
 
-fn player_right_arm_meshes() -> Vec<Mesh> {
+fn player_right_arm_meshes(skin_model: PlayerSkinModel) -> Vec<Mesh> {
+    let (arm_width, arm_u) = match skin_model {
+        PlayerSkinModel::Slim => (3.0, 40.0),
+        PlayerSkinModel::Classic => (4.0, 40.0),
+    };
     vec![
-        make_skin_box(4.0, 12.0, 4.0, 40.0, 16.0, 0.0),
-        make_skin_box(4.0, 12.0, 4.0, 40.0, 32.0, 0.25),
+        make_skin_box(arm_width, 12.0, 4.0, arm_u, 16.0, 0.0),
+        make_skin_box(arm_width, 12.0, 4.0, arm_u, 32.0, 0.25),
     ]
 }
 
-fn player_left_arm_meshes() -> Vec<Mesh> {
+fn player_left_arm_meshes(skin_model: PlayerSkinModel) -> Vec<Mesh> {
+    let (arm_width, inner_u, outer_u) = match skin_model {
+        PlayerSkinModel::Slim => (3.0, 32.0, 48.0),
+        PlayerSkinModel::Classic => (4.0, 32.0, 48.0),
+    };
     vec![
-        make_skin_box(4.0, 12.0, 4.0, 32.0, 48.0, 0.0),
-        make_skin_box(4.0, 12.0, 4.0, 48.0, 48.0, 0.25),
+        make_skin_box(arm_width, 12.0, 4.0, inner_u, 48.0, 0.0),
+        make_skin_box(arm_width, 12.0, 4.0, outer_u, 48.0, 0.25),
     ]
 }
 
