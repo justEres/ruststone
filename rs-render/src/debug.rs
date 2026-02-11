@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
-use crate::chunk::{ChunkStore, snapshot_for_chunk};
+use crate::chunk::{ChunkRenderAssets, ChunkStore, snapshot_for_chunk};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::core_pipeline::fxaa::Fxaa;
 use bevy::pbr::wireframe::WireframeConfig;
@@ -146,6 +146,7 @@ pub fn remesh_on_meshing_toggle(
     store: Res<ChunkStore>,
     async_mesh: Res<MeshAsyncResources>,
     mut in_flight: ResMut<MeshInFlight>,
+    assets: Res<ChunkRenderAssets>,
 ) {
     if settings.use_greedy_meshing == state.last_use_greedy {
         return;
@@ -158,6 +159,7 @@ pub fn remesh_on_meshing_toggle(
             chunk_key: key,
             snapshot,
             use_greedy: settings.use_greedy_meshing,
+            texture_mapping: assets.texture_mapping.clone(),
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);

@@ -6,6 +6,7 @@ use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
+mod block_models;
 mod block_textures;
 mod camera;
 mod chunk;
@@ -68,6 +69,7 @@ fn enqueue_chunk_meshes(
     mut in_flight: ResMut<async_mesh::MeshInFlight>,
     render_debug: Res<debug::RenderDebugSettings>,
     mut perf: ResMut<debug::RenderPerfStats>,
+    assets: Res<chunk::ChunkRenderAssets>,
 ) {
     let start = std::time::Instant::now();
     if queue.0.is_empty() {
@@ -102,6 +104,7 @@ fn enqueue_chunk_meshes(
             chunk_key: key,
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
+            texture_mapping: assets.texture_mapping.clone(),
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);
@@ -162,6 +165,7 @@ fn apply_mesh_results(
         let mut active_keys = std::collections::HashSet::new();
         let chunk::MeshBatch {
             opaque,
+            cutout,
             transparent,
         } = mesh_batch;
         for (group, data, material) in [
@@ -169,6 +173,11 @@ fn apply_mesh_results(
                 chunk::MaterialGroup::Opaque,
                 opaque,
                 assets.opaque_material.clone(),
+            ),
+            (
+                chunk::MaterialGroup::Cutout,
+                cutout,
+                assets.cutout_material.clone(),
             ),
             (
                 chunk::MaterialGroup::Transparent,

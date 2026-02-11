@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
@@ -10,11 +11,13 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderRef, TextureDimension, TextureFormat,
 };
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
-use rs_utils::{BlockUpdate, ChunkData};
+use rs_utils::{BlockModelKind, BlockUpdate, ChunkData, block_model_kind};
 
+use crate::block_models::{BlockModelResolver, default_model_roots};
 use crate::block_textures::{
-    ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TEXTURES, BiomeTint, Face, TextureKey, atlas_tile_origin,
-    biome_tint, is_transparent_texture, texture_for_face, texture_path, uv_for_texture,
+    ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TILE_CAPACITY, AtlasBlockMapping, BiomeTint, Face,
+    atlas_tile_origin, biome_tint, build_block_texture_mapping, is_grass_block, is_leaves_block,
+    is_transparent_block, is_water_block, uv_for_texture,
 };
 
 const CHUNK_SIZE: i32 = 16;
@@ -128,26 +131,31 @@ pub struct ChunkColumnSnapshot {
 }
 
 impl ChunkColumnSnapshot {
-    pub fn build_mesh_data(&self, use_greedy: bool) -> MeshBatch {
+    pub fn build_mesh_data(
+        &self,
+        use_greedy: bool,
+        texture_mapping: &AtlasBlockMapping,
+    ) -> MeshBatch {
         if use_greedy {
-            build_chunk_mesh_greedy(self, self.center_key.0, self.center_key.1)
+            build_chunk_mesh_greedy(self, self.center_key.0, self.center_key.1, texture_mapping)
         } else {
-            build_chunk_mesh_culled(self, self.center_key.0, self.center_key.1)
+            build_chunk_mesh_culled(self, self.center_key.0, self.center_key.1, texture_mapping)
         }
     }
 }
 
 pub struct MeshBatch {
     pub opaque: MeshData,
+    pub cutout: MeshData,
     pub transparent: MeshData,
 }
 
 impl MeshBatch {
-    pub fn data_for(&mut self, key: TextureKey) -> &mut MeshData {
-        if is_transparent_texture(key) {
-            &mut self.transparent
-        } else {
-            &mut self.opaque
+    pub fn data_for(&mut self, block_id: u16) -> &mut MeshData {
+        match render_group_for_block(block_id) {
+            MaterialGroup::Opaque => &mut self.opaque,
+            MaterialGroup::Cutout => &mut self.cutout,
+            MaterialGroup::Transparent => &mut self.transparent,
         }
     }
 }
@@ -156,6 +164,7 @@ impl Default for MeshBatch {
     fn default() -> Self {
         Self {
             opaque: MeshData::empty(),
+            cutout: MeshData::empty(),
             transparent: MeshData::empty(),
         }
     }
@@ -164,6 +173,7 @@ impl Default for MeshBatch {
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum MaterialGroup {
     Opaque,
+    Cutout,
     Transparent,
 }
 
@@ -218,13 +228,15 @@ impl MeshData {
 #[derive(Resource)]
 pub struct ChunkRenderAssets {
     pub opaque_material: Handle<ChunkAtlasMaterial>,
+    pub cutout_material: Handle<ChunkAtlasMaterial>,
     pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
+    pub texture_mapping: Arc<AtlasBlockMapping>,
 }
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
-        let mut atlas_image = load_or_build_atlas();
+        let (mut atlas_image, texture_mapping) = load_or_build_atlas();
         let mut sampler = ImageSamplerDescriptor::nearest();
         sampler.address_mode_u = ImageAddressMode::ClampToEdge;
         sampler.address_mode_v = ImageAddressMode::ClampToEdge;
@@ -260,11 +272,26 @@ impl FromWorld for ChunkRenderAssets {
                 atlas: atlas_handle.clone(),
             },
         });
+        let cutout_material = materials.add(ChunkAtlasMaterial {
+            base: StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: None,
+                perceptual_roughness: 1.0,
+                alpha_mode: AlphaMode::Mask(0.5),
+                cull_mode: None,
+                ..default()
+            },
+            extension: AtlasTextureExtension {
+                atlas: atlas_handle.clone(),
+            },
+        });
 
         Self {
             opaque_material,
+            cutout_material,
             transparent_material,
             atlas: atlas_handle,
+            texture_mapping,
         }
     }
 }
@@ -273,26 +300,42 @@ fn assets_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rs-client/assets")
 }
 
-fn atlas_cache_path() -> PathBuf {
-    assets_root().join("texturepack/atlas_cache_v2.png")
-}
-
 fn texture_root_path() -> PathBuf {
     assets_root().join(TEXTURE_BASE)
 }
 
-fn load_or_build_atlas() -> Image {
-    let cache_path = atlas_cache_path();
-    if let Ok(img) = image::open(&cache_path) {
-        return bevy_image_from_rgba(img);
+fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>) {
+    let textures_root = texture_root_path();
+    let mut texture_names = collect_texture_names(&textures_root);
+    texture_names.sort();
+    texture_names.dedup();
+    if texture_names.is_empty() {
+        texture_names.push("missing_texture.png".to_string());
+    } else if !texture_names
+        .iter()
+        .any(|name| name == "missing_texture.png")
+    {
+        texture_names.insert(0, "missing_texture.png".to_string());
+    }
+    if texture_names.len() > ATLAS_TILE_CAPACITY {
+        warn!(
+            "Block texture atlas overflow: {} textures but capacity is {}",
+            texture_names.len(),
+            ATLAS_TILE_CAPACITY
+        );
+        texture_names.truncate(ATLAS_TILE_CAPACITY);
     }
 
-    let textures_root = texture_root_path();
+    let mut name_to_index = HashMap::with_capacity(texture_names.len());
+    for (idx, name) in texture_names.iter().enumerate() {
+        name_to_index.insert(name.clone(), idx as u16);
+    }
+
     let mut tile_size = None;
     let mut atlas = None::<ImageBuffer<Rgba<u8>, Vec<u8>>>;
 
-    for (idx, key) in ATLAS_TEXTURES.iter().enumerate() {
-        let texture_path = textures_root.join(texture_path(*key));
+    for (idx, texture_name) in texture_names.iter().enumerate() {
+        let texture_path = textures_root.join(texture_name);
         let img = image::open(&texture_path).unwrap_or_else(|_| missing_texture_image());
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
@@ -318,15 +361,40 @@ fn load_or_build_atlas() -> Image {
         imageops::overlay(atlas_buf, &rgba, x.into(), y.into());
     }
 
-    let atlas = atlas
-        .unwrap_or_else(|| ImageBuffer::from_pixel(ATLAS_COLUMNS, ATLAS_ROWS, Rgba([0, 0, 0, 0])));
+    let atlas = atlas.unwrap_or_else(|| {
+        ImageBuffer::from_pixel(ATLAS_COLUMNS * 16, ATLAS_ROWS * 16, Rgba([0, 0, 0, 0]))
+    });
+    let mut model_resolver = BlockModelResolver::new(default_model_roots());
+    let mapping = Arc::new(build_block_texture_mapping(
+        &name_to_index,
+        Some(&mut model_resolver),
+    ));
+    (
+        bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas)),
+        mapping,
+    )
+}
 
-    if let Some(parent) = cache_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+fn collect_texture_names(textures_root: &PathBuf) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(read_dir) = std::fs::read_dir(textures_root) else {
+        return out;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+        {
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                out.push(name.to_string());
+            }
+        }
     }
-    let _ = atlas.save(&cache_path);
-
-    bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas))
+    out
 }
 
 fn bevy_image_from_rgba(img: DynamicImage) -> Image {
@@ -446,6 +514,7 @@ fn build_chunk_mesh_culled(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
+    texture_mapping: &AtlasBlockMapping,
 ) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
@@ -468,10 +537,26 @@ fn build_chunk_mesh_culled(
                     }
 
                     let tint = biome_tint(biome_at(snapshot, chunk_x, chunk_z, x, z));
+                    if is_custom_block(block_id) {
+                        add_custom_block(
+                            &mut batch,
+                            snapshot,
+                            texture_mapping,
+                            chunk_x,
+                            chunk_z,
+                            x,
+                            base_y + y,
+                            z,
+                            block_id,
+                            tint,
+                        );
+                        continue;
+                    }
 
                     add_block_faces(
                         &mut batch,
                         snapshot,
+                        texture_mapping,
                         chunk_x,
                         chunk_z,
                         x,
@@ -490,7 +575,8 @@ fn build_chunk_mesh_culled(
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 struct GreedyKey {
-    texture: TextureKey,
+    texture_index: u16,
+    block_id: u16,
     tint_key: u8,
 }
 
@@ -506,6 +592,7 @@ fn build_chunk_mesh_greedy(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
+    texture_mapping: &AtlasBlockMapping,
 ) -> MeshBatch {
     let mut batch = MeshBatch::default();
 
@@ -518,6 +605,33 @@ fn build_chunk_mesh_greedy(
             continue;
         };
         let base_y = section_y as i32 * SECTION_HEIGHT;
+
+        // Cross-model blocks (flowers/grass/reeds/crops) are emitted as explicit
+        // crossed quads and skipped from greedy full-cube meshing.
+        for y in 0..SECTION_HEIGHT {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let idx = (y * CHUNK_SIZE * CHUNK_SIZE + z * CHUNK_SIZE + x) as usize;
+                    let block_id = section_blocks[idx];
+                    if block_id == 0 || !is_custom_block(block_id) {
+                        continue;
+                    }
+                    let tint = biome_tint(biome_at(snapshot, chunk_x, chunk_z, x, z));
+                    add_custom_block(
+                        &mut batch,
+                        snapshot,
+                        texture_mapping,
+                        chunk_x,
+                        chunk_z,
+                        x,
+                        base_y + y,
+                        z,
+                        block_id,
+                        tint,
+                    );
+                }
+            }
+        }
 
         for face in [
             Face::PosX,
@@ -537,6 +651,9 @@ fn build_chunk_mesh_greedy(
                         if block_id == 0 {
                             continue;
                         }
+                        if is_custom_block(block_id) {
+                            continue;
+                        }
 
                         let (dx, dy, dz) = match face {
                             Face::PosX => (1, 0, 0),
@@ -552,20 +669,21 @@ fn build_chunk_mesh_greedy(
                             continue;
                         }
 
-                        let texture = texture_for_face(block_id, face);
+                        let texture_index = texture_mapping.texture_index(block_id, face);
                         let biome_id = biome_at(snapshot, chunk_x, chunk_z, x, z);
-                        let tint_key = if matches!(
-                            texture,
-                            TextureKey::GrassTop
-                                | TextureKey::GrassSide
-                                | TextureKey::LeavesOak
-                                | TextureKey::Water
-                        ) {
+                        let tint_key = if is_grass_block(block_id)
+                            || is_leaves_block(block_id)
+                            || is_water_block(block_id)
+                        {
                             biome_id
                         } else {
                             0
                         };
-                        let key = GreedyKey { texture, tint_key };
+                        let key = GreedyKey {
+                            texture_index,
+                            block_id,
+                            tint_key,
+                        };
 
                         let (axis, u, v) = match face {
                             Face::PosY | Face::NegY => (y, x, z),
@@ -589,7 +707,8 @@ fn build_chunk_mesh_greedy(
                             axis as i32,
                             base_y,
                             quad,
-                            key.texture,
+                            key.texture_index,
+                            key.block_id,
                             tint,
                         );
                     }
@@ -607,12 +726,13 @@ fn add_greedy_quad(
     axis: i32,
     base_y: i32,
     quad: GreedyQuad,
-    texture: TextureKey,
+    texture_index: u16,
+    block_id: u16,
     tint: BiomeTint,
 ) {
-    let data = batch.data_for(texture);
+    let data = batch.data_for(block_id);
     let base_index = data.positions.len() as u32;
-    let tile_origin = atlas_tile_origin(texture);
+    let tile_origin = atlas_tile_origin(texture_index);
 
     let u0 = quad.x as f32;
     let v0 = quad.y as f32;
@@ -677,13 +797,13 @@ fn add_greedy_quad(
         data.normals.push(normal);
     }
 
-    let base_uvs = uv_for_texture(texture);
+    let base_uvs = uv_for_texture();
     for uv in base_uvs {
         data.uvs
             .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
         data.uvs_b.push(tile_origin);
     }
-    let color = tint_color(texture, tint);
+    let color = tint_color(block_id, tint);
     data.colors.extend_from_slice(&[color, color, color, color]);
     data.indices.extend_from_slice(&[
         base_index,
@@ -733,6 +853,7 @@ fn greedy_mesh_binary_plane(mut data: [u32; 16], size: u32) -> Vec<GreedyQuad> {
 fn add_block_faces(
     batch: &mut MeshBatch,
     snapshot: &ChunkColumnSnapshot,
+    texture_mapping: &AtlasBlockMapping,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -828,18 +949,18 @@ fn add_block_faces(
             continue;
         }
 
-        let texture = texture_for_face(block_id, face);
-        let data = batch.data_for(texture);
+        let texture_index = texture_mapping.texture_index(block_id, face);
+        let data = batch.data_for(block_id);
         let base_index = data.positions.len() as u32;
         for vert in verts {
             data.push_pos([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
             data.normals.push(normal);
         }
-        let uvs = uv_for_texture(texture);
+        let uvs = uv_for_texture();
         data.uvs.extend_from_slice(&uvs);
-        let tile_origin = atlas_tile_origin(texture);
+        let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let color = tint_color(texture, tint);
+        let color = tint_color(block_id, tint);
         data.colors.extend_from_slice(&[color, color, color, color]);
         data.indices.extend_from_slice(&[
             base_index,
@@ -852,13 +973,373 @@ fn add_block_faces(
     }
 }
 
-fn tint_color(texture: TextureKey, tint: BiomeTint) -> [f32; 4] {
-    match texture {
-        TextureKey::GrassTop | TextureKey::GrassSide => tint.grass,
-        TextureKey::LeavesOak => tint.foliage,
-        TextureKey::Water => tint.water,
-        _ => [1.0, 1.0, 1.0, 1.0],
+fn tint_color(block_id: u16, tint: BiomeTint) -> [f32; 4] {
+    if is_grass_block(block_id) {
+        return tint.grass;
     }
+    if is_leaves_block(block_id) {
+        return tint.foliage;
+    }
+    if is_water_block(block_id) {
+        return tint.water;
+    }
+    [1.0, 1.0, 1.0, 1.0]
+}
+
+fn add_cross_plant(
+    batch: &mut MeshBatch,
+    _snapshot: &ChunkColumnSnapshot,
+    texture_mapping: &AtlasBlockMapping,
+    _chunk_x: i32,
+    _chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    tint: BiomeTint,
+) {
+    let texture_index = texture_mapping.texture_index(block_id, Face::PosZ);
+    let tile_origin = atlas_tile_origin(texture_index);
+    let uvs = uv_for_texture();
+    let color = tint_color(block_id, tint);
+    let data = batch.data_for(block_id);
+
+    let x0 = x as f32;
+    let y0 = y as f32;
+    let z0 = z as f32;
+
+    // Plane A: (0,0,0) -> (1,1,1)
+    let normal_a = Vec3::new(1.0, 0.0, 1.0).normalize();
+    let a = [
+        [x0 + 0.0, y0 + 0.0, z0 + 0.0],
+        [x0 + 1.0, y0 + 0.0, z0 + 1.0],
+        [x0 + 1.0, y0 + 1.0, z0 + 1.0],
+        [x0 + 0.0, y0 + 1.0, z0 + 0.0],
+    ];
+    add_double_sided_quad(
+        data,
+        a,
+        [normal_a.x, normal_a.y, normal_a.z],
+        uvs,
+        tile_origin,
+        color,
+    );
+
+    // Plane B: (1,0,0) -> (0,1,1)
+    let normal_b = Vec3::new(-1.0, 0.0, 1.0).normalize();
+    let b = [
+        [x0 + 1.0, y0 + 0.0, z0 + 0.0],
+        [x0 + 0.0, y0 + 0.0, z0 + 1.0],
+        [x0 + 0.0, y0 + 1.0, z0 + 1.0],
+        [x0 + 1.0, y0 + 1.0, z0 + 0.0],
+    ];
+    add_double_sided_quad(
+        data,
+        b,
+        [normal_b.x, normal_b.y, normal_b.z],
+        uvs,
+        tile_origin,
+        color,
+    );
+}
+
+fn add_double_sided_quad(
+    data: &mut MeshData,
+    verts: [[f32; 3]; 4],
+    normal: [f32; 3],
+    uvs: [[f32; 2]; 4],
+    tile_origin: [f32; 2],
+    color: [f32; 4],
+) {
+    let base = data.positions.len() as u32;
+    for i in 0..4 {
+        data.push_pos(verts[i]);
+        data.normals.push(normal);
+        data.uvs.push(uvs[i]);
+        data.uvs_b.push(tile_origin);
+        data.colors.push(color);
+    }
+    data.indices
+        .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+
+    let back_base = data.positions.len() as u32;
+    for i in 0..4 {
+        data.push_pos(verts[i]);
+        data.normals.push([-normal[0], -normal[1], -normal[2]]);
+        data.uvs.push(uvs[i]);
+        data.uvs_b.push(tile_origin);
+        data.colors.push(color);
+    }
+    data.indices.extend_from_slice(&[
+        back_base,
+        back_base + 1,
+        back_base + 2,
+        back_base,
+        back_base + 2,
+        back_base + 3,
+    ]);
+}
+
+fn add_custom_block(
+    batch: &mut MeshBatch,
+    snapshot: &ChunkColumnSnapshot,
+    texture_mapping: &AtlasBlockMapping,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    tint: BiomeTint,
+) {
+    match block_model_kind(block_id) {
+        BlockModelKind::Cross => add_cross_plant(
+            batch,
+            snapshot,
+            texture_mapping,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+        ),
+        BlockModelKind::TorchLike => add_cross_plant(
+            batch,
+            snapshot,
+            texture_mapping,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+        ),
+        BlockModelKind::Slab => add_box(
+            batch,
+            Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+            texture_mapping,
+            x,
+            y,
+            z,
+            [0.0, 0.0, 0.0],
+            [1.0, 0.5, 1.0],
+            block_id,
+            tint,
+        ),
+        BlockModelKind::Fence => {
+            add_box(
+                batch,
+                None,
+                texture_mapping,
+                x,
+                y,
+                z,
+                [0.375, 0.0, 0.375],
+                [0.625, 1.0, 0.625],
+                block_id,
+                tint,
+            );
+            add_box(
+                batch,
+                None,
+                texture_mapping,
+                x,
+                y,
+                z,
+                [0.4375, 0.375, 0.0],
+                [0.5625, 0.8125, 1.0],
+                block_id,
+                tint,
+            );
+            add_box(
+                batch,
+                None,
+                texture_mapping,
+                x,
+                y,
+                z,
+                [0.0, 0.375, 0.4375],
+                [1.0, 0.8125, 0.5625],
+                block_id,
+                tint,
+            );
+        }
+        BlockModelKind::Pane => {
+            add_box(
+                batch,
+                None,
+                texture_mapping,
+                x,
+                y,
+                z,
+                [0.4375, 0.0, 0.0],
+                [0.5625, 1.0, 1.0],
+                block_id,
+                tint,
+            );
+            add_box(
+                batch,
+                None,
+                texture_mapping,
+                x,
+                y,
+                z,
+                [0.0, 0.0, 0.4375],
+                [1.0, 1.0, 0.5625],
+                block_id,
+                tint,
+            );
+        }
+        _ => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_box(
+    batch: &mut MeshBatch,
+    neighbor_ctx: Option<(&ChunkColumnSnapshot, i32, i32, i32, i32, i32, u16)>,
+    texture_mapping: &AtlasBlockMapping,
+    x: i32,
+    y: i32,
+    z: i32,
+    min: [f32; 3],
+    max: [f32; 3],
+    block_id: u16,
+    tint: BiomeTint,
+) {
+    let faces = [
+        (
+            Face::PosX,
+            1,
+            0,
+            0,
+            [1.0, 0.0, 0.0],
+            [
+                [max[0], min[1], min[2]],
+                [max[0], min[1], max[2]],
+                [max[0], max[1], max[2]],
+                [max[0], max[1], min[2]],
+            ],
+            max[0] >= 1.0,
+        ),
+        (
+            Face::NegX,
+            -1,
+            0,
+            0,
+            [-1.0, 0.0, 0.0],
+            [
+                [min[0], min[1], max[2]],
+                [min[0], min[1], min[2]],
+                [min[0], max[1], min[2]],
+                [min[0], max[1], max[2]],
+            ],
+            min[0] <= 0.0,
+        ),
+        (
+            Face::PosY,
+            0,
+            1,
+            0,
+            [0.0, 1.0, 0.0],
+            [
+                [min[0], max[1], min[2]],
+                [max[0], max[1], min[2]],
+                [max[0], max[1], max[2]],
+                [min[0], max[1], max[2]],
+            ],
+            max[1] >= 1.0,
+        ),
+        (
+            Face::NegY,
+            0,
+            -1,
+            0,
+            [0.0, -1.0, 0.0],
+            [
+                [min[0], min[1], max[2]],
+                [max[0], min[1], max[2]],
+                [max[0], min[1], min[2]],
+                [min[0], min[1], min[2]],
+            ],
+            min[1] <= 0.0,
+        ),
+        (
+            Face::PosZ,
+            0,
+            0,
+            1,
+            [0.0, 0.0, 1.0],
+            [
+                [max[0], min[1], max[2]],
+                [min[0], min[1], max[2]],
+                [min[0], max[1], max[2]],
+                [max[0], max[1], max[2]],
+            ],
+            max[2] >= 1.0,
+        ),
+        (
+            Face::NegZ,
+            0,
+            0,
+            -1,
+            [0.0, 0.0, -1.0],
+            [
+                [min[0], min[1], min[2]],
+                [max[0], min[1], min[2]],
+                [max[0], max[1], min[2]],
+                [min[0], max[1], min[2]],
+            ],
+            min[2] <= 0.0,
+        ),
+    ];
+
+    for (face, dx, dy, dz, normal, verts, boundary_face) in faces {
+        if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, block_id_for_cull)) = neighbor_ctx {
+            if boundary_face {
+                let neighbor = block_at(snapshot, chunk_x, chunk_z, bx + dx, by + dy, bz + dz);
+                if face_is_occluded(block_id_for_cull, neighbor) {
+                    continue;
+                }
+            }
+        }
+
+        let texture_index = texture_mapping.texture_index(block_id, face);
+        let data = batch.data_for(block_id);
+        let base_index = data.positions.len() as u32;
+        for vert in verts {
+            data.push_pos([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
+            data.normals.push(normal);
+        }
+        let uvs = uv_for_texture();
+        data.uvs.extend_from_slice(&uvs);
+        let tile_origin = atlas_tile_origin(texture_index);
+        data.uvs_b.extend_from_slice(&[tile_origin; 4]);
+        let color = tint_color(block_id, tint);
+        data.colors.extend_from_slice(&[color, color, color, color]);
+        data.indices.extend_from_slice(&[
+            base_index,
+            base_index + 2,
+            base_index + 1,
+            base_index,
+            base_index + 3,
+            base_index + 2,
+        ]);
+    }
+}
+
+fn is_custom_block(block_id: u16) -> bool {
+    matches!(
+        block_model_kind(block_id),
+        BlockModelKind::Cross
+            | BlockModelKind::Slab
+            | BlockModelKind::Fence
+            | BlockModelKind::Pane
+            | BlockModelKind::TorchLike
+    )
 }
 
 fn biome_at(snapshot: &ChunkColumnSnapshot, chunk_x: i32, chunk_z: i32, x: i32, z: i32) -> u8 {
@@ -924,6 +1405,29 @@ fn is_liquid(block_id: u16) -> bool {
     matches!(block_id, 8 | 9 | 10 | 11)
 }
 
+fn render_group_for_block(block_id: u16) -> MaterialGroup {
+    if is_transparent_block(block_id) {
+        return MaterialGroup::Transparent;
+    }
+    if matches!(
+        block_model_kind(block_id),
+        BlockModelKind::Cross | BlockModelKind::Pane | BlockModelKind::TorchLike
+    ) {
+        return MaterialGroup::Cutout;
+    }
+    MaterialGroup::Opaque
+}
+
+fn is_occluding_block(block_id: u16) -> bool {
+    if block_id == 0 {
+        return false;
+    }
+    if is_liquid(block_id) {
+        return true;
+    }
+    !is_custom_block(block_id)
+}
+
 fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
     if neighbor_id == 0 {
         return false;
@@ -931,5 +1435,5 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
     if is_liquid(neighbor_id) {
         return is_liquid(block_id);
     }
-    true
+    is_occluding_block(neighbor_id)
 }
