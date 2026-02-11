@@ -176,6 +176,14 @@ pub enum NetEntityMessage {
         entity_id: i32,
         velocity: Vec3,
     },
+    Pose {
+        entity_id: i32,
+        sneaking: bool,
+    },
+    Animation {
+        entity_id: i32,
+        animation: NetEntityAnimation,
+    },
     SetLabel {
         entity_id: i32,
         label: String,
@@ -183,6 +191,14 @@ pub enum NetEntityMessage {
     Destroy {
         entity_ids: Vec<i32>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetEntityAnimation {
+    SwingMainArm,
+    TakeDamage,
+    LeaveBed,
+    Unknown(u8),
 }
 
 #[derive(Resource)]

@@ -3,7 +3,8 @@ use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
-    MobKind, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel,
+    MobKind, NetEntityAnimation, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition,
+    PlayerSkinModel,
 };
 
 use crate::chunk_decode;
@@ -243,6 +244,18 @@ pub fn handle_packet(
         }
         Packet::EntityMetadata_i32(em) => {
             handle_entity_metadata(em.entity_id, &em.metadata, to_main);
+        }
+        Packet::Animation(anim) => {
+            let animation = match anim.animation_id {
+                0 => NetEntityAnimation::SwingMainArm,
+                1 => NetEntityAnimation::TakeDamage,
+                2 => NetEntityAnimation::LeaveBed,
+                other => NetEntityAnimation::Unknown(other),
+            };
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Animation {
+                entity_id: anim.entity_id.0,
+                animation,
+            }));
         }
         Packet::EntityProperties(_ep) => {}
         Packet::SpawnObject_i32_NoUUID(so) => {
@@ -716,6 +729,14 @@ fn handle_entity_metadata(
     metadata: &rs_protocol::types::Metadata,
     to_main: &crossbeam::channel::Sender<FromNetMessage>,
 ) {
+    if let Some(MetadataValue::Byte(flags)) = metadata.get_raw(0) {
+        let sneaking = (*flags & 0x02) != 0;
+        let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Pose {
+            entity_id,
+            sneaking,
+        }));
+    }
+
     let Some(MetadataValue::OptionalItemStack(Some(stack))) = metadata.get_raw(10) else {
         return;
     };
