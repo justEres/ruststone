@@ -267,10 +267,9 @@ pub fn is_transparent_texture(key: TextureKey) -> bool {
 }
 
 fn base_uv_for_texture(key: TextureKey) -> [[f32; 2]; 4] {
-    match key {
-        TextureKey::GrassSide => [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-        _ => [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-    }
+    let _ = key;
+    // Keep UVs in top-left image-space convention used by Bevy/WGPU sampling.
+    [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
 }
 
 fn atlas_index(key: TextureKey) -> usize {

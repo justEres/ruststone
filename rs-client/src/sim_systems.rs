@@ -22,6 +22,7 @@ use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
 use crate::entities::RemoteEntity;
+use crate::entities::PlayerTextureDebugSettings;
 
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
@@ -794,6 +795,7 @@ pub fn debug_overlay_system(
     time: Res<Time>,
     mut debug_ui: ResMut<DebugUiState>,
     mut render_debug: ResMut<RenderDebugSettings>,
+    mut player_tex_debug: ResMut<PlayerTextureDebugSettings>,
     render_perf: Res<RenderPerfStats>,
     mut timings: ResMut<PerfTimings>,
 ) {
@@ -845,6 +847,8 @@ pub fn debug_overlay_system(
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
+                ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
+                ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
                 if render_debug.frustum_fov_debug {
                     ui.add(
                         egui::Slider::new(&mut render_debug.frustum_fov_deg, 30.0..=140.0)
