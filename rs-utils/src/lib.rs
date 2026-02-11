@@ -4,6 +4,12 @@ use bevy::{ecs::resource::Resource, prelude::Vec3};
 use crossbeam::channel::{Receiver, Sender};
 use rs_protocol::protocol::UUID;
 
+pub mod registry;
+pub use registry::{
+    BlockFace, BlockModelKind, TEXTUREPACK_BLOCKS_BASE, TEXTUREPACK_ITEMS_BASE, block_model_kind,
+    block_name, block_registry_key, block_texture_name, item_name, item_registry_key,
+};
+
 #[derive(Resource)]
 pub struct AppState(pub ApplicationState);
 

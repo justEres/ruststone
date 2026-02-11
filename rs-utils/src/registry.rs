@@ -1,0 +1,275 @@
+// 1.8.9-focused compile-time registry primitives.
+// Kept dependency-free and allocation-free on hot paths.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BlockFace {
+    Up,
+    Down,
+    North,
+    South,
+    West,
+    East,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BlockModelKind {
+    #[default]
+    FullCube,
+    Cross,
+    Slab,
+    Stairs,
+    Fence,
+    Pane,
+    Fluid,
+    TorchLike,
+    Custom,
+}
+
+pub const TEXTUREPACK_BLOCKS_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
+pub const TEXTUREPACK_ITEMS_BASE: &str = "texturepack/assets/minecraft/textures/items/";
+
+mod generated {
+    include!("registry_ids_generated.rs");
+}
+
+pub use generated::{block_registry_key, item_registry_key};
+
+pub const fn block_name(block_id: u16) -> &'static str {
+    match block_id {
+        1 => "Stone",
+        2 => "Grass Block",
+        3 => "Dirt",
+        4 => "Cobblestone",
+        5 => "Wood Planks",
+        7 => "Bedrock",
+        8 | 9 => "Water",
+        10 | 11 => "Lava",
+        12 => "Sand",
+        13 => "Gravel",
+        14 => "Gold Ore",
+        15 => "Iron Ore",
+        16 => "Coal Ore",
+        17 => "Oak Log",
+        18 => "Oak Leaves",
+        20 => "Glass",
+        24 => "Sandstone",
+        31 => "Tall Grass",
+        37 => "Dandelion",
+        38 => "Poppy",
+        44 => "Stone Slab",
+        50 => "Torch",
+        53 => "Oak Stairs",
+        54 => "Chest",
+        61 => "Furnace",
+        64 => "Oak Door",
+        65 => "Ladder",
+        67 => "Cobblestone Stairs",
+        71 => "Iron Door",
+        78 => "Snow Layer",
+        79 => "Ice",
+        80 => "Snow Block",
+        81 => "Cactus",
+        82 => "Clay",
+        85 => "Fence",
+        87 => "Netherrack",
+        88 => "Soul Sand",
+        89 => "Glowstone",
+        95 => "Stained Glass",
+        96 => "Trapdoor",
+        101 => "Iron Bars",
+        102 => "Glass Pane",
+        107 => "Fence Gate",
+        108 => "Brick Stairs",
+        109 => "Stone Brick Stairs",
+        134 => "Spruce Stairs",
+        135 => "Birch Stairs",
+        136 => "Jungle Stairs",
+        156 => "Quartz Stairs",
+        163 => "Acacia Stairs",
+        164 => "Dark Oak Stairs",
+        171 => "Carpet",
+        _ => match block_registry_key(block_id) {
+            Some(name) => name,
+            None => "Block",
+        },
+    }
+}
+
+pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
+    match block_id {
+        8 | 9 | 10 | 11 => BlockModelKind::Fluid,
+        6 | 31 | 32 | 37 | 38 | 39 | 40 | 59 | 83 | 104 | 105 | 141 | 142 | 175 => {
+            BlockModelKind::Cross
+        }
+        44 | 126 | 182 => BlockModelKind::Slab,
+        53 | 67 | 108 | 109 | 114 | 128 | 134 | 135 | 136 | 156 | 163 | 164 | 180 => {
+            BlockModelKind::Stairs
+        }
+        85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
+        101 | 102 | 160 => BlockModelKind::Pane,
+        50 | 75 | 76 => BlockModelKind::TorchLike,
+        _ => BlockModelKind::FullCube,
+    }
+}
+
+pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str {
+    match block_id {
+        1 => "stone.png",
+        2 => match face {
+            BlockFace::Up => "grass_top.png",
+            BlockFace::Down => "dirt.png",
+            _ => "grass_side.png",
+        },
+        3 => "dirt.png",
+        4 => "cobblestone.png",
+        5 => "planks_oak.png",
+        7 => "bedrock.png",
+        8 | 9 => "water_still.png",
+        10 | 11 => "lava_still.png",
+        12 => "sand.png",
+        13 => "gravel.png",
+        14 => "gold_ore.png",
+        15 => "iron_ore.png",
+        16 => "coal_ore.png",
+        17 => "log_oak.png",
+        18 => "leaves_oak.png",
+        19 => "sponge.png",
+        20 => "glass.png",
+        21 => "lapis_ore.png",
+        22 => "lapis_block.png",
+        24 => match face {
+            BlockFace::Up => "sandstone_top.png",
+            BlockFace::Down => "sandstone_bottom.png",
+            _ => "sandstone_normal.png",
+        },
+        25 => "noteblock.png",
+        41 => "gold_block.png",
+        42 => "iron_block.png",
+        45 => "brick.png",
+        46 => match face {
+            BlockFace::Up => "tnt_top.png",
+            BlockFace::Down => "tnt_bottom.png",
+            _ => "tnt_side.png",
+        },
+        48 => "cobblestone_mossy.png",
+        49 => "obsidian.png",
+        56 => "diamond_ore.png",
+        57 => "diamond_block.png",
+        58 => match face {
+            BlockFace::Up => "crafting_table_top.png",
+            BlockFace::Down => "planks_oak.png",
+            BlockFace::East | BlockFace::West => "crafting_table_front.png",
+            _ => "crafting_table_side.png",
+        },
+        61 | 62 => match face {
+            BlockFace::Up => "furnace_top.png",
+            BlockFace::Down => "stone.png",
+            BlockFace::South => "furnace_front_on.png",
+            _ => "furnace_side.png",
+        },
+        65 => "ladder.png",
+        78 => "snow.png",
+        79 => "ice.png",
+        80 => "snow.png",
+        81 => match face {
+            BlockFace::Up => "cactus_top.png",
+            BlockFace::Down => "cactus_bottom.png",
+            _ => "cactus_side.png",
+        },
+        82 => "clay.png",
+        87 => "netherrack.png",
+        88 => "soul_sand.png",
+        89 => "glowstone.png",
+        _ => "stone.png",
+    }
+}
+
+pub const fn item_name(item_id: i32) -> &'static str {
+    match item_id {
+        1 => "Stone",
+        2 => "Grass Block",
+        3 => "Dirt",
+        4 => "Cobblestone",
+        5 => "Wood Planks",
+        12 => "Sand",
+        13 => "Gravel",
+        17 => "Log",
+        18 => "Leaves",
+        20 => "Glass",
+        35 => "Wool",
+        41 => "Gold Block",
+        42 => "Iron Block",
+        45 => "Bricks",
+        49 => "Obsidian",
+        50 => "Torch",
+        54 => "Chest",
+        58 => "Crafting Table",
+        61 | 62 => "Furnace",
+        79 => "Ice",
+        80 => "Snow Block",
+        81 => "Cactus",
+        82 => "Clay",
+        87 => "Netherrack",
+        89 => "Glowstone",
+        256 => "Iron Shovel",
+        257 => "Iron Pickaxe",
+        258 => "Iron Axe",
+        259 => "Flint and Steel",
+        260 => "Apple",
+        261 => "Bow",
+        262 => "Arrow",
+        263 => "Coal",
+        264 => "Diamond",
+        265 => "Iron Ingot",
+        266 => "Gold Ingot",
+        267 => "Iron Sword",
+        268 => "Wooden Sword",
+        269 => "Wooden Shovel",
+        270 => "Wooden Pickaxe",
+        271 => "Wooden Axe",
+        272 => "Stone Sword",
+        273 => "Stone Shovel",
+        274 => "Stone Pickaxe",
+        275 => "Stone Axe",
+        276 => "Diamond Sword",
+        277 => "Diamond Shovel",
+        278 => "Diamond Pickaxe",
+        279 => "Diamond Axe",
+        280 => "Stick",
+        281 => "Bowl",
+        282 => "Mushroom Stew",
+        283 => "Golden Sword",
+        284 => "Golden Shovel",
+        285 => "Golden Pickaxe",
+        286 => "Golden Axe",
+        297 => "Bread",
+        320 => "Cooked Porkchop",
+        322 => "Golden Apple",
+        332 => "Snowball",
+        344 => "Egg",
+        346 => "Fishing Rod",
+        347 => "Clock",
+        354 => "Cake",
+        355 => "Bed",
+        357 => "Cookie",
+        359 => "Shears",
+        360 => "Melon Slice",
+        364 => "Steak",
+        368 => "Ender Pearl",
+        384 => "Bottle o' Enchanting",
+        386 => "Book",
+        387 => "Written Book",
+        388 => "Emerald",
+        391 => "Carrot",
+        393 => "Baked Potato",
+        403 => "Enchanted Book",
+        412 => "Rabbit Stew",
+        417 => "Iron Horse Armor",
+        418 => "Gold Horse Armor",
+        419 => "Diamond Horse Armor",
+        _ => match item_registry_key(item_id) {
+            Some(name) => name,
+            None => "Item",
+        },
+    }
+}

@@ -107,6 +107,7 @@ fn main() {
         .insert_resource(sim_systems::LatencyEstimate::default())
         .insert_resource(sim_systems::ActionState::default())
         .insert_resource(sim_systems::FrameTimingState::default())
+        .insert_resource(sim_systems::EntityHitboxDebug::default())
         .add_systems(First, sim_systems::frame_timing_start)
         .add_systems(
             Update,
@@ -125,8 +126,7 @@ fn main() {
                 entities::smooth_remote_entity_motion
                     .after(entities::apply_remote_entity_events)
                     .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
-                entities::animate_remote_player_models
-                    .after(entities::smooth_remote_entity_motion),
+                entities::animate_remote_player_models.after(entities::smooth_remote_entity_motion),
             ),
         )
         .add_systems(
@@ -138,6 +138,8 @@ fn main() {
                 sim_systems::input_collect_system,
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
+                sim_systems::draw_entity_hitboxes_system
+                    .after(sim_systems::apply_visual_transform_system),
                 sim_systems::world_interaction_system
                     .after(sim_systems::apply_visual_transform_system),
             ),

@@ -22,7 +22,12 @@ use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
 use crate::entities::RemoteEntity;
-use crate::entities::PlayerTextureDebugSettings;
+use crate::entities::{PlayerTextureDebugSettings, RemoteVisual};
+
+#[derive(Resource, Default)]
+pub struct EntityHitboxDebug {
+    pub enabled: bool,
+}
 
 #[derive(Resource, Default)]
 pub struct FrameTimingState {
@@ -177,6 +182,7 @@ pub fn fixed_update_timing_end(
 pub fn debug_toggle_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut debug_ui: ResMut<DebugUiState>,
+    mut hitbox_debug: ResMut<EntityHitboxDebug>,
     ui_state: Res<UiState>,
 ) {
     if ui_state.chat_open || ui_state.inventory_open {
@@ -184,6 +190,9 @@ pub fn debug_toggle_system(
     }
     if keys.just_pressed(KeyCode::KeyF) {
         debug_ui.open = !debug_ui.open;
+    }
+    if keys.just_pressed(KeyCode::KeyH) {
+        hitbox_debug.enabled = !hitbox_debug.enabled;
     }
 }
 
@@ -389,7 +398,7 @@ pub fn world_interaction_system(
     mut break_indicator: ResMut<BreakIndicator>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
-    remote_entities: Query<(&GlobalTransform, &RemoteEntity)>,
+    remote_entities: Query<(&GlobalTransform, &RemoteEntity, &RemoteVisual)>,
     mut mining: Local<MiningState>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
@@ -647,7 +656,7 @@ fn nearest_entity_hit(
     block_hit: Option<RayHit>,
 ) -> Option<EntityHit> {
     match (entity_hit, block_hit) {
-        (Some(entity), Some(block)) if entity.distance <= block.distance => Some(entity),
+        (Some(entity), Some(block)) if entity.distance <= block.distance + 0.12 => Some(entity),
         (Some(_), Some(_)) => None,
         (Some(entity), None) => Some(entity),
         _ => None,
@@ -690,7 +699,7 @@ fn raycast_block(
 }
 
 fn raycast_remote_entity(
-    remote_entities: &Query<(&GlobalTransform, &RemoteEntity)>,
+    remote_entities: &Query<(&GlobalTransform, &RemoteEntity, &RemoteVisual)>,
     origin: Vec3,
     direction: Vec3,
     max_distance: f32,
@@ -701,14 +710,15 @@ fn raycast_remote_entity(
     }
 
     let mut nearest: Option<EntityHit> = None;
-    for (transform, remote) in remote_entities.iter() {
+    for (transform, remote, visual) in remote_entities.iter() {
         let (half_w, height) = match remote.kind {
-            rs_utils::NetEntityKind::Player | rs_utils::NetEntityKind::Mob(_) => (0.3, 1.8),
+            rs_utils::NetEntityKind::Player | rs_utils::NetEntityKind::Mob(_) => (0.34, 1.8),
             rs_utils::NetEntityKind::Item => (0.22, 0.35),
             rs_utils::NetEntityKind::ExperienceOrb => (0.18, 0.28),
             rs_utils::NetEntityKind::Object(_) => (0.28, 0.56),
         };
-        let feet = transform.translation() - Vec3::Y * (height * 0.5);
+        // Remote entity transforms are rendered with a y-offset; derive collider base from that.
+        let feet = transform.translation() - Vec3::Y * visual.y_offset;
         let min = Vec3::new(feet.x - half_w, feet.y, feet.z - half_w);
         let max = Vec3::new(feet.x + half_w, feet.y + height, feet.z + half_w);
         let Some(distance) = ray_aabb_distance(origin, dir, min, max, max_distance) else {
@@ -727,6 +737,56 @@ fn raycast_remote_entity(
     }
 
     nearest
+}
+
+pub fn draw_entity_hitboxes_system(
+    mut gizmos: Gizmos,
+    settings: Res<EntityHitboxDebug>,
+    app_state: Res<AppState>,
+    entities: Query<(&GlobalTransform, &RemoteEntity, &RemoteVisual)>,
+) {
+    if !settings.enabled || !matches!(app_state.0, ApplicationState::Connected) {
+        return;
+    }
+
+    for (transform, remote, visual) in &entities {
+        let (half_w, height) = match remote.kind {
+            rs_utils::NetEntityKind::Player | rs_utils::NetEntityKind::Mob(_) => (0.34, 1.8),
+            rs_utils::NetEntityKind::Item => (0.22, 0.35),
+            rs_utils::NetEntityKind::ExperienceOrb => (0.18, 0.28),
+            rs_utils::NetEntityKind::Object(_) => (0.28, 0.56),
+        };
+        let feet = transform.translation() - Vec3::Y * visual.y_offset;
+        let min = Vec3::new(feet.x - half_w, feet.y, feet.z - half_w);
+        let max = Vec3::new(feet.x + half_w, feet.y + height, feet.z + half_w);
+        draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.2, 1.0, 0.2, 1.0));
+    }
+}
+
+fn draw_aabb_lines(gizmos: &mut Gizmos, min: Vec3, max: Vec3, color: Color) {
+    let p000 = Vec3::new(min.x, min.y, min.z);
+    let p001 = Vec3::new(min.x, min.y, max.z);
+    let p010 = Vec3::new(min.x, max.y, min.z);
+    let p011 = Vec3::new(min.x, max.y, max.z);
+    let p100 = Vec3::new(max.x, min.y, min.z);
+    let p101 = Vec3::new(max.x, min.y, max.z);
+    let p110 = Vec3::new(max.x, max.y, min.z);
+    let p111 = Vec3::new(max.x, max.y, max.z);
+
+    gizmos.line(p000, p001, color);
+    gizmos.line(p001, p011, color);
+    gizmos.line(p011, p010, color);
+    gizmos.line(p010, p000, color);
+
+    gizmos.line(p100, p101, color);
+    gizmos.line(p101, p111, color);
+    gizmos.line(p111, p110, color);
+    gizmos.line(p110, p100, color);
+
+    gizmos.line(p000, p100, color);
+    gizmos.line(p001, p101, color);
+    gizmos.line(p010, p110, color);
+    gizmos.line(p011, p111, color);
 }
 
 fn ray_aabb_distance(

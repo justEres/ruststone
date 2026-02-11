@@ -31,8 +31,8 @@
 #import bevy_pbr::decal::forward::get_forward_decal_info
 #endif
 
-const ATLAS_COLUMNS: f32 = 8.0;
-const ATLAS_ROWS: f32 = 7.0;
+const ATLAS_COLUMNS: f32 = 64.0;
+const ATLAS_ROWS: f32 = 64.0;
 const ATLAS_UV_INSET: f32 = 0.02;
 
 @group(2) @binding(100) var atlas_texture: texture_2d<f32>;

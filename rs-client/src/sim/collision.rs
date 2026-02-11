@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::Resource;
+use rs_utils::{BlockModelKind, block_model_kind};
 use rs_utils::{BlockUpdate, ChunkData};
 
 const CHUNK_SIZE: i32 = 16;
@@ -114,6 +115,9 @@ pub fn is_solid(block_id: u16) -> bool {
         0 => false,       // air
         8 | 9 => false,   // water
         10 | 11 => false, // lava
-        _ => true,
+        _ => !matches!(
+            block_model_kind(block_id),
+            BlockModelKind::Cross | BlockModelKind::TorchLike
+        ),
     }
 }

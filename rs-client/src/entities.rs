@@ -13,8 +13,7 @@ use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::PlayerCamera;
 use rs_utils::{
     AppState, ApplicationState, MobKind, NetEntityAnimation, NetEntityKind, NetEntityMessage,
-    ObjectKind,
-    PlayerSkinModel,
+    ObjectKind, PlayerSkinModel,
 };
 use tracing::{info, warn};
 
@@ -876,7 +875,8 @@ pub fn animate_remote_player_models(
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
             t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
-            t.rotation = Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
+            t.rotation =
+                Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
             t.translation = Vec3::new(-0.375, 1.125, 0.0);
@@ -1030,7 +1030,14 @@ fn player_head_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
 fn player_body_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
         make_skin_box_with_faces(8.0, 12.0, 4.0, 0.0, torso_base_face_rects(), texture_debug),
-        make_skin_box_with_faces(8.0, 12.0, 4.0, 0.25, torso_outer_face_rects(), texture_debug),
+        make_skin_box_with_faces(
+            8.0,
+            12.0,
+            4.0,
+            0.25,
+            torso_outer_face_rects(),
+            texture_debug,
+        ),
     ]
 }
 
@@ -1092,15 +1099,43 @@ fn player_left_arm_meshes(
 
 fn player_right_leg_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.0, right_leg_base_face_rects(), texture_debug),
-        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.25, right_leg_outer_face_rects(), texture_debug),
+        make_skin_box_with_faces(
+            4.0,
+            12.0,
+            4.0,
+            0.0,
+            right_leg_base_face_rects(),
+            texture_debug,
+        ),
+        make_skin_box_with_faces(
+            4.0,
+            12.0,
+            4.0,
+            0.25,
+            right_leg_outer_face_rects(),
+            texture_debug,
+        ),
     ]
 }
 
 fn player_left_leg_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.0, left_leg_base_face_rects(), texture_debug),
-        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.25, left_leg_outer_face_rects(), texture_debug),
+        make_skin_box_with_faces(
+            4.0,
+            12.0,
+            4.0,
+            0.0,
+            left_leg_base_face_rects(),
+            texture_debug,
+        ),
+        make_skin_box_with_faces(
+            4.0,
+            12.0,
+            4.0,
+            0.25,
+            left_leg_outer_face_rects(),
+            texture_debug,
+        ),
     ]
 }
 
@@ -1143,12 +1178,7 @@ fn make_skin_box_with_faces(
         &mut normals,
         &mut uvs,
         &mut indices,
-        [
-            [-hw, hh, -hd],
-            [hw, hh, -hd],
-            [hw, hh, hd],
-            [-hw, hh, hd],
-        ],
+        [[-hw, hh, -hd], [hw, hh, -hd], [hw, hh, hd], [-hw, hh, hd]],
         [0.0, 1.0, 0.0],
         faces.up,
         texture_debug,
@@ -1173,12 +1203,7 @@ fn make_skin_box_with_faces(
         &mut normals,
         &mut uvs,
         &mut indices,
-        [
-            [hw, -hh, hd],
-            [-hw, -hh, hd],
-            [-hw, hh, hd],
-            [hw, hh, hd],
-        ],
+        [[hw, -hh, hd], [-hw, -hh, hd], [-hw, hh, hd], [hw, hh, hd]],
         [0.0, 0.0, 1.0],
         faces.south,
         texture_debug,
@@ -1203,12 +1228,7 @@ fn make_skin_box_with_faces(
         &mut normals,
         &mut uvs,
         &mut indices,
-        [
-            [hw, -hh, hd],
-            [hw, -hh, -hd],
-            [hw, hh, -hd],
-            [hw, hh, hd],
-        ],
+        [[hw, -hh, hd], [hw, -hh, -hd], [hw, hh, -hd], [hw, hh, hd]],
         [1.0, 0.0, 0.0],
         faces.east,
         texture_debug,

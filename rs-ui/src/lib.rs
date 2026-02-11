@@ -13,7 +13,8 @@ use bevy_egui::{
 use rs_render::RenderDebugSettings;
 use rs_utils::{
     AppState, ApplicationState, BreakIndicator, Chat, InventoryItemStack, InventoryState,
-    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
+    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, block_registry_key, item_name,
+    item_registry_key,
 };
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
@@ -568,7 +569,7 @@ fn item_short_label(item_id: i32) -> &'static str {
         280 => "Stick",
         297 => "Bread",
         364 => "Steak",
-        _ => "Item",
+        _ => item_name(item_id),
     }
 }
 
@@ -763,7 +764,7 @@ impl ItemIconCache {
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
         for rel_path in candidates {
-            let full_path = texturepack_textures_root().join(rel_path);
+            let full_path = texturepack_textures_root().join(&rel_path);
             if !full_path.exists() {
                 continue;
             }
@@ -804,116 +805,128 @@ fn load_color_image(path: &Path) -> Option<egui::ColorImage> {
     ))
 }
 
-fn item_texture_candidates(item_id: i32, damage: i16) -> Vec<&'static str> {
+fn item_texture_candidates(item_id: i32, damage: i16) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(8);
+
+    // Keep important subtype-aware item mappings explicit.
     match item_id {
-        1 => vec!["blocks/stone.png"],
-        2 => vec!["blocks/grass_top.png"],
-        3 => vec!["blocks/dirt.png"],
-        4 => vec!["blocks/cobblestone.png"],
-        5 => match damage {
-            1 => vec!["blocks/planks_spruce.png"],
-            2 => vec!["blocks/planks_birch.png"],
-            3 => vec!["blocks/planks_jungle.png"],
-            4 => vec!["blocks/planks_acacia.png"],
-            5 => vec!["blocks/planks_big_oak.png"],
-            _ => vec!["blocks/planks_oak.png"],
-        },
-        12 => vec!["blocks/sand.png"],
-        13 => vec!["blocks/gravel.png"],
-        17 => match damage & 0x3 {
-            1 => vec!["blocks/log_spruce.png"],
-            2 => vec!["blocks/log_birch.png"],
-            3 => vec!["blocks/log_jungle.png"],
-            _ => vec!["blocks/log_oak.png"],
-        },
-        18 => match damage & 0x3 {
-            1 => vec!["blocks/leaves_spruce.png"],
-            2 => vec!["blocks/leaves_birch.png"],
-            3 => vec!["blocks/leaves_jungle.png"],
-            _ => vec!["blocks/leaves_oak.png"],
-        },
-        20 => vec!["blocks/glass.png"],
-        24 => vec!["blocks/sandstone_top.png"],
-        41 => vec!["blocks/gold_block.png"],
-        42 => vec!["blocks/iron_block.png"],
-        45 => vec!["blocks/brick.png"],
-        49 => vec!["blocks/obsidian.png"],
-        50 => vec!["blocks/torch_on.png"],
-        54 => vec!["items/chest.png", "blocks/planks_oak.png"],
-        58 => vec!["blocks/crafting_table_top.png"],
-        61 => vec!["blocks/furnace_front_off.png"],
-        62 => vec!["blocks/furnace_front_on.png"],
-        79 => vec!["blocks/ice.png"],
-        80 => vec!["blocks/snow.png"],
-        81 => vec!["blocks/cactus_side.png"],
-        82 => vec!["blocks/clay.png"],
-        87 => vec!["blocks/netherrack.png"],
-        88 => vec!["blocks/soul_sand.png"],
-        89 => vec!["blocks/glowstone.png"],
-        256 => vec!["items/iron_shovel.png"],
-        257 => vec!["items/iron_pickaxe.png"],
-        258 => vec!["items/iron_axe.png"],
-        259 => vec!["items/flint_and_steel.png"],
-        260 => vec!["items/apple.png"],
-        261 => vec!["items/bow_standby.png"],
-        262 => vec!["items/arrow.png"],
-        263 => match damage {
-            1 => vec!["items/charcoal.png", "items/coal.png"],
-            _ => vec!["items/coal.png", "items/charcoal.png"],
-        },
-        264 => vec!["items/diamond.png"],
-        265 => vec!["items/iron_ingot.png"],
-        266 => vec!["items/gold_ingot.png"],
-        267 => vec!["items/iron_sword.png"],
-        268 => vec!["items/wood_sword.png"],
-        269 => vec!["items/wood_shovel.png"],
-        270 => vec!["items/wood_pickaxe.png"],
-        271 => vec!["items/wood_axe.png"],
-        272 => vec!["items/stone_sword.png"],
-        273 => vec!["items/stone_shovel.png"],
-        274 => vec!["items/stone_pickaxe.png"],
-        275 => vec!["items/stone_axe.png"],
-        276 => vec!["items/diamond_sword.png"],
-        277 => vec!["items/diamond_shovel.png"],
-        278 => vec!["items/diamond_pickaxe.png"],
-        279 => vec!["items/diamond_axe.png"],
-        280 => vec!["items/stick.png"],
-        281 => vec!["items/bowl.png"],
-        282 => vec!["items/mushroom_stew.png"],
-        283 => vec!["items/gold_sword.png"],
-        284 => vec!["items/gold_shovel.png"],
-        285 => vec!["items/gold_pickaxe.png"],
-        286 => vec!["items/gold_axe.png"],
-        297 => vec!["items/bread.png"],
-        320 => vec!["items/porkchop_cooked.png"],
-        322 => vec!["items/apple_golden.png"],
-        332 => vec!["items/snowball.png"],
-        344 => vec!["items/egg.png"],
-        346 => vec!["items/fishing_rod_uncast.png"],
-        347 => vec!["items/clock.png"],
-        354 => vec!["items/cake.png"],
-        355 => vec!["items/bed.png"],
-        357 => vec!["items/cookie.png"],
-        359 => vec!["items/shears.png"],
-        360 => vec!["items/melon_slice.png"],
-        364 => vec!["items/beef_cooked.png"],
-        368 => vec!["items/ender_pearl.png"],
-        384 => vec!["items/experience_bottle.png"],
-        386 => vec!["items/book_normal.png"],
-        387 => vec!["items/book_written.png"],
-        388 => vec!["items/emerald.png"],
-        391 => vec!["items/carrot.png"],
-        393 => vec!["items/potato_baked.png"],
-        397 => vec![
-            "items/skull_skeleton.png",
-            "items/skull_zombie.png",
-            "items/skull_wither.png",
-        ],
-        403 => vec!["items/book_enchanted.png"],
-        412 => vec!["items/rabbit_stew.png"],
-        417 => vec!["items/iron_horse_armor.png"],
-        418 => vec!["items/gold_horse_armor.png"],
-        419 => vec!["items/diamond_horse_armor.png"],
-        _ => Vec::new(),
+        5 => {
+            let planks = match damage {
+                1 => "planks_spruce",
+                2 => "planks_birch",
+                3 => "planks_jungle",
+                4 => "planks_acacia",
+                5 => "planks_big_oak",
+                _ => "planks_oak",
+            };
+            push_candidate(&mut out, format!("blocks/{planks}.png"));
+        }
+        17 => {
+            let log = match damage & 0x3 {
+                1 => "log_spruce",
+                2 => "log_birch",
+                3 => "log_jungle",
+                _ => "log_oak",
+            };
+            push_candidate(&mut out, format!("blocks/{log}.png"));
+        }
+        18 => {
+            let leaves = match damage & 0x3 {
+                1 => "leaves_spruce",
+                2 => "leaves_birch",
+                3 => "leaves_jungle",
+                _ => "leaves_oak",
+            };
+            push_candidate(&mut out, format!("blocks/{leaves}.png"));
+        }
+        263 => {
+            if damage == 1 {
+                push_candidate(&mut out, "items/charcoal.png".to_string());
+                push_candidate(&mut out, "items/coal.png".to_string());
+            } else {
+                push_candidate(&mut out, "items/coal.png".to_string());
+                push_candidate(&mut out, "items/charcoal.png".to_string());
+            }
+        }
+        349 => {
+            push_candidate(&mut out, "items/fish_cod_raw.png".to_string());
+            push_candidate(&mut out, "items/fish_raw.png".to_string());
+        }
+        350 => {
+            push_candidate(&mut out, "items/fish_cod_cooked.png".to_string());
+            push_candidate(&mut out, "items/fish_cooked.png".to_string());
+        }
+        397 => {
+            push_candidate(&mut out, "items/skull_skeleton.png".to_string());
+            push_candidate(&mut out, "items/skull_zombie.png".to_string());
+            push_candidate(&mut out, "items/skull_wither.png".to_string());
+        }
+        _ => {}
+    }
+
+    // General mapping from baked 1.8.9 registries.
+    if let Some(key) = item_registry_key(item_id) {
+        add_key_candidates(&mut out, key);
+    }
+    // Block item IDs not present in item registry (1.8 uses numeric IDs for blocks as items).
+    if let Some(block_key) = block_registry_key(item_id as u16) {
+        add_key_candidates(&mut out, block_key);
+    }
+
+    out
+}
+
+fn add_key_candidates(out: &mut Vec<String>, key: &str) {
+    push_candidate(out, format!("items/{key}.png"));
+    push_candidate(out, format!("blocks/{key}.png"));
+
+    // Common naming differences between registry keys and 1.8 texture filenames.
+    match key {
+        "wooden_sword" => push_candidate(out, "items/wood_sword.png".to_string()),
+        "wooden_shovel" => push_candidate(out, "items/wood_shovel.png".to_string()),
+        "wooden_pickaxe" => push_candidate(out, "items/wood_pickaxe.png".to_string()),
+        "wooden_axe" => push_candidate(out, "items/wood_axe.png".to_string()),
+        "golden_sword" => push_candidate(out, "items/gold_sword.png".to_string()),
+        "golden_shovel" => push_candidate(out, "items/gold_shovel.png".to_string()),
+        "golden_pickaxe" => push_candidate(out, "items/gold_pickaxe.png".to_string()),
+        "golden_axe" => push_candidate(out, "items/gold_axe.png".to_string()),
+        "golden_apple" => push_candidate(out, "items/apple_golden.png".to_string()),
+        "cooked_porkchop" => push_candidate(out, "items/porkchop_cooked.png".to_string()),
+        "cooked_beef" => push_candidate(out, "items/beef_cooked.png".to_string()),
+        "cooked_chicken" => push_candidate(out, "items/chicken_cooked.png".to_string()),
+        "baked_potato" => push_candidate(out, "items/potato_baked.png".to_string()),
+        "poisonous_potato" => push_candidate(out, "items/potato_poisonous.png".to_string()),
+        "writable_book" => push_candidate(out, "items/book_normal.png".to_string()),
+        "written_book" => push_candidate(out, "items/book_written.png".to_string()),
+        "experience_bottle" => push_candidate(out, "items/experience_bottle.png".to_string()),
+        "filled_map" => push_candidate(out, "items/map_filled.png".to_string()),
+        "map" => push_candidate(out, "items/map_empty.png".to_string()),
+        "firework_charge" => push_candidate(out, "items/fireworks_charge.png".to_string()),
+        "lit_furnace" => push_candidate(out, "blocks/furnace_front_on.png".to_string()),
+        "furnace" => push_candidate(out, "blocks/furnace_front_off.png".to_string()),
+        "grass" => push_candidate(out, "blocks/grass_top.png".to_string()),
+        "planks" => push_candidate(out, "blocks/planks_oak.png".to_string()),
+        "log" => push_candidate(out, "blocks/log_oak.png".to_string()),
+        "leaves" => push_candidate(out, "blocks/leaves_oak.png".to_string()),
+        "flowing_water" | "water" => push_candidate(out, "blocks/water_still.png".to_string()),
+        "flowing_lava" | "lava" => push_candidate(out, "blocks/lava_still.png".to_string()),
+        "redstone_torch" => push_candidate(out, "blocks/redstone_torch_on.png".to_string()),
+        "unlit_redstone_torch" => push_candidate(out, "blocks/redstone_torch_off.png".to_string()),
+        "brick_block" => push_candidate(out, "blocks/brick.png".to_string()),
+        "mossy_cobblestone" => push_candidate(out, "blocks/cobblestone_mossy.png".to_string()),
+        _ => {}
+    }
+
+    if let Some(stripped) = key.strip_prefix("wooden_") {
+        push_candidate(out, format!("items/wood_{stripped}.png"));
+    }
+    if let Some(stripped) = key.strip_prefix("golden_") {
+        push_candidate(out, format!("items/gold_{stripped}.png"));
+    }
+}
+
+fn push_candidate(out: &mut Vec<String>, candidate: String) {
+    if !out.iter().any(|s| s == &candidate) {
+        out.push(candidate);
     }
 }

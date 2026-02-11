@@ -43,6 +43,7 @@ pub fn handle_messages(
         match msg {
             FromNetMessage::Connected => {
                 *app_state = AppState(ApplicationState::Connected);
+                player_status.dead = false;
                 sim_clock.tick = 0;
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
@@ -75,10 +76,18 @@ pub fn handle_messages(
                 food,
                 food_saturation,
             } => {
+                let was_dead = player_status.dead;
                 player_status.health = health;
                 player_status.food = food;
                 player_status.food_saturation = food_saturation;
                 player_status.dead = health <= 0.0;
+                // Respawn transition: reset prediction and wait for authoritative position packet.
+                if was_dead && !player_status.dead {
+                    sim_clock.tick = 0;
+                    sim_ready.0 = false;
+                    history.0 = PredictionHistory::default().0;
+                    sim_render.previous = sim_state.current;
+                }
             }
             FromNetMessage::PlayerPosition(pos) => {
                 let mut position = sim_state.current.pos;

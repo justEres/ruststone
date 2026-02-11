@@ -3,8 +3,8 @@
 use std::thread;
 
 use rand::Rng;
-use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::Conn;
+use rs_protocol::protocol::login::{Account, AccountType};
 use rs_utils::{EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 
 mod chunk_decode;
@@ -413,10 +413,12 @@ fn handle_encryption_request(
     let shared_encrypted = rsa_public_encrypt_pkcs1::encrypt(public_key, &shared_secret)?;
     let token_encrypted = rsa_public_encrypt_pkcs1::encrypt(public_key, verify_token)?;
 
-    conn.write_packet(rs_protocol::protocol::packet::login::serverbound::EncryptionResponse {
-        shared_secret: rs_protocol::protocol::LenPrefixedBytes::new(shared_encrypted),
-        verify_token: rs_protocol::protocol::LenPrefixedBytes::new(token_encrypted),
-    })?;
+    conn.write_packet(
+        rs_protocol::protocol::packet::login::serverbound::EncryptionResponse {
+            shared_secret: rs_protocol::protocol::LenPrefixedBytes::new(shared_encrypted),
+            verify_token: rs_protocol::protocol::LenPrefixedBytes::new(token_encrypted),
+        },
+    )?;
 
     conn.enable_encyption(&shared_secret);
     println!("Encryption enabled");
