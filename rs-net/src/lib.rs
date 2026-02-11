@@ -2,6 +2,8 @@
 
 use std::thread;
 
+use rand::Rng;
+use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::Conn;
 use rs_utils::{EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 
@@ -12,6 +14,10 @@ pub fn start_networking(
     from_main: crossbeam::channel::Receiver<ToNetMessage>,
     to_main: crossbeam::channel::Sender<FromNetMessage>,
 ) {
+    if dotenvy::dotenv().is_ok() {
+        println!("Loaded environment from .env");
+    }
+
     //enable_network_debug();
 
     if let Ok(msg) = from_main.recv() {
@@ -255,6 +261,12 @@ fn to_protocol_stack(item: InventoryItemStack) -> rs_protocol::item::Stack {
 
 fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Error>> {
     let mut conn = Conn::new(target, 47)?;
+    let effective_username = std::env::var("RS_AUTH_USERNAME")
+        .ok()
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| username.to_string());
+    let online_account = load_online_account_from_env(&effective_username);
 
     conn.write_packet(
         rs_protocol::protocol::packet::handshake::serverbound::Handshake {
@@ -269,7 +281,7 @@ fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Err
 
     conn.write_packet(
         rs_protocol::protocol::packet::login::serverbound::LoginStart {
-            username: username.to_string(),
+            username: effective_username,
         },
     )?;
 
@@ -281,6 +293,29 @@ fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Err
                     Packet::SetInitialCompression(s) => {
                         println!("RECV: SetInitialCompression (threshold={})", s.threshold.0);
                         conn.set_compression(s.threshold.0);
+                    }
+                    Packet::EncryptionRequest(req) => {
+                        println!("RECV: EncryptionRequest");
+                        handle_encryption_request(
+                            &mut conn,
+                            &req.server_id,
+                            &req.public_key.data,
+                            &req.verify_token.data,
+                            online_account.as_ref(),
+                        )?;
+                    }
+                    Packet::EncryptionRequest_i16(req) => {
+                        println!("RECV: EncryptionRequest_i16");
+                        handle_encryption_request(
+                            &mut conn,
+                            &req.server_id,
+                            &req.public_key.data,
+                            &req.verify_token.data,
+                            online_account.as_ref(),
+                        )?;
+                    }
+                    Packet::LoginDisconnect(disconnect) => {
+                        return Err(format!("Login disconnect: {}", disconnect.reason).into());
                     }
                     Packet::LoginSuccess_String(s) => {
                         println!(
@@ -315,4 +350,75 @@ fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Err
             }
         }
     }
+}
+
+fn load_online_account_from_env(username: &str) -> Option<Account> {
+    let access_token = std::env::var("RS_AUTH_ACCESS_TOKEN")
+        .ok()?
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    let mut uuid = std::env::var("RS_AUTH_UUID")
+        .ok()?
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    uuid.retain(|c| c != '-');
+    if uuid.len() != 32 {
+        println!("RS_AUTH_UUID is set but invalid (expected 32 hex chars, optionally with '-')");
+        return None;
+    }
+    println!(
+        "Auth env loaded: username={} uuid={}.. token_len={}",
+        username,
+        &uuid[..8],
+        access_token.len()
+    );
+    let mut account = Account::new(username.to_string(), Some(uuid), AccountType::Microsoft);
+    // Compatibility with rs-protocol microsoft join_server implementation expecting index 2.
+    account.verification_tokens = vec![String::new(), String::new(), access_token];
+    Some(account)
+}
+
+fn handle_encryption_request(
+    conn: &mut Conn,
+    server_id: &str,
+    public_key: &[u8],
+    verify_token: &[u8],
+    online_account: Option<&Account>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let account = online_account.ok_or_else(|| {
+        "Server requires online-mode authentication; set RS_AUTH_UUID and RS_AUTH_ACCESS_TOKEN"
+            .to_string()
+    })?;
+    println!(
+        "Starting encrypted login: server_id='{}' pubkey_len={} verify_len={} uuid={}..",
+        server_id,
+        public_key.len(),
+        verify_token.len(),
+        account
+            .uuid
+            .as_deref()
+            .unwrap_or("<none>")
+            .chars()
+            .take(8)
+            .collect::<String>()
+    );
+
+    let mut shared_secret = [0u8; 16];
+    rand::thread_rng().fill(&mut shared_secret);
+
+    account.join_server(server_id, &shared_secret, public_key)?;
+
+    let shared_encrypted = rsa_public_encrypt_pkcs1::encrypt(public_key, &shared_secret)?;
+    let token_encrypted = rsa_public_encrypt_pkcs1::encrypt(public_key, verify_token)?;
+
+    conn.write_packet(rs_protocol::protocol::packet::login::serverbound::EncryptionResponse {
+        shared_secret: rs_protocol::protocol::LenPrefixedBytes::new(shared_encrypted),
+        verify_token: rs_protocol::protocol::LenPrefixedBytes::new(token_encrypted),
+    })?;
+
+    conn.enable_encyption(&shared_secret);
+    println!("Encryption enabled");
+    Ok(())
 }

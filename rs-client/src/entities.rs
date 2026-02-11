@@ -1,14 +1,21 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::thread;
 
 use crate::sim::collision::{WorldCollisionMap, is_solid};
 use bevy::prelude::*;
+use bevy::render::mesh::Indices;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::PrimitiveTopology;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_egui::{EguiContexts, egui};
+use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::PlayerCamera;
 use rs_utils::{AppState, ApplicationState, MobKind, NetEntityKind, NetEntityMessage, ObjectKind};
+use tracing::{info, warn};
 
-const PLAYER_SCALE: Vec3 = Vec3::new(0.55, 0.9, 0.55);
-const PLAYER_Y_OFFSET: f32 = 0.9;
-const PLAYER_NAME_Y_OFFSET: f32 = 1.35;
+const PLAYER_SCALE: Vec3 = Vec3::ONE;
+const PLAYER_Y_OFFSET: f32 = 0.0;
+const PLAYER_NAME_Y_OFFSET: f32 = 2.05;
 
 const MOB_SCALE: Vec3 = Vec3::new(0.55, 0.9, 0.55);
 const MOB_Y_OFFSET: f32 = 0.9;
@@ -25,6 +32,50 @@ const ORB_NAME_Y_OFFSET: f32 = 0.45;
 const OBJECT_SCALE: Vec3 = Vec3::splat(0.28);
 const OBJECT_Y_OFFSET: f32 = 0.28;
 const OBJECT_NAME_Y_OFFSET: f32 = 0.65;
+
+#[derive(Debug)]
+struct SkinDownloadResult {
+    skin_url: String,
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Resource)]
+pub struct RemoteSkinDownloader {
+    request_tx: Sender<String>,
+    result_rx: Receiver<SkinDownloadResult>,
+    requested: HashSet<String>,
+    loaded: HashMap<String, Handle<Image>>,
+}
+
+impl Default for RemoteSkinDownloader {
+    fn default() -> Self {
+        let (request_tx, request_rx) = unbounded::<String>();
+        let (result_tx, result_rx) = unbounded::<SkinDownloadResult>();
+        thread::spawn(move || skin_download_worker(request_rx, result_tx));
+        Self {
+            request_tx,
+            result_rx,
+            requested: HashSet::new(),
+            loaded: HashMap::new(),
+        }
+    }
+}
+
+impl RemoteSkinDownloader {
+    pub fn request(&mut self, skin_url: String) {
+        if !self.requested.insert(skin_url.clone()) {
+            return;
+        }
+        info!("queue skin fetch: {skin_url}");
+        let _ = self.request_tx.send(skin_url);
+    }
+
+    pub fn skin_handle(&self, skin_url: &str) -> Option<Handle<Image>> {
+        self.loaded.get(skin_url).cloned()
+    }
+}
 
 #[derive(Default, Resource)]
 pub struct RemoteEntityEventQueue {
@@ -47,6 +98,7 @@ pub struct RemoteEntityRegistry {
     pub by_server_id: HashMap<i32, Entity>,
     pub player_entity_by_uuid: HashMap<rs_protocol::protocol::UUID, i32>,
     pub player_name_by_uuid: HashMap<rs_protocol::protocol::UUID, String>,
+    pub player_skin_url_by_uuid: HashMap<rs_protocol::protocol::UUID, String>,
     pub pending_labels: HashMap<i32, String>,
 }
 
@@ -71,6 +123,25 @@ pub struct RemoteEntityName(pub String);
 
 #[derive(Component)]
 pub struct RemotePlayer;
+
+#[derive(Component, Debug, Clone)]
+pub struct RemotePlayerModelParts {
+    pub head: Entity,
+    pub body: Entity,
+    pub arm_left: Entity,
+    pub arm_right: Entity,
+    pub leg_left: Entity,
+    pub leg_right: Entity,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct RemotePlayerSkinMaterials(pub Vec<Handle<StandardMaterial>>);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemotePlayerAnimation {
+    pub previous_pos: Vec3,
+    pub walk_phase: f32,
+}
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteVisual {
@@ -98,6 +169,7 @@ pub fn remote_entity_connection_sync(
     registry.local_entity_id = None;
     registry.player_entity_by_uuid.clear();
     registry.player_name_by_uuid.clear();
+    registry.player_skin_url_by_uuid.clear();
     registry.pending_labels.clear();
 }
 
@@ -105,13 +177,10 @@ pub fn apply_remote_entity_events(
     mut commands: Commands,
     mut queue: ResMut<RemoteEntityEventQueue>,
     mut registry: ResMut<RemoteEntityRegistry>,
+    mut skin_downloader: ResMut<RemoteSkinDownloader>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut transform_query: Query<(
-        &mut Transform,
-        &mut Mesh3d,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut transform_query: Query<&mut Transform>,
     mut entity_query: Query<(&mut RemoteEntity, &mut RemoteEntityLook)>,
     mut name_query: Query<&mut RemoteEntityName>,
     visual_query: Query<&RemoteVisual>,
@@ -128,10 +197,24 @@ pub fn apply_remote_entity_events(
                         .retain(|_, id| *id != entity_id);
                 }
             }
-            NetEntityMessage::PlayerInfoAdd { uuid, name } => {
+            NetEntityMessage::PlayerInfoAdd {
+                uuid,
+                name,
+                skin_url,
+            } => {
+                info!(
+                    "ENTITY PlayerInfoAdd name={} uuid={:?} skin_url={:?}",
+                    name, uuid, skin_url
+                );
                 registry
                     .player_name_by_uuid
                     .insert(uuid.clone(), name.clone());
+                if let Some(url) = skin_url {
+                    skin_downloader.request(url.clone());
+                    registry.player_skin_url_by_uuid.insert(uuid.clone(), url);
+                } else {
+                    warn!("ENTITY no skin url in PlayerInfoAdd for uuid={:?}", uuid);
+                }
                 if let Some(server_id) = registry.player_entity_by_uuid.get(&uuid).copied()
                     && let Some(entity) = registry.by_server_id.get(&server_id).copied()
                     && let Ok(mut entity_name) = name_query.get_mut(entity)
@@ -155,8 +238,31 @@ pub fn apply_remote_entity_events(
                     continue;
                 }
 
+                if let Some(existing) = registry.by_server_id.remove(&entity_id) {
+                    commands.entity(existing).despawn_recursive();
+                    registry
+                        .player_entity_by_uuid
+                        .retain(|_, id| *id != entity_id);
+                }
+
                 let spec = visual_spec(kind);
                 let visual = visual_for_kind(kind);
+                let player_skin = if kind == NetEntityKind::Player {
+                    let url = uuid
+                        .as_ref()
+                        .and_then(|id| registry.player_skin_url_by_uuid.get(id));
+                    if let Some(url) = url {
+                        skin_downloader.request(url.clone());
+                        skin_downloader.skin_handle(url)
+                    } else {
+                        if let Some(id) = uuid.as_ref() {
+                            warn!("ENTITY player spawn without known skin url uuid={:?}", id);
+                        }
+                        None
+                    }
+                } else {
+                    None
+                };
                 let display_name = if kind == NetEntityKind::Player {
                     uuid.as_ref()
                         .and_then(|id| registry.player_name_by_uuid.get(id))
@@ -169,59 +275,15 @@ pub fn apply_remote_entity_events(
                         .unwrap_or_else(|| kind_label(kind).to_string())
                 };
 
-                if let Some(existing) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut transform, mut mesh3d, mut material3d)) =
-                        transform_query.get_mut(existing)
-                    {
-                        transform.translation = pos + Vec3::Y * visual.y_offset;
-                        transform.rotation = Quat::from_axis_angle(Vec3::Y, yaw);
-                        transform.scale = spec.scale;
-                        *mesh3d = Mesh3d(match spec.mesh {
-                            VisualMesh::Capsule => meshes.add(Capsule3d::default()),
-                            VisualMesh::Sphere => meshes.add(Sphere::default()),
-                        });
-                        *material3d = MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: spec.color,
-                            perceptual_roughness: 0.95,
-                            metallic: 0.0,
-                            ..Default::default()
-                        }));
-                    }
-                    if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(existing) {
-                        remote_entity.kind = kind;
-                        remote_entity.on_ground = on_ground.unwrap_or(remote_entity.on_ground);
-                        look.yaw = yaw;
-                        look.pitch = pitch;
-                    }
-                    commands.entity(existing).insert(visual);
-                    if kind == NetEntityKind::Player {
-                        commands.entity(existing).insert(RemotePlayer);
-                    } else {
-                        commands.entity(existing).remove::<RemotePlayer>();
-                    }
-                    if let Ok(mut name_comp) = name_query.get_mut(existing) {
-                        name_comp.0 = display_name;
-                    }
-                    continue;
-                }
-
-                let mesh = meshes.add(match spec.mesh {
-                    VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
-                    VisualMesh::Sphere => Mesh::from(Sphere::default()),
-                });
-                let material = materials.add(StandardMaterial {
-                    base_color: spec.color,
-                    perceptual_roughness: 0.95,
-                    metallic: 0.0,
-                    ..Default::default()
-                });
-                let mut spawn_cmd = commands.spawn((
+                let spawn_cmd = commands.spawn((
                     Name::new(format!("RemoteEntity[{entity_id}]")),
-                    Mesh3d(mesh),
-                    MeshMaterial3d(material),
                     Transform {
                         translation: pos + Vec3::Y * visual.y_offset,
-                        rotation: Quat::from_axis_angle(Vec3::Y, yaw),
+                        rotation: if kind == NetEntityKind::Player {
+                            player_root_rotation(yaw)
+                        } else {
+                            Quat::from_axis_angle(Vec3::Y, yaw)
+                        },
                         scale: spec.scale,
                     },
                     GlobalTransform::default(),
@@ -237,17 +299,54 @@ pub fn apply_remote_entity_events(
                     RemoteEntityName(display_name),
                     visual,
                 ));
+                let root = spawn_cmd.id();
+
                 if kind == NetEntityKind::Player {
-                    spawn_cmd.insert(RemotePlayer);
+                    let (parts, material_handles) = spawn_remote_player_model(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        player_skin,
+                    );
+                    commands.entity(root).add_child(parts.head);
+                    commands.entity(root).add_child(parts.body);
+                    commands.entity(root).add_child(parts.arm_left);
+                    commands.entity(root).add_child(parts.arm_right);
+                    commands.entity(root).add_child(parts.leg_left);
+                    commands.entity(root).add_child(parts.leg_right);
+                    commands.entity(root).insert((
+                        RemotePlayer,
+                        parts,
+                        RemotePlayerSkinMaterials(material_handles),
+                        RemotePlayerAnimation {
+                            previous_pos: pos,
+                            walk_phase: 0.0,
+                        },
+                    ));
+                } else {
+                    let mesh = meshes.add(match spec.mesh {
+                        VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
+                        VisualMesh::Sphere => Mesh::from(Sphere::default()),
+                    });
+                    let material = materials.add(StandardMaterial {
+                        base_color: spec.color,
+                        perceptual_roughness: 0.95,
+                        metallic: 0.0,
+                        ..Default::default()
+                    });
+                    commands
+                        .entity(root)
+                        .insert((Mesh3d(mesh), MeshMaterial3d(material)));
                 }
+
                 if let Some(uuid) = uuid {
                     registry
                         .player_entity_by_uuid
                         .insert(uuid.clone(), entity_id);
-                    spawn_cmd.insert(RemoteEntityUuid(uuid));
+                    commands.entity(root).insert(RemoteEntityUuid(uuid));
                 }
 
-                registry.by_server_id.insert(entity_id, spawn_cmd.id());
+                registry.by_server_id.insert(entity_id, root);
             }
             NetEntityMessage::SetLabel { entity_id, label } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
@@ -264,7 +363,7 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut transform, _, _)) = transform_query.get_mut(entity) {
+                    if let Ok(mut transform) = transform_query.get_mut(entity) {
                         transform.translation += delta;
                     }
                     if let Ok((mut remote_entity, _)) = entity_query.get_mut(entity)
@@ -281,12 +380,16 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut transform, _, _)) = transform_query.get_mut(entity) {
-                        transform.rotation = Quat::from_axis_angle(Vec3::Y, yaw);
-                    }
                     if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
                         look.yaw = yaw;
                         look.pitch = pitch;
+                        if let Ok(mut transform) = transform_query.get_mut(entity) {
+                            transform.rotation = if remote_entity.kind == NetEntityKind::Player {
+                                player_root_rotation(yaw)
+                            } else {
+                                Quat::from_axis_angle(Vec3::Y, yaw)
+                            };
+                        }
                         if let Some(on_ground) = on_ground {
                             remote_entity.on_ground = on_ground;
                         }
@@ -301,14 +404,18 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut transform, _, _)) = transform_query.get_mut(entity) {
-                        let y_offset = visual_query
-                            .get(entity)
-                            .map_or(PLAYER_Y_OFFSET, |v| v.y_offset);
-                        transform.translation = pos + Vec3::Y * y_offset;
-                        transform.rotation = Quat::from_axis_angle(Vec3::Y, yaw);
-                    }
                     if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
+                        if let Ok(mut transform) = transform_query.get_mut(entity) {
+                            let y_offset = visual_query
+                                .get(entity)
+                                .map_or(PLAYER_Y_OFFSET, |v| v.y_offset);
+                            transform.translation = pos + Vec3::Y * y_offset;
+                            transform.rotation = if remote_entity.kind == NetEntityKind::Player {
+                                player_root_rotation(yaw)
+                            } else {
+                                Quat::from_axis_angle(Vec3::Y, yaw)
+                            };
+                        }
                         look.yaw = yaw;
                         look.pitch = pitch;
                         remote_entity.on_ground = on_ground.unwrap_or(remote_entity.on_ground);
@@ -393,6 +500,427 @@ fn line_of_sight_blocked(world: &WorldCollisionMap, from: Vec3, to: Vec3) -> boo
         t += step;
     }
     false
+}
+
+fn skin_download_worker(request_rx: Receiver<String>, result_tx: Sender<SkinDownloadResult>) {
+    while let Ok(skin_url) = request_rx.recv() {
+        info!("fetching skin: {skin_url}");
+        let Ok(response) = reqwest::blocking::get(&skin_url) else {
+            warn!("skin fetch failed (request): {skin_url}");
+            continue;
+        };
+        let Ok(bytes) = response.bytes() else {
+            warn!("skin fetch failed (bytes): {skin_url}");
+            continue;
+        };
+        let Ok(decoded) = image::load_from_memory(&bytes) else {
+            warn!("skin fetch failed (decode): {skin_url}");
+            continue;
+        };
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        info!("skin fetched: {skin_url} ({width}x{height})");
+        let _ = result_tx.send(SkinDownloadResult {
+            skin_url,
+            rgba: rgba.into_raw(),
+            width,
+            height,
+        });
+    }
+}
+
+pub fn remote_skin_download_tick(
+    mut downloader: ResMut<RemoteSkinDownloader>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    while let Ok(downloaded) = downloader.result_rx.try_recv() {
+        let mut image = Image::new_fill(
+            Extent3d {
+                width: downloaded.width,
+                height: downloaded.height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            &[0, 0, 0, 0],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        image.data = Some(downloaded.rgba);
+        let handle = images.add(image);
+        downloader.loaded.insert(downloaded.skin_url, handle);
+    }
+}
+
+pub fn apply_remote_player_skins(
+    registry: Res<RemoteEntityRegistry>,
+    downloader: Res<RemoteSkinDownloader>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    player_query: Query<(&RemoteEntityUuid, &RemotePlayerSkinMaterials), With<RemotePlayer>>,
+) {
+    for (uuid, player_mats) in &player_query {
+        let Some(skin_url) = registry.player_skin_url_by_uuid.get(&uuid.0) else {
+            continue;
+        };
+        let Some(texture_handle) = downloader.skin_handle(skin_url) else {
+            continue;
+        };
+        for mat_handle in &player_mats.0 {
+            let Some(material) = materials.get_mut(mat_handle) else {
+                continue;
+            };
+            if material.base_color_texture.as_ref() != Some(&texture_handle) {
+                material.base_color_texture = Some(texture_handle.clone());
+                material.base_color = Color::WHITE;
+                material.alpha_mode = AlphaMode::Mask(0.5);
+                material.unlit = false;
+            }
+        }
+    }
+}
+
+pub fn animate_remote_player_models(
+    time: Res<Time>,
+    mut roots: Query<
+        (
+            &Transform,
+            &RemoteEntityLook,
+            &RemotePlayerModelParts,
+            &mut RemotePlayerAnimation,
+        ),
+        With<RemotePlayer>,
+    >,
+    mut part_transforms: Query<&mut Transform, Without<RemotePlayer>>,
+) {
+    let dt = time.delta_secs().max(1e-4);
+    for (root_transform, look, parts, mut anim) in &mut roots {
+        let pos = root_transform.translation;
+        let horizontal_delta = Vec2::new(pos.x - anim.previous_pos.x, pos.z - anim.previous_pos.z);
+        let speed = (horizontal_delta.length() / dt).min(8.0);
+        let stride = (speed / 4.0).clamp(0.0, 1.0);
+        anim.walk_phase += speed * dt * 2.5;
+        anim.previous_pos = pos;
+
+        let swing = anim.walk_phase.sin() * 0.7 * stride;
+        let head_pitch = look.pitch.clamp(-1.4, 1.4);
+
+        if let Ok(mut t) = part_transforms.get_mut(parts.head) {
+            t.translation = Vec3::new(0.0, 1.75, 0.0);
+            t.rotation = Quat::from_rotation_x(-head_pitch);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.body) {
+            t.translation = Vec3::new(0.0, 1.125, 0.0);
+            t.rotation = Quat::IDENTITY;
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
+            t.translation = Vec3::new(-0.375, 1.125, 0.0);
+            t.rotation = Quat::from_rotation_x(swing);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
+            t.translation = Vec3::new(0.375, 1.125, 0.0);
+            t.rotation = Quat::from_rotation_x(-swing);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
+            t.translation = Vec3::new(-0.125, 0.375, 0.0);
+            t.rotation = Quat::from_rotation_x(-swing);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
+            t.translation = Vec3::new(0.125, 0.375, 0.0);
+            t.rotation = Quat::from_rotation_x(swing);
+        }
+    }
+}
+
+fn spawn_remote_player_model(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    player_skin: Option<Handle<Image>>,
+) -> (RemotePlayerModelParts, Vec<Handle<StandardMaterial>>) {
+    let base_mat = materials.add(StandardMaterial {
+        base_color: if player_skin.is_some() {
+            Color::WHITE
+        } else {
+            Color::srgb(0.85, 0.78, 0.72)
+        },
+        base_color_texture: player_skin,
+        alpha_mode: AlphaMode::Mask(0.5),
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        ..Default::default()
+    });
+
+    let head = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_head_meshes(),
+        Vec3::new(0.0, 1.75, 0.0),
+    );
+    let body = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_body_meshes(),
+        Vec3::new(0.0, 1.125, 0.0),
+    );
+    let arm_left = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_left_arm_meshes(),
+        Vec3::new(-0.375, 1.125, 0.0),
+    );
+    let arm_right = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_right_arm_meshes(),
+        Vec3::new(0.375, 1.125, 0.0),
+    );
+    let leg_left = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_left_leg_meshes(),
+        Vec3::new(-0.125, 0.375, 0.0),
+    );
+    let leg_right = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        &base_mat,
+        player_right_leg_meshes(),
+        Vec3::new(0.125, 0.375, 0.0),
+    );
+
+    (
+        RemotePlayerModelParts {
+            head,
+            body,
+            arm_left,
+            arm_right,
+            leg_left,
+            leg_right,
+        },
+        vec![base_mat],
+    )
+}
+
+fn spawn_player_part(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    _materials: &mut Assets<StandardMaterial>,
+    base_material: &Handle<StandardMaterial>,
+    part_meshes: Vec<Mesh>,
+    translation: Vec3,
+) -> Entity {
+    let mut children = Vec::new();
+    for mesh in part_meshes {
+        let child = commands
+            .spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(base_material.clone()),
+                Transform::IDENTITY,
+                GlobalTransform::default(),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+            ))
+            .id();
+        children.push(child);
+    }
+
+    let pivot = commands
+        .spawn((
+            Transform::from_translation(translation),
+            GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+
+    for child in children {
+        commands.entity(pivot).add_child(child);
+    }
+    pivot
+}
+
+fn player_head_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(8.0, 8.0, 8.0, 0.0, 0.0, 0.0),
+        make_skin_box(8.0, 8.0, 8.0, 32.0, 0.0, 0.5),
+    ]
+}
+
+fn player_body_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(8.0, 12.0, 4.0, 16.0, 16.0, 0.0),
+        make_skin_box(8.0, 12.0, 4.0, 16.0, 32.0, 0.25),
+    ]
+}
+
+fn player_right_arm_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(4.0, 12.0, 4.0, 40.0, 16.0, 0.0),
+        make_skin_box(4.0, 12.0, 4.0, 40.0, 32.0, 0.25),
+    ]
+}
+
+fn player_left_arm_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(4.0, 12.0, 4.0, 32.0, 48.0, 0.0),
+        make_skin_box(4.0, 12.0, 4.0, 48.0, 48.0, 0.25),
+    ]
+}
+
+fn player_right_leg_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(4.0, 12.0, 4.0, 0.0, 16.0, 0.0),
+        make_skin_box(4.0, 12.0, 4.0, 0.0, 32.0, 0.25),
+    ]
+}
+
+fn player_left_leg_meshes() -> Vec<Mesh> {
+    vec![
+        make_skin_box(4.0, 12.0, 4.0, 16.0, 48.0, 0.0),
+        make_skin_box(4.0, 12.0, 4.0, 0.0, 48.0, 0.25),
+    ]
+}
+
+fn make_skin_box(w_px: f32, h_px: f32, d_px: f32, u: f32, v: f32, inflate_px: f32) -> Mesh {
+    let px = 1.0 / 16.0;
+    let inflate = inflate_px * px;
+    let hw = w_px * px * 0.5 + inflate;
+    let hh = h_px * px * 0.5 + inflate;
+    let hd = d_px * px * 0.5 + inflate;
+
+    let top = uv_rect(u + d_px, v, w_px, d_px);
+    let bottom = uv_rect(u + d_px + w_px, v, w_px, d_px);
+    let left = uv_rect(u, v + d_px, d_px, h_px);
+    let front = uv_rect(u + d_px, v + d_px, w_px, h_px);
+    let right = uv_rect(u + d_px + w_px, v + d_px, d_px, h_px);
+    let back = uv_rect(u + d_px + w_px + d_px, v + d_px, w_px, h_px);
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [-hw, -hh, -hd],
+            [-hw, hh, -hd],
+            [hw, hh, -hd],
+            [hw, -hh, -hd],
+        ],
+        [0.0, 0.0, -1.0],
+        back,
+    );
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [[hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd], [-hw, -hh, hd]],
+        [0.0, 0.0, 1.0],
+        front,
+    );
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [-hw, -hh, hd],
+            [-hw, hh, hd],
+            [-hw, hh, -hd],
+            [-hw, -hh, -hd],
+        ],
+        [-1.0, 0.0, 0.0],
+        left,
+    );
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [[hw, -hh, -hd], [hw, hh, -hd], [hw, hh, hd], [hw, -hh, hd]],
+        [1.0, 0.0, 0.0],
+        right,
+    );
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [[-hw, hh, hd], [hw, hh, hd], [hw, hh, -hd], [-hw, hh, -hd]],
+        [0.0, 1.0, 0.0],
+        top,
+    );
+    add_quad(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [-hw, -hh, -hd],
+            [hw, -hh, -hd],
+            [hw, -hh, hd],
+            [-hw, -hh, hd],
+        ],
+        [0.0, -1.0, 0.0],
+        bottom,
+    );
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn add_quad(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    verts: [[f32; 3]; 4],
+    normal: [f32; 3],
+    uv: [[f32; 2]; 4],
+) {
+    let base = positions.len() as u32;
+    for i in 0..4 {
+        positions.push(verts[i]);
+        normals.push(normal);
+        uvs.push(uv[i]);
+    }
+    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+fn uv_rect(u: f32, v: f32, w: f32, h: f32) -> [[f32; 2]; 4] {
+    let u0 = u / 64.0;
+    let u1 = (u + w) / 64.0;
+    let v0 = 1.0 - (v / 64.0);
+    let v1 = 1.0 - ((v + h) / 64.0);
+    [[u0, v1], [u0, v0], [u1, v0], [u1, v1]]
+}
+
+fn player_root_rotation(yaw: f32) -> Quat {
+    Quat::from_axis_angle(Vec3::Y, yaw + std::f32::consts::PI)
 }
 
 #[derive(Clone, Copy)]
