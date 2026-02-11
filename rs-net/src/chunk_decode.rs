@@ -85,8 +85,10 @@ fn decode_block_ids(bytes: &[u8]) -> Result<Vec<u16>, String> {
     for i in 0..SECTION_BLOCK_COUNT {
         let low = bytes[i * 2];
         let high = bytes[i * 2 + 1];
-        let id = ((low as u16) >> 4) | ((high as u16) << 4);
-        blocks.push(id);
+        // 1.8 chunk section stores block state as little-endian u16:
+        // low 4 bits metadata, high 12 bits block id.
+        let state = ((high as u16) << 8) | (low as u16);
+        blocks.push(state);
     }
 
     Ok(blocks)

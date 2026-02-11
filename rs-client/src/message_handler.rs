@@ -128,7 +128,7 @@ pub fn handle_messages(
                     }
                 }
 
-                let on_ground = pos.on_ground.unwrap_or(false);
+                let on_ground = pos.on_ground.unwrap_or(sim_state.current.on_ground);
                 net_events.push(NetEvent::ServerPosLook {
                     pos: position,
                     yaw,
@@ -149,6 +149,15 @@ pub fn handle_messages(
                     });
                 }
                 remote_entity_events.push(event);
+            }
+            FromNetMessage::UpdateExperience {
+                experience_bar,
+                level,
+                total_experience,
+            } => {
+                player_status.experience_bar = experience_bar.clamp(0.0, 1.0);
+                player_status.level = level.max(0);
+                player_status.total_experience = total_experience.max(0);
             }
             FromNetMessage::Inventory(event) => {
                 apply_inventory_message(&mut inventory_state, event);

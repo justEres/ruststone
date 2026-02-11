@@ -7,6 +7,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::block_textures::AtlasBlockMapping;
+use crate::block_textures::BiomeTintResolver;
 use crate::chunk::{ChunkColumnSnapshot, MeshBatch};
 
 #[derive(Resource)]
@@ -59,12 +60,13 @@ pub struct MeshJob {
     pub snapshot: ChunkColumnSnapshot,
     pub use_greedy: bool,
     pub texture_mapping: Arc<AtlasBlockMapping>,
+    pub biome_tints: Arc<BiomeTintResolver>,
 }
 
 impl MeshJob {
     pub fn build_mesh(self) -> MeshBatch {
         self.snapshot
-            .build_mesh_data(self.use_greedy, &self.texture_mapping)
+            .build_mesh_data(self.use_greedy, &self.texture_mapping, &self.biome_tints)
     }
 }
 

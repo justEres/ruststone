@@ -9,20 +9,24 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - 20 TPS fixed-step local simulation with client-side prediction + reconciliation.
 - Basic movement/camera flow, collisions, sneaking, sprinting, jumping.
 - World/chunk decoding and meshing with async mesh generation.
+- Chunk metadata/state decode kept end-to-end (`id + meta`) and used in render/collision paths.
 - Block texture atlas rendering, water transparency improvements, biome tint support.
+- State-aware texture selection for metadata variants (e.g. acacia/dark-oak logs & leaves, flower variants).
 - Manual/engine culling toggles, render distance controls, wireframe and performance overlays.
 
 ### Networking and gameplay loop
 - Connect/login/play loop against 1.8.9 servers.
 - Chunk + block updates wired into world state and remeshing.
-- Local player movement send + server correction handling.
+- Local player movement send + server correction handling (including large-teleport snap path).
 - Remote entity scaffolding for players, mobs, objects, dropped items and XP orbs.
 - Entity click interactions (attack/interact), knockback velocity ingest, item use in air.
 - Chat, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
+- Local block placement guard prevents placing into the local player collider.
 
 ### UI (egui)
 - Connect screen, chat, pause menu, debug menu, death screen.
 - Crosshair + block break progress indicator.
+- HUD bars for health, hunger, and experience.
 - Survival inventory/hotbar window scaffolding with server-synced item stacks.
 - Inventory item textures loaded from the client texture pack.
 - Inventory interactions implemented for common survival actions:
@@ -98,7 +102,7 @@ Legend:
 | `0x08` | `TeleportPlayer_NoConfirm` | Implemented | Also handles protocol variants. |
 | `0x09` | `SetCurrentHotbarSlot` | Implemented | Hotbar slot sync. |
 | `0x0A` | `EntityUsedBed` | Not implemented |  |
-| `0x0B` | `Animation` | Not implemented |  |
+| `0x0B` | `Animation` | Implemented | Remote animation events parsed and applied to remote visuals. |
 | `0x0C` | `SpawnPlayer_i32_HeldItem` | Implemented | Also handles other spawn player variants. |
 | `0x0D` | `CollectItem_nocount` | Not implemented |  |
 | `0x0E` | `SpawnObject_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
@@ -115,10 +119,10 @@ Legend:
 | `0x19` | `EntityHeadLook` | Partial | Parsed, ignored. |
 | `0x1A` | `EntityStatus` | Not implemented |  |
 | `0x1B` | `EntityAttach_leashed` | Not implemented |  |
-| `0x1C` | `EntityMetadata` | Partial | Parsed for dropped-item labels from stack metadata. |
+| `0x1C` | `EntityMetadata` | Implemented | Parsed for pose flags (sneak) and dropped-item labels from stack metadata. |
 | `0x1D` | `EntityEffect` | Not implemented |  |
 | `0x1E` | `EntityRemoveEffect` | Not implemented |  |
-| `0x1F` | `SetExperience` | Not implemented |  |
+| `0x1F` | `SetExperience` | Implemented | Experience bar / level / total XP sync to HUD state. |
 | `0x20` | `EntityProperties` | Partial | Parsed, ignored. |
 | `0x21` | `ChunkData_NoEntities_u16` | Implemented | Handled via `ChunkData` decode path. |
 | `0x22` | `MultiBlockChange_VarInt` | Implemented | Also handles `MultiBlockChange_u16`. |

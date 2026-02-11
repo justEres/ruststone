@@ -28,6 +28,14 @@ pub enum BlockModelKind {
 pub const TEXTUREPACK_BLOCKS_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
 pub const TEXTUREPACK_ITEMS_BASE: &str = "texturepack/assets/minecraft/textures/items/";
 
+pub const fn block_state_id(block_state: u16) -> u16 {
+    block_state >> 4
+}
+
+pub const fn block_state_meta(block_state: u16) -> u8 {
+    (block_state & 0xF) as u8
+}
+
 mod generated {
     include!("registry_ids_generated.rs");
 }

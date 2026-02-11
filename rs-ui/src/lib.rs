@@ -316,6 +316,7 @@ fn draw_hotbar_ui(
 ) {
     let health_frac = (player_status.health / 20.0).clamp(0.0, 1.0);
     let hunger_frac = (player_status.food as f32 / 20.0).clamp(0.0, 1.0);
+    let xp_frac = player_status.experience_bar.clamp(0.0, 1.0);
     let hotbar_width = INVENTORY_SLOT_SIZE * 9.0 + INVENTORY_SLOT_SPACING * 8.0;
 
     egui::Area::new(egui::Id::new("hotbar_overlay"))
@@ -349,6 +350,15 @@ fn draw_hotbar_ui(
                         hunger_rect,
                         hunger_frac,
                         egui::Color32::from_rgb(181, 122, 43),
+                    );
+                    ui.add_space(3.0);
+                    let (xp_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(hotbar_width, 7.0), egui::Sense::hover());
+                    draw_stat_bar(
+                        ui.painter(),
+                        xp_rect,
+                        xp_frac,
+                        egui::Color32::from_rgb(110, 196, 64),
                     );
                     ui.add_space(4.0);
 

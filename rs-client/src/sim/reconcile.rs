@@ -75,10 +75,8 @@ fn find_frame<'a>(
     }
 
     let latest = buffer.latest_tick()?;
-    for t in (0..=latest).rev() {
-        if t < tick {
-            break;
-        }
+    let start = latest.min(tick);
+    for t in (0..=start).rev() {
         if let Some(frame) = buffer.get_by_tick(t) {
             return Some(frame);
         }

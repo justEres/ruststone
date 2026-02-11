@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::Resource;
-use rs_utils::{BlockModelKind, block_model_kind};
+use rs_utils::{BlockModelKind, block_model_kind, block_state_id};
 use rs_utils::{BlockUpdate, ChunkData};
 
 const CHUNK_SIZE: i32 = 16;
@@ -69,7 +69,7 @@ impl WorldCollisionMap {
 
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> u16 {
         if y < 0 {
-            return 1;
+            return block_state_from_id(1);
         }
         if y >= WORLD_HEIGHT {
             return 0;
@@ -110,7 +110,8 @@ impl WorldCollisionMap {
     }
 }
 
-pub fn is_solid(block_id: u16) -> bool {
+pub fn is_solid(block_state: u16) -> bool {
+    let block_id = block_state_id(block_state);
     match block_id {
         0 => false,       // air
         8 | 9 => false,   // water
@@ -120,4 +121,8 @@ pub fn is_solid(block_id: u16) -> bool {
             BlockModelKind::Cross | BlockModelKind::TorchLike
         ),
     }
+}
+
+const fn block_state_from_id(block_id: u16) -> u16 {
+    block_id << 4
 }
