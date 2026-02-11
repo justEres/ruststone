@@ -53,6 +53,12 @@ pub struct RemoteSkinDownloader {
     loaded: HashMap<String, Handle<Image>>,
 }
 
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct PlayerTextureDebugSettings {
+    pub flip_u: bool,
+    pub flip_v: bool,
+}
+
 impl Default for RemoteSkinDownloader {
     fn default() -> Self {
         let (request_tx, request_rx) = unbounded::<String>();
@@ -149,6 +155,9 @@ pub struct RemotePlayerAnimation {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
+pub struct RemotePlayerSkinModel(pub PlayerSkinModel);
+
+#[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteVisual {
     pub y_offset: f32,
     pub name_y_offset: f32,
@@ -190,6 +199,7 @@ pub fn apply_remote_entity_events(
     mut entity_query: Query<(&mut RemoteEntity, &mut RemoteEntityLook)>,
     mut name_query: Query<&mut RemoteEntityName>,
     visual_query: Query<&RemoteVisual>,
+    texture_debug: Res<PlayerTextureDebugSettings>,
 ) {
     for event in queue.drain() {
         match event {
@@ -324,6 +334,7 @@ pub fn apply_remote_entity_events(
                         &mut materials,
                         player_skin,
                         player_skin_model,
+                        &texture_debug,
                     );
                     commands.entity(root).add_child(parts.head);
                     commands.entity(root).add_child(parts.body);
@@ -339,6 +350,7 @@ pub fn apply_remote_entity_events(
                             previous_pos: pos,
                             walk_phase: 0.0,
                         },
+                        RemotePlayerSkinModel(player_skin_model),
                     ));
                 } else {
                     let mesh = meshes.add(match spec.mesh {
@@ -599,6 +611,107 @@ pub fn apply_remote_player_skins(
     }
 }
 
+pub fn rebuild_remote_player_meshes_on_texture_debug_change(
+    settings: Res<PlayerTextureDebugSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    query: Query<
+        (
+            &RemotePlayerModelParts,
+            &RemotePlayerSkinMaterials,
+            &RemotePlayerSkinModel,
+        ),
+        With<RemotePlayer>,
+    >,
+    children_query: Query<&Children>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for (parts, mats, skin_model) in &query {
+        let Some(base_material) = mats.0.first() else {
+            continue;
+        };
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.head,
+            base_material,
+            player_head_meshes(&settings),
+        );
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.body,
+            base_material,
+            player_body_meshes(&settings),
+        );
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.arm_left,
+            base_material,
+            player_left_arm_meshes(skin_model.0, &settings),
+        );
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.arm_right,
+            base_material,
+            player_right_arm_meshes(skin_model.0, &settings),
+        );
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.leg_left,
+            base_material,
+            player_left_leg_meshes(&settings),
+        );
+        rebuild_part_children(
+            &mut commands,
+            &mut meshes,
+            &children_query,
+            parts.leg_right,
+            base_material,
+            player_right_leg_meshes(&settings),
+        );
+    }
+}
+
+fn rebuild_part_children(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    children_query: &Query<&Children>,
+    pivot: Entity,
+    base_material: &Handle<StandardMaterial>,
+    part_meshes: Vec<Mesh>,
+) {
+    if let Ok(children) = children_query.get(pivot) {
+        for child in children.iter() {
+            commands.entity(child).despawn_recursive();
+        }
+    }
+    for mesh in part_meshes {
+        let child = commands
+            .spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(base_material.clone()),
+                Transform::IDENTITY,
+                GlobalTransform::default(),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+            ))
+            .id();
+        commands.entity(pivot).add_child(child);
+    }
+}
+
 pub fn animate_remote_player_models(
     time: Res<Time>,
     mut roots: Query<
@@ -657,6 +770,7 @@ fn spawn_remote_player_model(
     materials: &mut Assets<StandardMaterial>,
     player_skin: Option<Handle<Image>>,
     skin_model: PlayerSkinModel,
+    texture_debug: &PlayerTextureDebugSettings,
 ) -> (RemotePlayerModelParts, Vec<Handle<StandardMaterial>>) {
     let base_mat = materials.add(StandardMaterial {
         base_color: if player_skin.is_some() {
@@ -676,7 +790,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_head_meshes(),
+        player_head_meshes(texture_debug),
         Vec3::new(0.0, 1.75, 0.0),
     );
     let body = spawn_player_part(
@@ -684,7 +798,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_body_meshes(),
+        player_body_meshes(texture_debug),
         Vec3::new(0.0, 1.125, 0.0),
     );
     let arm_left = spawn_player_part(
@@ -692,7 +806,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_left_arm_meshes(skin_model),
+        player_left_arm_meshes(skin_model, texture_debug),
         Vec3::new(-0.375, 1.125, 0.0),
     );
     let arm_right = spawn_player_part(
@@ -700,7 +814,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_right_arm_meshes(skin_model),
+        player_right_arm_meshes(skin_model, texture_debug),
         Vec3::new(0.375, 1.125, 0.0),
     );
     let leg_left = spawn_player_part(
@@ -708,7 +822,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_left_leg_meshes(),
+        player_left_leg_meshes(texture_debug),
         Vec3::new(-0.125, 0.375, 0.0),
     );
     let leg_right = spawn_player_part(
@@ -716,7 +830,7 @@ fn spawn_remote_player_model(
         meshes,
         materials,
         &base_mat,
-        player_right_leg_meshes(),
+        player_right_leg_meshes(texture_debug),
         Vec3::new(0.125, 0.375, 0.0),
     );
 
@@ -773,143 +887,198 @@ fn spawn_player_part(
     pivot
 }
 
-fn player_head_meshes() -> Vec<Mesh> {
+fn player_head_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box(8.0, 8.0, 8.0, 0.0, 0.0, 0.0),
-        make_skin_box(8.0, 8.0, 8.0, 32.0, 0.0, 0.5),
+        make_skin_box_with_faces(8.0, 8.0, 8.0, 0.0, head_base_face_rects(), texture_debug),
+        make_skin_box_with_faces(8.0, 8.0, 8.0, 0.5, head_outer_face_rects(), texture_debug),
     ]
 }
 
-fn player_body_meshes() -> Vec<Mesh> {
+fn player_body_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box(8.0, 12.0, 4.0, 16.0, 16.0, 0.0),
-        make_skin_box(8.0, 12.0, 4.0, 16.0, 32.0, 0.25),
+        make_skin_box_with_faces(8.0, 12.0, 4.0, 0.0, torso_base_face_rects(), texture_debug),
+        make_skin_box_with_faces(8.0, 12.0, 4.0, 0.25, torso_outer_face_rects(), texture_debug),
     ]
 }
 
-fn player_right_arm_meshes(skin_model: PlayerSkinModel) -> Vec<Mesh> {
-    let (arm_width, arm_u) = match skin_model {
-        PlayerSkinModel::Slim => (3.0, 40.0),
-        PlayerSkinModel::Classic => (4.0, 40.0),
+fn player_right_arm_meshes(
+    skin_model: PlayerSkinModel,
+    texture_debug: &PlayerTextureDebugSettings,
+) -> Vec<Mesh> {
+    let arm_width = match skin_model {
+        PlayerSkinModel::Slim => 3.0,
+        PlayerSkinModel::Classic => 4.0,
     };
     vec![
-        make_skin_box(arm_width, 12.0, 4.0, arm_u, 16.0, 0.0),
-        make_skin_box(arm_width, 12.0, 4.0, arm_u, 32.0, 0.25),
+        make_skin_box_with_faces(
+            arm_width,
+            12.0,
+            4.0,
+            0.0,
+            right_arm_base_face_rects(skin_model),
+            texture_debug,
+        ),
+        make_skin_box_with_faces(
+            arm_width,
+            12.0,
+            4.0,
+            0.25,
+            right_arm_outer_face_rects(skin_model),
+            texture_debug,
+        ),
     ]
 }
 
-fn player_left_arm_meshes(skin_model: PlayerSkinModel) -> Vec<Mesh> {
-    let (arm_width, inner_u, outer_u) = match skin_model {
-        PlayerSkinModel::Slim => (3.0, 32.0, 48.0),
-        PlayerSkinModel::Classic => (4.0, 32.0, 48.0),
+fn player_left_arm_meshes(
+    skin_model: PlayerSkinModel,
+    texture_debug: &PlayerTextureDebugSettings,
+) -> Vec<Mesh> {
+    let arm_width = match skin_model {
+        PlayerSkinModel::Slim => 3.0,
+        PlayerSkinModel::Classic => 4.0,
     };
     vec![
-        make_skin_box(arm_width, 12.0, 4.0, inner_u, 48.0, 0.0),
-        make_skin_box(arm_width, 12.0, 4.0, outer_u, 48.0, 0.25),
+        make_skin_box_with_faces(
+            arm_width,
+            12.0,
+            4.0,
+            0.0,
+            left_arm_base_face_rects(skin_model),
+            texture_debug,
+        ),
+        make_skin_box_with_faces(
+            arm_width,
+            12.0,
+            4.0,
+            0.25,
+            left_arm_outer_face_rects(skin_model),
+            texture_debug,
+        ),
     ]
 }
 
-fn player_right_leg_meshes() -> Vec<Mesh> {
+fn player_right_leg_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box(4.0, 12.0, 4.0, 0.0, 16.0, 0.0),
-        make_skin_box(4.0, 12.0, 4.0, 0.0, 32.0, 0.25),
+        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.0, right_leg_base_face_rects(), texture_debug),
+        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.25, right_leg_outer_face_rects(), texture_debug),
     ]
 }
 
-fn player_left_leg_meshes() -> Vec<Mesh> {
+fn player_left_leg_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
     vec![
-        make_skin_box(4.0, 12.0, 4.0, 16.0, 48.0, 0.0),
-        make_skin_box(4.0, 12.0, 4.0, 0.0, 48.0, 0.25),
+        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.0, left_leg_base_face_rects(), texture_debug),
+        make_skin_box_with_faces(4.0, 12.0, 4.0, 0.25, left_leg_outer_face_rects(), texture_debug),
     ]
 }
 
-fn make_skin_box(w_px: f32, h_px: f32, d_px: f32, u: f32, v: f32, inflate_px: f32) -> Mesh {
+fn make_skin_box_with_faces(
+    w_px: f32,
+    h_px: f32,
+    d_px: f32,
+    inflate_px: f32,
+    faces: SkinFaceMap,
+    texture_debug: &PlayerTextureDebugSettings,
+) -> Mesh {
     let px = 1.0 / 16.0;
     let inflate = inflate_px * px;
     let hw = w_px * px * 0.5 + inflate;
     let hh = h_px * px * 0.5 + inflate;
     let hd = d_px * px * 0.5 + inflate;
 
-    let top = uv_rect(u + d_px, v, w_px, d_px);
-    let bottom = uv_rect(u + d_px + w_px, v, w_px, d_px);
-    let left = uv_rect(u, v + d_px, d_px, h_px);
-    let front = uv_rect(u + d_px, v + d_px, w_px, h_px);
-    let right = uv_rect(u + d_px + w_px, v + d_px, d_px, h_px);
-    let back = uv_rect(u + d_px + w_px + d_px, v + d_px, w_px, h_px);
-
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    add_quad(
+    add_face(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [hw, -hh, hd],
+            [-hw, -hh, hd],
+            [-hw, -hh, -hd],
+            [hw, -hh, -hd],
+        ],
+        [0.0, -1.0, 0.0],
+        faces.down,
+        texture_debug,
+    );
+    add_face(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [-hw, hh, -hd],
+            [hw, hh, -hd],
+            [hw, hh, hd],
+            [-hw, hh, hd],
+        ],
+        [0.0, 1.0, 0.0],
+        faces.up,
+        texture_debug,
+    );
+    add_face(
         &mut positions,
         &mut normals,
         &mut uvs,
         &mut indices,
         [
             [-hw, -hh, -hd],
-            [-hw, hh, -hd],
-            [hw, hh, -hd],
             [hw, -hh, -hd],
+            [hw, hh, -hd],
+            [-hw, hh, -hd],
         ],
         [0.0, 0.0, -1.0],
-        back,
+        faces.north,
+        texture_debug,
     );
-    add_quad(
-        &mut positions,
-        &mut normals,
-        &mut uvs,
-        &mut indices,
-        [[hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd], [-hw, -hh, hd]],
-        [0.0, 0.0, 1.0],
-        front,
-    );
-    add_quad(
+    add_face(
         &mut positions,
         &mut normals,
         &mut uvs,
         &mut indices,
         [
+            [hw, -hh, hd],
+            [-hw, -hh, hd],
+            [-hw, hh, hd],
+            [hw, hh, hd],
+        ],
+        [0.0, 0.0, 1.0],
+        faces.south,
+        texture_debug,
+    );
+    add_face(
+        &mut positions,
+        &mut normals,
+        &mut uvs,
+        &mut indices,
+        [
+            [-hw, -hh, -hd],
             [-hw, -hh, hd],
             [-hw, hh, hd],
             [-hw, hh, -hd],
-            [-hw, -hh, -hd],
         ],
         [-1.0, 0.0, 0.0],
-        left,
+        faces.west,
+        texture_debug,
     );
-    add_quad(
-        &mut positions,
-        &mut normals,
-        &mut uvs,
-        &mut indices,
-        [[hw, -hh, -hd], [hw, hh, -hd], [hw, hh, hd], [hw, -hh, hd]],
-        [1.0, 0.0, 0.0],
-        right,
-    );
-    add_quad(
-        &mut positions,
-        &mut normals,
-        &mut uvs,
-        &mut indices,
-        [[-hw, hh, hd], [hw, hh, hd], [hw, hh, -hd], [-hw, hh, -hd]],
-        [0.0, 1.0, 0.0],
-        top,
-    );
-    add_quad(
+    add_face(
         &mut positions,
         &mut normals,
         &mut uvs,
         &mut indices,
         [
-            [-hw, -hh, -hd],
-            [hw, -hh, -hd],
             [hw, -hh, hd],
-            [-hw, -hh, hd],
+            [hw, -hh, -hd],
+            [hw, hh, -hd],
+            [hw, hh, hd],
         ],
-        [0.0, -1.0, 0.0],
-        bottom,
+        [1.0, 0.0, 0.0],
+        faces.east,
+        texture_debug,
     );
 
     let mut mesh = Mesh::new(
@@ -923,15 +1092,251 @@ fn make_skin_box(w_px: f32, h_px: f32, d_px: f32, u: f32, v: f32, inflate_px: f3
     mesh
 }
 
-fn add_quad(
+#[derive(Clone, Copy)]
+struct SkinUvRect {
+    u: f32,
+    v: f32,
+    w: f32,
+    h: f32,
+}
+
+impl SkinUvRect {
+    fn new(u: f32, v: f32, w: f32, h: f32) -> Self {
+        Self { u, v, w, h }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SkinFaceMap {
+    down: SkinUvRect,
+    up: SkinUvRect,
+    north: SkinUvRect,
+    south: SkinUvRect,
+    west: SkinUvRect,
+    east: SkinUvRect,
+}
+
+fn rect(x1: f32, y1: f32, x2: f32, y2: f32) -> SkinUvRect {
+    SkinUvRect::new(x1, y1, x2 - x1, y2 - y1)
+}
+
+fn map_from_named_faces(
+    top: SkinUvRect,
+    bottom: SkinUvRect,
+    left: SkinUvRect,
+    front: SkinUvRect,
+    right: SkinUvRect,
+    back: SkinUvRect,
+) -> SkinFaceMap {
+    // Cube axes to named skin faces.
+    // -Y -> bottom, +Y -> top, -Z -> front, +Z -> back, -X -> left, +X -> right
+    SkinFaceMap {
+        down: bottom,
+        up: top,
+        north: front,
+        south: back,
+        west: left,
+        east: right,
+    }
+}
+
+fn head_base_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(8.0, 0.0, 16.0, 8.0),
+        rect(16.0, 0.0, 24.0, 8.0),
+        rect(0.0, 8.0, 8.0, 16.0),
+        rect(8.0, 8.0, 16.0, 16.0),
+        rect(16.0, 8.0, 24.0, 16.0),
+        rect(24.0, 8.0, 32.0, 16.0),
+    )
+}
+
+fn head_outer_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(40.0, 0.0, 48.0, 8.0),
+        rect(48.0, 0.0, 56.0, 8.0),
+        rect(32.0, 8.0, 40.0, 16.0),
+        rect(40.0, 8.0, 48.0, 16.0),
+        rect(48.0, 8.0, 56.0, 16.0),
+        rect(56.0, 8.0, 64.0, 16.0),
+    )
+}
+
+fn torso_base_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(20.0, 16.0, 28.0, 20.0),
+        rect(28.0, 16.0, 36.0, 20.0),
+        rect(16.0, 20.0, 20.0, 32.0),
+        rect(20.0, 20.0, 28.0, 32.0),
+        rect(28.0, 20.0, 32.0, 32.0),
+        rect(32.0, 20.0, 40.0, 32.0),
+    )
+}
+
+fn torso_outer_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(20.0, 32.0, 28.0, 36.0),
+        rect(28.0, 32.0, 36.0, 36.0),
+        rect(16.0, 36.0, 20.0, 48.0),
+        rect(20.0, 36.0, 28.0, 48.0),
+        rect(28.0, 36.0, 32.0, 48.0),
+        rect(32.0, 36.0, 40.0, 48.0),
+    )
+}
+
+fn right_arm_base_face_rects(model: PlayerSkinModel) -> SkinFaceMap {
+    match model {
+        PlayerSkinModel::Classic => map_from_named_faces(
+            rect(44.0, 16.0, 48.0, 20.0),
+            rect(48.0, 16.0, 52.0, 20.0),
+            rect(40.0, 20.0, 44.0, 32.0),
+            rect(44.0, 20.0, 48.0, 32.0),
+            rect(48.0, 20.0, 52.0, 32.0),
+            rect(52.0, 20.0, 56.0, 32.0),
+        ),
+        PlayerSkinModel::Slim => map_from_named_faces(
+            rect(44.0, 16.0, 47.0, 20.0),
+            rect(47.0, 16.0, 50.0, 20.0),
+            rect(40.0, 20.0, 43.0, 32.0),
+            rect(44.0, 20.0, 47.0, 32.0),
+            rect(47.0, 20.0, 50.0, 32.0),
+            rect(50.0, 20.0, 53.0, 32.0),
+        ),
+    }
+}
+
+fn right_arm_outer_face_rects(model: PlayerSkinModel) -> SkinFaceMap {
+    match model {
+        PlayerSkinModel::Classic => map_from_named_faces(
+            rect(44.0, 32.0, 48.0, 36.0),
+            rect(48.0, 32.0, 52.0, 36.0),
+            rect(40.0, 36.0, 44.0, 48.0),
+            rect(44.0, 36.0, 48.0, 48.0),
+            rect(48.0, 36.0, 52.0, 48.0),
+            rect(52.0, 36.0, 56.0, 48.0),
+        ),
+        PlayerSkinModel::Slim => map_from_named_faces(
+            rect(44.0, 32.0, 47.0, 36.0),
+            rect(47.0, 32.0, 50.0, 36.0),
+            rect(40.0, 36.0, 43.0, 48.0),
+            rect(44.0, 36.0, 47.0, 48.0),
+            rect(47.0, 36.0, 50.0, 48.0),
+            rect(50.0, 36.0, 53.0, 48.0),
+        ),
+    }
+}
+
+fn left_arm_base_face_rects(model: PlayerSkinModel) -> SkinFaceMap {
+    match model {
+        PlayerSkinModel::Classic => map_from_named_faces(
+            rect(36.0, 48.0, 40.0, 52.0),
+            rect(40.0, 48.0, 44.0, 52.0),
+            rect(32.0, 52.0, 36.0, 64.0),
+            rect(36.0, 52.0, 40.0, 64.0),
+            rect(40.0, 52.0, 44.0, 64.0),
+            rect(44.0, 52.0, 48.0, 64.0),
+        ),
+        PlayerSkinModel::Slim => map_from_named_faces(
+            rect(36.0, 48.0, 39.0, 52.0),
+            rect(39.0, 48.0, 42.0, 52.0),
+            rect(32.0, 52.0, 35.0, 64.0),
+            rect(36.0, 52.0, 39.0, 64.0),
+            rect(39.0, 52.0, 42.0, 64.0),
+            rect(42.0, 52.0, 45.0, 64.0),
+        ),
+    }
+}
+
+fn left_arm_outer_face_rects(model: PlayerSkinModel) -> SkinFaceMap {
+    match model {
+        PlayerSkinModel::Classic => map_from_named_faces(
+            rect(52.0, 48.0, 56.0, 52.0),
+            rect(56.0, 48.0, 60.0, 52.0),
+            rect(48.0, 52.0, 52.0, 64.0),
+            rect(52.0, 52.0, 56.0, 64.0),
+            rect(56.0, 52.0, 60.0, 64.0),
+            rect(60.0, 52.0, 64.0, 64.0),
+        ),
+        PlayerSkinModel::Slim => map_from_named_faces(
+            rect(52.0, 48.0, 55.0, 52.0),
+            rect(55.0, 48.0, 58.0, 52.0),
+            rect(48.0, 52.0, 51.0, 64.0),
+            rect(52.0, 52.0, 55.0, 64.0),
+            rect(55.0, 52.0, 58.0, 64.0),
+            rect(58.0, 52.0, 61.0, 64.0),
+        ),
+    }
+}
+
+fn right_leg_base_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(4.0, 16.0, 8.0, 20.0),
+        rect(8.0, 16.0, 12.0, 20.0),
+        rect(0.0, 20.0, 4.0, 32.0),
+        rect(4.0, 20.0, 8.0, 32.0),
+        rect(8.0, 20.0, 12.0, 32.0),
+        rect(12.0, 20.0, 16.0, 32.0),
+    )
+}
+
+fn right_leg_outer_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(4.0, 32.0, 8.0, 36.0),
+        rect(8.0, 32.0, 12.0, 36.0),
+        rect(0.0, 36.0, 4.0, 48.0),
+        rect(4.0, 36.0, 8.0, 48.0),
+        rect(8.0, 36.0, 12.0, 48.0),
+        rect(12.0, 36.0, 16.0, 48.0),
+    )
+}
+
+fn left_leg_base_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(20.0, 48.0, 24.0, 52.0),
+        rect(24.0, 48.0, 28.0, 52.0),
+        rect(16.0, 52.0, 20.0, 64.0),
+        rect(20.0, 52.0, 24.0, 64.0),
+        rect(24.0, 52.0, 28.0, 64.0),
+        rect(28.0, 52.0, 32.0, 64.0),
+    )
+}
+
+fn left_leg_outer_face_rects() -> SkinFaceMap {
+    map_from_named_faces(
+        rect(4.0, 48.0, 8.0, 52.0),
+        rect(8.0, 48.0, 12.0, 52.0),
+        rect(0.0, 52.0, 4.0, 64.0),
+        rect(4.0, 52.0, 8.0, 64.0),
+        rect(8.0, 52.0, 12.0, 64.0),
+        rect(12.0, 52.0, 16.0, 64.0),
+    )
+}
+
+fn add_face(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     uvs: &mut Vec<[f32; 2]>,
     indices: &mut Vec<u32>,
     verts: [[f32; 3]; 4],
     normal: [f32; 3],
-    uv: [[f32; 2]; 4],
+    rect: SkinUvRect,
+    texture_debug: &PlayerTextureDebugSettings,
 ) {
+    let mut verts = verts;
+    let mut uv = uv_rect(rect, texture_debug.flip_u, texture_debug.flip_v);
+
+    // Keep face winding consistent with the provided normal so both triangles
+    // are front-facing together (fixes diagonal half-quad culling).
+    let a = Vec3::from_array(verts[0]);
+    let b = Vec3::from_array(verts[1]);
+    let c = Vec3::from_array(verts[2]);
+    let actual = (b - a).cross(c - a);
+    let expected = Vec3::from_array(normal);
+    if actual.dot(expected) < 0.0 {
+        verts = [verts[0], verts[3], verts[2], verts[1]];
+        uv = [uv[0], uv[3], uv[2], uv[1]];
+    }
+
     let base = positions.len() as u32;
     for i in 0..4 {
         positions.push(verts[i]);
@@ -941,12 +1346,23 @@ fn add_quad(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-fn uv_rect(u: f32, v: f32, w: f32, h: f32) -> [[f32; 2]; 4] {
-    let u0 = u / 64.0;
-    let u1 = (u + w) / 64.0;
-    let v0 = 1.0 - (v / 64.0);
-    let v1 = 1.0 - ((v + h) / 64.0);
-    [[u0, v1], [u0, v0], [u1, v0], [u1, v1]]
+fn uv_rect(rect: SkinUvRect, flip_u: bool, flip_v: bool) -> [[f32; 2]; 4] {
+    let u0 = rect.u / 64.0;
+    let u1 = (rect.u + rect.w) / 64.0;
+    let v0 = rect.v / 64.0;
+    let v1 = (rect.v + rect.h) / 64.0;
+    let mut out = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+    if flip_u {
+        for uv in &mut out {
+            uv[0] = 1.0 - uv[0];
+        }
+    }
+    if flip_v {
+        for uv in &mut out {
+            uv[1] = 1.0 - uv[1];
+        }
+    }
+    out
 }
 
 fn player_root_rotation(yaw: f32) -> Quat {

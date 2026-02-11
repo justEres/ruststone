@@ -93,6 +93,7 @@ fn main() {
         .insert_resource(entities::RemoteEntityEventQueue::default())
         .insert_resource(entities::RemoteEntityRegistry::default())
         .insert_resource(entities::RemoteSkinDownloader::default())
+        .insert_resource(entities::PlayerTextureDebugSettings::default())
         .insert_resource(sim::SimClock::default())
         .insert_resource(sim::CurrentInput::default())
         .insert_resource(sim::SimState::default())
@@ -119,7 +120,10 @@ fn main() {
                 entities::apply_remote_entity_events.after(entities::remote_entity_connection_sync),
                 entities::remote_skin_download_tick.after(entities::apply_remote_entity_events),
                 entities::apply_remote_player_skins.after(entities::remote_skin_download_tick),
-                entities::animate_remote_player_models.after(entities::apply_remote_player_skins),
+                entities::rebuild_remote_player_meshes_on_texture_debug_change
+                    .after(entities::apply_remote_player_skins),
+                entities::animate_remote_player_models
+                    .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
             ),
         )
         .add_systems(

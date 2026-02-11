@@ -1,10 +1,10 @@
 [workspace]
 members = ["rs-client", "rs-net", "rs-protocol", "rs-render", "rs-ui", "rs-utils"]
+exclude = ["leafish"]
 resolver = "3"
 default-run = "rs-client"
 
 [workspace.dependencies]
 tracing = { version = "0.1.41" }
 tracing-subscriber = "0.3.20"
-
 
