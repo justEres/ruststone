@@ -1225,6 +1225,63 @@ fn add_custom_block(
             block_id,
             tint,
         ),
+        BlockModelKind::Stairs => {
+            let meta = block_meta(block_id);
+            let top = (meta & 0x4) != 0;
+            let facing = meta & 0x3;
+
+            // Base slab half.
+            add_box(
+                batch,
+                Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                texture_mapping,
+                biome_tints,
+                x,
+                y,
+                z,
+                if top {
+                    [0.0, 0.5, 0.0]
+                } else {
+                    [0.0, 0.0, 0.0]
+                },
+                if top {
+                    [1.0, 1.0, 1.0]
+                } else {
+                    [1.0, 0.5, 1.0]
+                },
+                block_id,
+                tint,
+            );
+
+            // Vertical half matching the stair facing.
+            let (min_x, max_x, min_z, max_z) = match facing {
+                0 => (0.5, 1.0, 0.0, 1.0), // east
+                1 => (0.0, 0.5, 0.0, 1.0), // west
+                2 => (0.0, 1.0, 0.5, 1.0), // south
+                _ => (0.0, 1.0, 0.0, 0.5), // north
+            };
+            add_box(
+                batch,
+                Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                texture_mapping,
+                biome_tints,
+                x,
+                y,
+                z,
+                if top {
+                    [min_x, 0.0, min_z]
+                } else {
+                    [min_x, 0.5, min_z]
+                },
+                if top {
+                    [max_x, 0.5, max_z]
+                } else {
+                    [max_x, 1.0, max_z]
+                },
+                block_id,
+                tint,
+            );
+        }
         BlockModelKind::Fence => {
             add_box(
                 batch,
@@ -1452,6 +1509,7 @@ fn is_custom_block(block_id: u16) -> bool {
         block_model_kind(block_type(block_id)),
         BlockModelKind::Cross
             | BlockModelKind::Slab
+            | BlockModelKind::Stairs
             | BlockModelKind::Fence
             | BlockModelKind::Pane
             | BlockModelKind::TorchLike

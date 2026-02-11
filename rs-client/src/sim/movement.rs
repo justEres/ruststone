@@ -1,10 +1,12 @@
 use bevy::prelude::Vec3;
+use rs_utils::{BlockModelKind, block_model_kind, block_state_id, block_state_meta};
 
 use super::collision::{WorldCollisionMap, is_solid};
 use super::types::{InputState, PlayerSimState};
 
 const PLAYER_HALF_WIDTH: f32 = 0.3;
 const PLAYER_HEIGHT: f32 = 1.8;
+const PLAYER_STEP_HEIGHT: f32 = 0.6;
 const COLLISION_EPS: f32 = 1e-5;
 
 const GRAVITY: f32 = -0.08;
@@ -35,22 +37,27 @@ impl<'a> WorldCollision<'a> {
         self.map.map_or(0, |map| map.block_at(x, y, z))
     }
 
-    fn is_solid_at(&self, x: i32, y: i32, z: i32) -> bool {
-        is_solid(self.block_at(x, y, z))
-    }
-
-    fn aabb_collides(&self, min: Vec3, max: Vec3) -> bool {
+    fn collect_collision_boxes(&self, min: Vec3, max: Vec3) -> Vec<Aabb> {
         let (min_x, max_x) = block_range(min.x, max.x);
         let (min_y, max_y) = block_range(min.y, max.y);
         let (min_z, max_z) = block_range(min.z, max.z);
-
+        let mut out = Vec::new();
         for y in min_y..=max_y {
             for z in min_z..=max_z {
                 for x in min_x..=max_x {
-                    if self.is_solid_at(x, y, z) {
-                        return true;
-                    }
+                    let block_state = self.block_at(x, y, z);
+                    append_block_collision_boxes(block_state, x, y, z, &mut out);
                 }
+            }
+        }
+        out
+    }
+
+    fn aabb_collides(&self, min: Vec3, max: Vec3) -> bool {
+        let query = Aabb::new(min, max);
+        for block in self.collect_collision_boxes(min, max) {
+            if query.intersects(&block) {
+                return true;
             }
         }
         false
@@ -101,173 +108,97 @@ impl<'a> WorldCollision<'a> {
         Vec3::new(dx, vel.y, dz)
     }
 
-    pub fn resolve(&self, mut pos: Vec3, mut vel: Vec3) -> (Vec3, Vec3, bool) {
-        let mut on_ground = false;
+    pub fn resolve(&self, mut pos: Vec3, mut vel: Vec3, was_on_ground: bool) -> (Vec3, Vec3, bool) {
+        let original = vel;
+        let mut bb = player_aabb(pos);
 
-        // X axis
-        if vel.x.abs() > 0.0 {
-            let mut new_pos = pos;
-            new_pos.x += vel.x;
-            let min = Vec3::new(
-                new_pos.x - PLAYER_HALF_WIDTH,
-                new_pos.y,
-                new_pos.z - PLAYER_HALF_WIDTH,
+        let broadphase = bb.expanded_by_motion(vel);
+        let mut boxes = self.collect_collision_boxes(broadphase.min, broadphase.max);
+
+        let mut y = vel.y;
+        for block in &boxes {
+            y = calculate_y_offset(&bb, block, y);
+        }
+        bb = bb.offset(Vec3::new(0.0, y, 0.0));
+
+        let mut x = vel.x;
+        for block in &boxes {
+            x = calculate_x_offset(&bb, block, x);
+        }
+        bb = bb.offset(Vec3::new(x, 0.0, 0.0));
+
+        let mut z = vel.z;
+        for block in &boxes {
+            z = calculate_z_offset(&bb, block, z);
+        }
+        bb = bb.offset(Vec3::new(0.0, 0.0, z));
+
+        let stepped_down = original.y != y && original.y < 0.0;
+        let horizontal_blocked = original.x != x || original.z != z;
+
+        if PLAYER_STEP_HEIGHT > 0.0 && (was_on_ground || stepped_down) && horizontal_blocked {
+            let start = player_aabb(pos);
+            let mut stepped = start;
+
+            let step_motion = Vec3::new(original.x, PLAYER_STEP_HEIGHT, original.z);
+            boxes = self.collect_collision_boxes(
+                stepped.expanded_by_motion(step_motion).min,
+                stepped.expanded_by_motion(step_motion).max,
             );
-            let max = Vec3::new(
-                new_pos.x + PLAYER_HALF_WIDTH,
-                new_pos.y + PLAYER_HEIGHT,
-                new_pos.z + PLAYER_HALF_WIDTH,
-            );
-            if self.aabb_collides(min, max) {
-                let (min_y, max_y) = block_range(min.y, max.y);
-                let (min_z, max_z) = block_range(min.z, max.z);
-                let (min_x, max_x) = block_range(min.x, max.x);
-                if vel.x > 0.0 {
-                    let mut limit = new_pos.x;
-                    for y in min_y..=max_y {
-                        for z in min_z..=max_z {
-                            for x in min_x..=max_x {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = x as f32 - PLAYER_HALF_WIDTH;
-                                    if candidate < limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.x = limit;
-                } else {
-                    let mut limit = new_pos.x;
-                    for y in min_y..=max_y {
-                        for z in min_z..=max_z {
-                            for x in min_x..=max_x {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = (x + 1) as f32 + PLAYER_HALF_WIDTH;
-                                    if candidate > limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.x = limit;
-                }
-                vel.x = 0.0;
+
+            let mut up = PLAYER_STEP_HEIGHT;
+            for block in &boxes {
+                up = calculate_y_offset(&stepped, block, up);
             }
-            pos.x = new_pos.x;
+            stepped = stepped.offset(Vec3::new(0.0, up, 0.0));
+
+            let mut step_x = original.x;
+            for block in &boxes {
+                step_x = calculate_x_offset(&stepped, block, step_x);
+            }
+            stepped = stepped.offset(Vec3::new(step_x, 0.0, 0.0));
+
+            let mut step_z = original.z;
+            for block in &boxes {
+                step_z = calculate_z_offset(&stepped, block, step_z);
+            }
+            stepped = stepped.offset(Vec3::new(0.0, 0.0, step_z));
+
+            let mut down = -up;
+            for block in &boxes {
+                down = calculate_y_offset(&stepped, block, down);
+            }
+            stepped = stepped.offset(Vec3::new(0.0, down, 0.0));
+
+            let step_dist_sq = step_x * step_x + step_z * step_z;
+            let flat_dist_sq = x * x + z * z;
+            if step_dist_sq > flat_dist_sq + 1.0e-6 {
+                bb = stepped;
+                x = step_x;
+                y = up + down;
+                z = step_z;
+            }
         }
 
-        // Z axis
-        if vel.z.abs() > 0.0 {
-            let mut new_pos = pos;
-            new_pos.z += vel.z;
-            let min = Vec3::new(
-                new_pos.x - PLAYER_HALF_WIDTH,
-                new_pos.y,
-                new_pos.z - PLAYER_HALF_WIDTH,
-            );
-            let max = Vec3::new(
-                new_pos.x + PLAYER_HALF_WIDTH,
-                new_pos.y + PLAYER_HEIGHT,
-                new_pos.z + PLAYER_HALF_WIDTH,
-            );
-            if self.aabb_collides(min, max) {
-                let (min_y, max_y) = block_range(min.y, max.y);
-                let (min_x, max_x) = block_range(min.x, max.x);
-                let (min_z, max_z) = block_range(min.z, max.z);
-                if vel.z > 0.0 {
-                    let mut limit = new_pos.z;
-                    for y in min_y..=max_y {
-                        for x in min_x..=max_x {
-                            for z in min_z..=max_z {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = z as f32 - PLAYER_HALF_WIDTH;
-                                    if candidate < limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.z = limit;
-                } else {
-                    let mut limit = new_pos.z;
-                    for y in min_y..=max_y {
-                        for x in min_x..=max_x {
-                            for z in min_z..=max_z {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = (z + 1) as f32 + PLAYER_HALF_WIDTH;
-                                    if candidate > limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.z = limit;
-                }
-                vel.z = 0.0;
-            }
-            pos.z = new_pos.z;
+        if original.x != x {
+            vel.x = 0.0;
+        } else {
+            vel.x = x;
+        }
+        if original.y != y {
+            vel.y = 0.0;
+        } else {
+            vel.y = y;
+        }
+        if original.z != z {
+            vel.z = 0.0;
+        } else {
+            vel.z = z;
         }
 
-        // Y axis
-        if vel.y.abs() > 0.0 {
-            let mut new_pos = pos;
-            new_pos.y += vel.y;
-            let min = Vec3::new(
-                new_pos.x - PLAYER_HALF_WIDTH,
-                new_pos.y,
-                new_pos.z - PLAYER_HALF_WIDTH,
-            );
-            let max = Vec3::new(
-                new_pos.x + PLAYER_HALF_WIDTH,
-                new_pos.y + PLAYER_HEIGHT,
-                new_pos.z + PLAYER_HALF_WIDTH,
-            );
-            if self.aabb_collides(min, max) {
-                let (min_z, max_z) = block_range(min.z, max.z);
-                let (min_x, max_x) = block_range(min.x, max.x);
-                let (min_y, max_y) = block_range(min.y, max.y);
-                if vel.y > 0.0 {
-                    let mut limit = new_pos.y;
-                    for x in min_x..=max_x {
-                        for z in min_z..=max_z {
-                            for y in min_y..=max_y {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = y as f32 - PLAYER_HEIGHT;
-                                    if candidate < limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.y = limit;
-                } else {
-                    let mut limit = new_pos.y;
-                    for x in min_x..=max_x {
-                        for z in min_z..=max_z {
-                            for y in min_y..=max_y {
-                                if self.is_solid_at(x, y, z) {
-                                    let candidate = (y + 1) as f32;
-                                    if candidate > limit {
-                                        limit = candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    new_pos.y = limit;
-                    on_ground = true;
-                }
-                vel.y = 0.0;
-            }
-            pos.y = new_pos.y;
-        }
-
-        if !on_ground {
+        pos = aabb_feet_position(bb);
+        let mut on_ground = original.y != y && original.y < 0.0;
+        if !on_ground && original.y <= 0.0 {
             let min = Vec3::new(
                 pos.x - PLAYER_HALF_WIDTH,
                 pos.y - 0.02,
@@ -284,6 +215,241 @@ impl<'a> WorldCollision<'a> {
         }
 
         (pos, vel, on_ground)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Aabb {
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Aabb {
+    fn new(min: Vec3, max: Vec3) -> Self {
+        Self { min, max }
+    }
+
+    fn offset(self, delta: Vec3) -> Self {
+        Self {
+            min: self.min + delta,
+            max: self.max + delta,
+        }
+    }
+
+    fn expanded_by_motion(self, motion: Vec3) -> Self {
+        let min = Vec3::new(
+            self.min.x.min(self.min.x + motion.x),
+            self.min.y.min(self.min.y + motion.y),
+            self.min.z.min(self.min.z + motion.z),
+        );
+        let max = Vec3::new(
+            self.max.x.max(self.max.x + motion.x),
+            self.max.y.max(self.max.y + motion.y),
+            self.max.z.max(self.max.z + motion.z),
+        );
+        Self { min, max }
+    }
+
+    fn intersects(&self, other: &Aabb) -> bool {
+        self.max.x > other.min.x
+            && self.min.x < other.max.x
+            && self.max.y > other.min.y
+            && self.min.y < other.max.y
+            && self.max.z > other.min.z
+            && self.min.z < other.max.z
+    }
+}
+
+fn player_aabb(pos: Vec3) -> Aabb {
+    Aabb::new(
+        Vec3::new(pos.x - PLAYER_HALF_WIDTH, pos.y, pos.z - PLAYER_HALF_WIDTH),
+        Vec3::new(
+            pos.x + PLAYER_HALF_WIDTH,
+            pos.y + PLAYER_HEIGHT,
+            pos.z + PLAYER_HALF_WIDTH,
+        ),
+    )
+}
+
+fn aabb_feet_position(aabb: Aabb) -> Vec3 {
+    Vec3::new(
+        (aabb.min.x + aabb.max.x) * 0.5,
+        aabb.min.y,
+        (aabb.min.z + aabb.max.z) * 0.5,
+    )
+}
+
+fn overlap_xz(a: &Aabb, b: &Aabb) -> bool {
+    a.max.x > b.min.x && a.min.x < b.max.x && a.max.z > b.min.z && a.min.z < b.max.z
+}
+
+fn overlap_yz(a: &Aabb, b: &Aabb) -> bool {
+    a.max.y > b.min.y && a.min.y < b.max.y && a.max.z > b.min.z && a.min.z < b.max.z
+}
+
+fn overlap_xy(a: &Aabb, b: &Aabb) -> bool {
+    a.max.x > b.min.x && a.min.x < b.max.x && a.max.y > b.min.y && a.min.y < b.max.y
+}
+
+fn calculate_y_offset(entity: &Aabb, block: &Aabb, mut dy: f32) -> f32 {
+    if !overlap_xz(entity, block) {
+        return dy;
+    }
+    if dy > 0.0 && entity.max.y <= block.min.y {
+        dy = dy.min(block.min.y - entity.max.y);
+    } else if dy < 0.0 && entity.min.y >= block.max.y {
+        dy = dy.max(block.max.y - entity.min.y);
+    }
+    dy
+}
+
+fn calculate_x_offset(entity: &Aabb, block: &Aabb, mut dx: f32) -> f32 {
+    if !overlap_yz(entity, block) {
+        return dx;
+    }
+    if dx > 0.0 && entity.max.x <= block.min.x {
+        dx = dx.min(block.min.x - entity.max.x);
+    } else if dx < 0.0 && entity.min.x >= block.max.x {
+        dx = dx.max(block.max.x - entity.min.x);
+    }
+    dx
+}
+
+fn calculate_z_offset(entity: &Aabb, block: &Aabb, mut dz: f32) -> f32 {
+    if !overlap_xy(entity, block) {
+        return dz;
+    }
+    if dz > 0.0 && entity.max.z <= block.min.z {
+        dz = dz.min(block.min.z - entity.max.z);
+    } else if dz < 0.0 && entity.min.z >= block.max.z {
+        dz = dz.max(block.max.z - entity.min.z);
+    }
+    dz
+}
+
+fn append_box(
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    local_min: [f32; 3],
+    local_max: [f32; 3],
+    out: &mut Vec<Aabb>,
+) {
+    out.push(Aabb::new(
+        Vec3::new(
+            block_x as f32 + local_min[0],
+            block_y as f32 + local_min[1],
+            block_z as f32 + local_min[2],
+        ),
+        Vec3::new(
+            block_x as f32 + local_max[0],
+            block_y as f32 + local_max[1],
+            block_z as f32 + local_max[2],
+        ),
+    ));
+}
+
+fn append_stair_boxes(
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    out: &mut Vec<Aabb>,
+) {
+    let meta = block_state_meta(block_state);
+    let top = (meta & 0x4) != 0;
+    let facing = meta & 0x3;
+
+    if top {
+        append_box(
+            block_x,
+            block_y,
+            block_z,
+            [0.0, 0.5, 0.0],
+            [1.0, 1.0, 1.0],
+            out,
+        );
+    } else {
+        append_box(
+            block_x,
+            block_y,
+            block_z,
+            [0.0, 0.0, 0.0],
+            [1.0, 0.5, 1.0],
+            out,
+        );
+    }
+
+    let (min_x, max_x, min_z, max_z) = match facing {
+        0 => (0.5, 1.0, 0.0, 1.0), // east
+        1 => (0.0, 0.5, 0.0, 1.0), // west
+        2 => (0.0, 1.0, 0.5, 1.0), // south
+        _ => (0.0, 1.0, 0.0, 0.5), // north
+    };
+    if top {
+        append_box(
+            block_x,
+            block_y,
+            block_z,
+            [min_x, 0.0, min_z],
+            [max_x, 0.5, max_z],
+            out,
+        );
+    } else {
+        append_box(
+            block_x,
+            block_y,
+            block_z,
+            [min_x, 0.5, min_z],
+            [max_x, 1.0, max_z],
+            out,
+        );
+    }
+}
+
+fn append_block_collision_boxes(
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    out: &mut Vec<Aabb>,
+) {
+    if !is_solid(block_state) {
+        return;
+    }
+    let block_id = block_state_id(block_state);
+    let meta = block_state_meta(block_state);
+    match block_model_kind(block_id) {
+        BlockModelKind::Slab => {
+            if (meta & 0x8) != 0 {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.0, 0.5, 0.0],
+                    [1.0, 1.0, 1.0],
+                    out,
+                );
+            } else {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.5, 1.0],
+                    out,
+                );
+            }
+        }
+        BlockModelKind::Stairs => append_stair_boxes(block_state, block_x, block_y, block_z, out),
+        _ => append_box(
+            block_x,
+            block_y,
+            block_z,
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0],
+            out,
+        ),
     }
 }
 
@@ -353,7 +519,7 @@ pub fn simulate_tick(
         state.vel.z = clamped.z;
     }
 
-    let (pos, vel, on_ground) = world.resolve(state.pos, state.vel);
+    let (pos, vel, on_ground) = world.resolve(state.pos, state.vel, state.on_ground);
     state.pos = pos;
     state.vel = vel;
     state.on_ground = on_ground;
