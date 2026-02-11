@@ -12,6 +12,7 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - Chunk metadata/state decode kept end-to-end (`id + meta`) and used in render/collision paths.
 - Block texture atlas rendering, water transparency improvements, biome tint support.
 - State-aware texture selection for metadata variants (e.g. acacia/dark-oak logs & leaves, flower variants).
+- Non-cube rendering for slabs and stairs (metadata-driven orientation/half) instead of full-cube fallback.
 - Manual/engine culling toggles, render distance controls, wireframe and performance overlays.
 
 ### Networking and gameplay loop
@@ -22,6 +23,7 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - Entity click interactions (attack/interact), knockback velocity ingest, item use in air.
 - Chat, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
 - Local block placement guard prevents placing into the local player collider.
+- Movement collision supports slab/stair shapes and includes vanilla-style step-up (`0.6`) for walking up stairs.
 
 ### UI (egui)
 - Connect screen, chat, pause menu, debug menu, death screen.
@@ -171,6 +173,7 @@ Legend:
 - Breaking indicator is currently a local estimate and not yet server-confirmed timing.
 - Dropped item labels currently rely on metadata parsing plus static fallback naming (not full translation/NBT naming parity).
 - Inventory drag-splitting (`mode 5`) not implemented yet.
+- Stair corner shape rendering/collision (inner/outer) is still simplified; straight/top/bottom variants are implemented.
 - Many play packets are still intentionally unimplemented (see matrix above).
 - Protocol support target is currently `1.8.9` only.
 
