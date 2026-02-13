@@ -50,7 +50,7 @@ struct Cli {
     #[arg(long, default_value = DEFAULT_DEBUG_USERNAME)]
     username: String,
     /// Authentication mode for connect requests.
-    #[arg(long, value_enum, default_value_t = CliAuthMode::Offline)]
+    #[arg(long, value_enum, default_value_t = CliAuthMode::Authenticated)]
     auth_mode: CliAuthMode,
 }
 
