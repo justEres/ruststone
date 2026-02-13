@@ -26,11 +26,10 @@ impl Axis {
     }
 }
 
-use bevy_ecs::prelude::*;
 use std::fmt;
 use std::ops;
 
-#[derive(Component, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {
     pub x: i32,
     pub y: i32,

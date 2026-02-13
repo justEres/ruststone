@@ -40,6 +40,7 @@ pub fn start_networking(
             &connect_req.address,
             &connect_req.username,
             connect_req.auth_mode,
+            connect_req.auth_account_uuid.as_deref(),
         ) {
             Ok(mut conn) => {
                 println!("Connected to server");
@@ -63,6 +64,7 @@ struct ConnectRequest {
     username: String,
     address: String,
     auth_mode: AuthMode,
+    auth_account_uuid: Option<String>,
 }
 
 fn wait_for_connect_request(
@@ -77,11 +79,13 @@ fn wait_for_connect_request(
                 username,
                 address,
                 auth_mode,
+                auth_account_uuid,
             } => {
                 return Some(ConnectRequest {
                     username,
                     address,
                     auth_mode,
+                    auth_account_uuid,
                 });
             }
             ToNetMessage::Shutdown => return None,
@@ -338,15 +342,16 @@ fn connect(
     target: &str,
     username: &str,
     auth_mode: AuthMode,
+    auth_account_uuid: Option<&str>,
 ) -> Result<Conn, Box<dyn std::error::Error>> {
     let mut conn = Conn::new(target, 47)?;
     let online_account = match auth_mode {
         AuthMode::Offline => None,
         AuthMode::Authenticated => Some(
-            load_online_account(username).ok_or_else(|| {
+            load_online_account(username, auth_account_uuid).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "Authenticated mode selected but no valid account could be loaded (set env vars or use Prism account)",
+                    "Authenticated mode selected but no valid account could be loaded",
                 )
             })?,
         ),
@@ -446,11 +451,19 @@ const MSA_AUTHORIZE_URL: &str = "https://login.microsoftonline.com/consumers/oau
 const MSA_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AuthCache {
-    refresh_token: String,
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct AuthAccountsFile {
+    version: u32,
+    accounts: Vec<AuthAccountRecord>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+struct AuthAccountRecord {
     username: String,
     uuid: String,
+    refresh_token: String,
 }
 
 #[derive(Debug)]
@@ -467,12 +480,8 @@ struct MinecraftProfileResponse {
     name: String,
 }
 
-fn load_online_account(preferred_username: &str) -> Option<Account> {
-    if let Some(account) = load_online_account_from_env(preferred_username) {
-        return Some(account);
-    }
-
-    match load_online_account_from_msa(preferred_username) {
+fn load_online_account(preferred_username: &str, selected_uuid: Option<&str>) -> Option<Account> {
+    match load_online_account_from_msa(preferred_username, selected_uuid) {
         Ok(account) => Some(account),
         Err(err) => {
             println!("Microsoft authentication failed: {}", err);
@@ -481,66 +490,41 @@ fn load_online_account(preferred_username: &str) -> Option<Account> {
     }
 }
 
-fn load_online_account_from_env(preferred_username: &str) -> Option<Account> {
-    let username = std::env::var("RS_AUTH_USERNAME")
-        .ok()
-        .map(|v| v.trim().trim_matches('"').to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| preferred_username.to_string());
-    let access_token = std::env::var("RS_AUTH_ACCESS_TOKEN")
-        .ok()?
-        .trim()
-        .trim_matches('"')
-        .to_string();
-    let mut uuid = std::env::var("RS_AUTH_UUID")
-        .ok()?
-        .trim()
-        .trim_matches('"')
-        .to_string();
-    uuid.retain(|c| c != '-');
-    if uuid.len() != 32 || access_token.is_empty() {
-        return None;
-    }
-
-    println!(
-        "Auth env loaded: username={} uuid={}.. token_len={}",
-        username,
-        &uuid[..8],
-        access_token.len()
-    );
-    let mut account = Account::new(username, Some(uuid), AccountType::Microsoft);
-    account.verification_tokens = vec![String::new(), String::new(), access_token];
-    Some(account)
-}
-
 fn load_online_account_from_msa(
     preferred_username: &str,
+    selected_uuid: Option<&str>,
 ) -> Result<Account, Box<dyn std::error::Error>> {
-    let client_id = std::env::var("RS_MSA_CLIENT_ID")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_MSA_CLIENT_ID.to_string());
-    let cache_path = auth_cache_path();
-    let cached = read_auth_cache(&cache_path);
+    let store_path = auth_accounts_path();
+    let mut store = read_auth_accounts(&store_path).unwrap_or_default();
+    if store.version == 0 {
+        store.version = 1;
+    }
+    let selected_refresh = select_account(&store, selected_uuid)
+        .map(|record| record.refresh_token.as_str())
+        .filter(|token| !token.trim().is_empty());
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let auth = runtime.block_on(authenticate_with_msa(
-        &client_id,
+        DEFAULT_MSA_CLIENT_ID,
         preferred_username,
-        cached.as_ref(),
+        selected_refresh,
     ))?;
 
-    let cache = AuthCache {
-        refresh_token: auth.refresh_token.clone(),
-        username: auth.username.clone(),
-        uuid: auth.uuid.clone(),
-    };
-    if let Err(err) = write_auth_cache(&cache_path, &cache) {
+    upsert_account(
+        &mut store,
+        AuthAccountRecord {
+            username: auth.username.clone(),
+            uuid: auth.uuid.clone(),
+            refresh_token: auth.refresh_token.clone(),
+        },
+    );
+
+    if let Err(err) = write_auth_accounts(&store_path, &store) {
         println!(
-            "Failed to write auth cache {}: {}",
-            cache_path.display(),
+            "Failed to write auth account store {}: {}",
+            store_path.display(),
             err
         );
     }
@@ -559,7 +543,7 @@ fn load_online_account_from_msa(
 async fn authenticate_with_msa(
     client_id: &str,
     preferred_username: &str,
-    cached: Option<&AuthCache>,
+    refresh_token_hint: Option<&str>,
 ) -> Result<OnlineAuthData, Box<dyn std::error::Error>> {
     let oauth = BasicClient::new(
         ClientId::new(client_id.to_string()),
@@ -569,15 +553,7 @@ async fn authenticate_with_msa(
     )
     .set_device_authorization_url(DeviceAuthorizationUrl::new(DEVICE_CODE_URL.to_string())?);
 
-    let mut refresh_token = cached
-        .and_then(|c| {
-            if c.refresh_token.trim().is_empty() {
-                None
-            } else {
-                Some(c.refresh_token.clone())
-            }
-        })
-        .unwrap_or_default();
+    let mut refresh_token = refresh_token_hint.unwrap_or_default().to_string();
 
     let token = if !refresh_token.is_empty() {
         match oauth
@@ -667,37 +643,64 @@ async fn authenticate_with_device_code(
     Ok(token)
 }
 
-fn auth_cache_path() -> PathBuf {
-    if let Ok(path) = std::env::var("RS_AUTH_CACHE_PATH")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-
+fn auth_accounts_path() -> PathBuf {
     if let Ok(home) = std::env::var("HOME")
         && !home.trim().is_empty()
     {
         return PathBuf::from(home)
             .join(".config")
             .join("ruststone")
-            .join("auth.json");
+            .join("accounts.json");
     }
 
-    PathBuf::from(".ruststone-auth.json")
+    PathBuf::from(".ruststone-accounts.json")
 }
 
-fn read_auth_cache(path: &Path) -> Option<AuthCache> {
+fn read_auth_accounts(path: &Path) -> Option<AuthAccountsFile> {
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-fn write_auth_cache(path: &Path, cache: &AuthCache) -> Result<(), Box<dyn std::error::Error>> {
+fn write_auth_accounts(
+    path: &Path,
+    store: &AuthAccountsFile,
+) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let raw = serde_json::to_string_pretty(cache)?;
+    let raw = serde_json::to_string_pretty(store)?;
     std::fs::write(path, raw)?;
     Ok(())
+}
+
+fn select_account<'a>(
+    store: &'a AuthAccountsFile,
+    selected_uuid: Option<&str>,
+) -> Option<&'a AuthAccountRecord> {
+    if store.accounts.is_empty() {
+        return None;
+    }
+    if let Some(uuid) = selected_uuid
+        && let Some(found) = store
+            .accounts
+            .iter()
+            .find(|account| account.uuid.eq_ignore_ascii_case(uuid))
+    {
+        return Some(found);
+    }
+    store.accounts.first()
+}
+
+fn upsert_account(store: &mut AuthAccountsFile, record: AuthAccountRecord) {
+    if let Some(existing) = store
+        .accounts
+        .iter_mut()
+        .find(|entry| entry.uuid.eq_ignore_ascii_case(&record.uuid))
+    {
+        *existing = record;
+    } else {
+        store.accounts.push(record);
+    }
 }
 
 fn handle_encryption_request(

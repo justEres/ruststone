@@ -671,6 +671,7 @@ pub enum ToNetMessage {
         username: String,
         address: String,
         auth_mode: AuthMode,
+        auth_account_uuid: Option<String>,
     },
     Disconnect,
     Shutdown,

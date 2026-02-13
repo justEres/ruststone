@@ -19,9 +19,7 @@ pub mod bit;
 pub mod hash;
 pub mod nibble;
 
-use bevy_ecs::prelude::*;
-
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameMode {
     NotSet = -1,
     Survival = 0,

@@ -16,6 +16,7 @@ use rs_utils::{
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, block_registry_key, item_name,
     item_registry_key,
 };
+use serde::Deserialize;
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
 const INVENTORY_SLOT_SPACING: f32 = 4.0;
@@ -94,11 +95,14 @@ fn connect_ui(
     );
     if show_connect_window {
         ui_state.inventory_open = false;
+        if !state.auth_accounts_loaded {
+            state.auth_accounts = load_auth_accounts();
+            state.selected_auth_account = 0;
+            state.auth_accounts_loaded = true;
+        }
     }
 
     if show_connect_window {
-        let auth_env_ready =
-            std::env::var("RS_AUTH_UUID").is_ok() && std::env::var("RS_AUTH_ACCESS_TOKEN").is_ok();
         egui::Window::new("Ruststone")
             .collapsible(false)
             .resizable(false)
@@ -112,7 +116,16 @@ fn connect_ui(
                 });
                 ui.horizontal(|ui| {
                     ui.label("Username");
-                    ui.text_edit_singleline(&mut state.username);
+                    let lock_username = matches!(state.auth_mode, AuthMode::Authenticated)
+                        && !state.auth_accounts.is_empty();
+                    if lock_username {
+                        let selected = &state.auth_accounts[state.selected_auth_account];
+                        state.username = selected.username.clone();
+                    }
+                    ui.add_enabled(
+                        !lock_username,
+                        egui::TextEdit::singleline(&mut state.username),
+                    );
                 });
                 ui.add_space(6.0);
                 ui.label("Mode");
@@ -125,13 +138,43 @@ fn connect_ui(
                     );
                 });
                 if matches!(state.auth_mode, AuthMode::Authenticated) {
-                    if auth_env_ready {
-                        ui.label("Auth env detected: RS_AUTH_UUID + RS_AUTH_ACCESS_TOKEN");
-                    } else {
+                    if state.auth_accounts.is_empty() {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 140, 80),
-                            "Missing auth env: set RS_AUTH_UUID and RS_AUTH_ACCESS_TOKEN",
+                            "No saved accounts. Connect will start device login.",
                         );
+                    } else {
+                        if state.selected_auth_account >= state.auth_accounts.len() {
+                            state.selected_auth_account = 0;
+                        }
+                        let selected = &state.auth_accounts[state.selected_auth_account];
+                        egui::ComboBox::from_label("Account")
+                            .selected_text(format!(
+                                "{} ({})",
+                                selected.username,
+                                short_uuid(&selected.uuid)
+                            ))
+                            .show_ui(ui, |ui| {
+                                let mut chosen = state.selected_auth_account;
+                                for (idx, account) in state.auth_accounts.iter().enumerate() {
+                                    ui.selectable_value(
+                                        &mut chosen,
+                                        idx,
+                                        format!(
+                                            "{} ({})",
+                                            account.username,
+                                            short_uuid(&account.uuid)
+                                        ),
+                                    );
+                                }
+                                if chosen != state.selected_auth_account {
+                                    state.selected_auth_account = chosen;
+                                }
+                            });
+                    }
+                    if ui.button("Reload Accounts").clicked() {
+                        state.auth_accounts = load_auth_accounts();
+                        state.selected_auth_account = 0;
                     }
                 }
                 ui.add_space(8.0);
@@ -139,24 +182,46 @@ fn connect_ui(
                     .add_sized([220.0, 30.0], egui::Button::new("Connect"))
                     .clicked();
                 if connect_clicked {
-                    let username = state.username.trim().to_string();
                     let address = state.server_address.trim().to_string();
-                    if username.is_empty() || address.is_empty() {
-                        state.connect_feedback = "Username and server address are required".into();
+                    if address.is_empty() {
+                        state.connect_feedback = "Server address is required".into();
                     } else {
-                        match to_net.0.send(ToNetMessage::Connect {
-                            username,
-                            address,
-                            auth_mode: state.auth_mode,
-                        }) {
-                            Ok(()) => {
-                                *app_state = AppState(ApplicationState::Connecting);
-                                state.connect_feedback.clear();
+                        let connect_payload = match state.auth_mode {
+                            AuthMode::Offline => {
+                                let username = state.username.trim().to_string();
+                                if username.is_empty() {
+                                    state.connect_feedback =
+                                        "Username is required in offline mode".into();
+                                    None
+                                } else {
+                                    Some((username, None))
+                                }
                             }
-                            Err(e) => {
-                                state.connect_feedback =
-                                    format!("Network thread unavailable: {}", e);
-                                *app_state = AppState(ApplicationState::Disconnected);
+                            AuthMode::Authenticated => {
+                                let selected = state.auth_accounts.get(state.selected_auth_account);
+                                let username = selected
+                                    .map(|entry| entry.username.clone())
+                                    .unwrap_or_else(|| state.username.trim().to_string());
+                                let uuid = selected.map(|entry| entry.uuid.clone());
+                                Some((username, uuid))
+                            }
+                        };
+                        if let Some((username, auth_account_uuid)) = connect_payload {
+                            match to_net.0.send(ToNetMessage::Connect {
+                                username,
+                                address,
+                                auth_mode: state.auth_mode,
+                                auth_account_uuid,
+                            }) {
+                                Ok(()) => {
+                                    *app_state = AppState(ApplicationState::Connecting);
+                                    state.connect_feedback.clear();
+                                }
+                                Err(e) => {
+                                    state.connect_feedback =
+                                        format!("Network thread unavailable: {}", e);
+                                    *app_state = AppState(ApplicationState::Disconnected);
+                                }
                             }
                         }
                     }
@@ -363,6 +428,9 @@ pub struct ConnectUiState {
     pub username: String,
     pub server_address: String,
     pub auth_mode: AuthMode,
+    pub auth_accounts: Vec<UiAuthAccount>,
+    pub selected_auth_account: usize,
+    pub auth_accounts_loaded: bool,
     pub connect_feedback: String,
     pub vsync_enabled: bool,
 }
@@ -372,10 +440,58 @@ impl Default for ConnectUiState {
             username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
             auth_mode: AuthMode::Offline,
+            auth_accounts: Vec::new(),
+            selected_auth_account: 0,
+            auth_accounts_loaded: false,
             connect_feedback: String::new(),
             vsync_enabled: false,
         }
     }
+}
+
+fn short_uuid(uuid: &str) -> String {
+    uuid.chars().take(8).collect::<String>()
+}
+
+#[derive(Debug, Clone)]
+pub struct UiAuthAccount {
+    pub username: String,
+    pub uuid: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct AuthAccountsFile {
+    accounts: Vec<AuthAccountRecord>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct AuthAccountRecord {
+    username: String,
+    uuid: String,
+}
+
+fn load_auth_accounts() -> Vec<UiAuthAccount> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = PathBuf::from(home)
+        .join(".config")
+        .join("ruststone")
+        .join("accounts.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(store) = serde_json::from_str::<AuthAccountsFile>(&raw) else {
+        return Vec::new();
+    };
+    store
+        .accounts
+        .into_iter()
+        .map(|a| UiAuthAccount {
+            username: a.username,
+            uuid: a.uuid,
+        })
+        .collect()
 }
 
 fn draw_hotbar_ui(
