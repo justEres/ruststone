@@ -1,14 +1,21 @@
 #![recursion_limit = "256"]
 
+use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use minecraft_msa_auth::MinecraftAuthorizationFlow;
+use oauth2::basic::BasicClient;
+use oauth2::devicecode::StandardDeviceAuthorizationResponse;
+use oauth2::reqwest::async_http_client;
+use oauth2::{
+    AuthUrl, ClientId, DeviceAuthorizationUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
+};
 use rand::Rng;
-use serde_json::Value;
 use rs_protocol::protocol::Conn;
 use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::packet::Packet;
 use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
+use serde::{Deserialize, Serialize};
 
 mod chunk_decode;
 mod handle_packet;
@@ -433,11 +440,45 @@ fn connect(
     }
 }
 
+const DEFAULT_MSA_CLIENT_ID: &str = "00000000402b5328";
+const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
+const MSA_AUTHORIZE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
+const MSA_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AuthCache {
+    refresh_token: String,
+    username: String,
+    uuid: String,
+}
+
+#[derive(Debug)]
+struct OnlineAuthData {
+    username: String,
+    uuid: String,
+    minecraft_access_token: String,
+    refresh_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MinecraftProfileResponse {
+    id: String,
+    name: String,
+}
+
 fn load_online_account(preferred_username: &str) -> Option<Account> {
-    if let Some(account) = load_online_account_from_prism(preferred_username) {
+    if let Some(account) = load_online_account_from_env(preferred_username) {
         return Some(account);
     }
-    load_online_account_from_env(preferred_username)
+
+    match load_online_account_from_msa(preferred_username) {
+        Ok(account) => Some(account),
+        Err(err) => {
+            println!("Microsoft authentication failed: {}", err);
+            None
+        }
+    }
 }
 
 fn load_online_account_from_env(preferred_username: &str) -> Option<Account> {
@@ -457,238 +498,206 @@ fn load_online_account_from_env(preferred_username: &str) -> Option<Account> {
         .trim_matches('"')
         .to_string();
     uuid.retain(|c| c != '-');
-    if uuid.len() != 32 {
-        println!("RS_AUTH_UUID is set but invalid (expected 32 hex chars, optionally with '-')");
+    if uuid.len() != 32 || access_token.is_empty() {
         return None;
     }
-    if token_expired_soon(&access_token, 60) {
-        println!("RS_AUTH_ACCESS_TOKEN appears expired/near expiry; falling back to Prism auth");
-        return None;
-    }
+
     println!(
         "Auth env loaded: username={} uuid={}.. token_len={}",
         username,
         &uuid[..8],
         access_token.len()
     );
-    let mut account = Account::new(username.to_string(), Some(uuid), AccountType::Microsoft);
-    // Compatibility with rs-protocol microsoft join_server implementation expecting index 2.
+    let mut account = Account::new(username, Some(uuid), AccountType::Microsoft);
     account.verification_tokens = vec![String::new(), String::new(), access_token];
     Some(account)
 }
 
-fn load_online_account_from_prism(preferred_username: &str) -> Option<Account> {
-    let path = std::env::var("RS_PRISM_ACCOUNTS_PATH")
+fn load_online_account_from_msa(
+    preferred_username: &str,
+) -> Result<Account, Box<dyn std::error::Error>> {
+    let client_id = std::env::var("RS_MSA_CLIENT_ID")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            format!("{home}/.local/share/PrismLauncher/accounts.json")
-        });
+        .unwrap_or_else(|| DEFAULT_MSA_CLIENT_ID.to_string());
+    let cache_path = auth_cache_path();
+    let cached = read_auth_cache(&cache_path);
 
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let root: Value = serde_json::from_str(&raw).ok()?;
-    let accounts = root.get("accounts")?.as_array()?;
-    if accounts.is_empty() {
-        return None;
-    }
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let auth = runtime.block_on(authenticate_with_msa(
+        &client_id,
+        preferred_username,
+        cached.as_ref(),
+    ))?;
 
-    let selected = accounts
-        .iter()
-        .find(|acc| {
-            acc.get("active")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                && acc.get("type").and_then(Value::as_str) == Some("MSA")
-        })
-        .or_else(|| {
-            accounts.iter().find(|acc| {
-                acc.get("type").and_then(Value::as_str) == Some("MSA")
-                    && acc
-                        .pointer("/profile/name")
-                        .and_then(Value::as_str)
-                        .map(|n| n.eq_ignore_ascii_case(preferred_username))
-                        .unwrap_or(false)
-            })
-        })
-        .or_else(|| {
-            accounts
-                .iter()
-                .find(|acc| acc.get("type").and_then(Value::as_str) == Some("MSA"))
-        })?;
-
-    let profile_name = selected.pointer("/profile/name")?.as_str()?.to_string();
-    let profile_id = selected.pointer("/profile/id")?.as_str()?.to_string();
-    if profile_id.len() != 32 {
-        println!("Prism profile id is invalid length for account {}", profile_name);
-        return None;
-    }
-
-    let mut access_token = selected
-        .pointer("/ygg/token")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let ygg_exp = selected.pointer("/ygg/exp").and_then(Value::as_i64);
-
-    if access_token.is_empty()
-        || ygg_exp
-            .map(|exp| exp <= unix_ts_now() as i64 + 60)
-            .unwrap_or(true)
-        || token_expired_soon(&access_token, 60)
-    {
-        let refresh_token = selected
-            .pointer("/msa/refresh_token")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let client_id = selected
-            .get("msa-client-id")
-            .and_then(Value::as_str)
-            .unwrap_or("00000000402b5328");
-        match refresh_minecraft_access_token(refresh_token, client_id) {
-            Ok(token) => {
-                access_token = token;
-                println!("Refreshed Minecraft access token from Prism account {}", profile_name);
-            }
-            Err(err) => {
-                println!("Failed to refresh Prism account token: {}", err);
-                return None;
-            }
-        }
-    }
-
-    if access_token.is_empty() {
-        return None;
+    let cache = AuthCache {
+        refresh_token: auth.refresh_token.clone(),
+        username: auth.username.clone(),
+        uuid: auth.uuid.clone(),
+    };
+    if let Err(err) = write_auth_cache(&cache_path, &cache) {
+        println!(
+            "Failed to write auth cache {}: {}",
+            cache_path.display(),
+            err
+        );
     }
 
     println!(
-        "Auth Prism loaded: username={} uuid={}.. token_len={}",
-        profile_name,
-        &profile_id[..8],
-        access_token.len()
+        "Auth MSA loaded: username={} uuid={}.. token_len={}",
+        auth.username,
+        &auth.uuid[..8],
+        auth.minecraft_access_token.len()
     );
-    let mut account = Account::new(profile_name, Some(profile_id), AccountType::Microsoft);
-    account.verification_tokens = vec![String::new(), String::new(), access_token];
-    Some(account)
+    let mut account = Account::new(auth.username, Some(auth.uuid), AccountType::Microsoft);
+    account.verification_tokens = vec![String::new(), String::new(), auth.minecraft_access_token];
+    Ok(account)
 }
 
-fn refresh_minecraft_access_token(
-    refresh_token: &str,
+async fn authenticate_with_msa(
     client_id: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+    preferred_username: &str,
+    cached: Option<&AuthCache>,
+) -> Result<OnlineAuthData, Box<dyn std::error::Error>> {
+    let oauth = BasicClient::new(
+        ClientId::new(client_id.to_string()),
+        None,
+        AuthUrl::new(MSA_AUTHORIZE_URL.to_string())?,
+        Some(TokenUrl::new(MSA_TOKEN_URL.to_string())?),
+    )
+    .set_device_authorization_url(DeviceAuthorizationUrl::new(DEVICE_CODE_URL.to_string())?);
+
+    let mut refresh_token = cached
+        .and_then(|c| {
+            if c.refresh_token.trim().is_empty() {
+                None
+            } else {
+                Some(c.refresh_token.clone())
+            }
+        })
+        .unwrap_or_default();
+
+    let token = if !refresh_token.is_empty() {
+        match oauth
+            .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
+            .request_async(async_http_client)
+            .await
+        {
+            Ok(token) => {
+                println!("Authenticated via cached refresh token");
+                token
+            }
+            Err(err) => {
+                println!("Refresh token auth failed ({}), starting device auth", err);
+                refresh_token.clear();
+                authenticate_with_device_code(&oauth).await?
+            }
+        }
+    } else {
+        authenticate_with_device_code(&oauth).await?
+    };
+
+    if let Some(new_refresh) = token.refresh_token() {
+        refresh_token = new_refresh.secret().to_string();
+    }
     if refresh_token.is_empty() {
-        return Err("missing msa refresh token".into());
+        return Err("missing refresh token after Microsoft auth".into());
     }
 
-    let client = reqwest::blocking::Client::new();
+    let ms_access_token = token.access_token().secret().to_string();
+    let http_client = reqwest::Client::new();
+    let mc_flow = MinecraftAuthorizationFlow::new(http_client.clone());
+    let mc_token = mc_flow.exchange_microsoft_token(&ms_access_token).await?;
+    let minecraft_access_token = mc_token.access_token().as_ref().to_string();
 
-    let oauth: Value = client
-        .post("https://login.live.com/oauth20_token.srf")
-        .form(&[
-            ("client_id", client_id),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("redirect_uri", "https://login.live.com/oauth20_desktop.srf"),
-            ("scope", "service::user.auth.xboxlive.com::MBI_SSL"),
-        ])
-        .send()?
+    let profile = http_client
+        .get(MINECRAFT_PROFILE_URL)
+        .bearer_auth(&minecraft_access_token)
+        .send()
+        .await?
         .error_for_status()?
-        .json()?;
-    let msa_access = oauth
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or("oauth refresh response missing access_token")?;
+        .json::<MinecraftProfileResponse>()
+        .await?;
 
-    let xbl: Value = client
-        .post("https://user.auth.xboxlive.com/user/authenticate")
-        .json(&serde_json::json!({
-            "Properties": {
-                "AuthMethod": "RPS",
-                "SiteName": "user.auth.xboxlive.com",
-                "RpsTicket": format!("d={}", msa_access),
-            },
-            "RelyingParty": "http://auth.xboxlive.com",
-            "TokenType": "JWT",
-        }))
-        .send()?
-        .error_for_status()?
-        .json()?;
-    let user_token = xbl
-        .get("Token")
-        .and_then(Value::as_str)
-        .ok_or("xbl response missing Token")?;
+    let mut uuid = profile.id;
+    uuid.retain(|c| c != '-');
+    if uuid.len() != 32 {
+        return Err("minecraft profile id is invalid".into());
+    }
 
-    let xsts: Value = client
-        .post("https://xsts.auth.xboxlive.com/xsts/authorize")
-        .json(&serde_json::json!({
-            "Properties": {
-                "SandboxId": "RETAIL",
-                "UserTokens": [user_token],
-            },
-            "RelyingParty": "rp://api.minecraftservices.com/",
-            "TokenType": "JWT",
-        }))
-        .send()?
-        .error_for_status()?
-        .json()?;
-    let xsts_token = xsts
-        .get("Token")
-        .and_then(Value::as_str)
-        .ok_or("xsts response missing Token")?;
-    let uhs = xsts
-        .pointer("/DisplayClaims/xui/0/uhs")
-        .and_then(Value::as_str)
-        .ok_or("xsts response missing uhs")?;
+    if !preferred_username.is_empty() && !profile.name.eq_ignore_ascii_case(preferred_username) {
+        println!(
+            "Using authenticated profile '{}' instead of requested username '{}'",
+            profile.name, preferred_username
+        );
+    }
 
-    let mc_auth: Value = client
-        .post("https://api.minecraftservices.com/authentication/login_with_xbox")
-        .json(&serde_json::json!({
-            "identityToken": format!("XBL3.0 x={};{}", uhs, xsts_token),
-        }))
-        .send()?
-        .error_for_status()?
-        .json()?;
-    let minecraft_access = mc_auth
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or("minecraft login response missing access_token")?;
-
-    Ok(minecraft_access.to_string())
+    Ok(OnlineAuthData {
+        username: profile.name,
+        uuid,
+        minecraft_access_token,
+        refresh_token,
+    })
 }
 
-fn token_expired_soon(token: &str, leeway_secs: u64) -> bool {
-    use base64::Engine;
+async fn authenticate_with_device_code(
+    oauth: &BasicClient,
+) -> Result<
+    oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    Box<dyn std::error::Error>,
+> {
+    let details: StandardDeviceAuthorizationResponse = oauth
+        .exchange_device_code()?
+        .add_scope(Scope::new("XboxLive.signin offline_access".to_string()))
+        .request_async(async_http_client)
+        .await?;
 
-    let mut parts = token.split('.');
-    let _header = parts.next();
-    let payload = parts.next();
-    if payload.is_none() {
-        return false;
-    }
+    println!(
+        "Open this URL in your browser:\n{}\nEnter code: {}",
+        details.verification_uri().to_string(),
+        details.user_code().secret()
+    );
 
-    let mut payload = payload.unwrap().to_string();
-    let rem = payload.len() % 4;
-    if rem != 0 {
-        payload.extend(std::iter::repeat_n('=', 4 - rem));
-    }
-
-    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(payload) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return false;
-    };
-    let Some(exp) = value.get("exp").and_then(Value::as_u64) else {
-        return false;
-    };
-    exp <= unix_ts_now() + leeway_secs
+    let token = oauth
+        .exchange_device_access_token(&details)
+        .request_async(async_http_client, tokio::time::sleep, None)
+        .await?;
+    Ok(token)
 }
 
-fn unix_ts_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+fn auth_cache_path() -> PathBuf {
+    if let Ok(path) = std::env::var("RS_AUTH_CACHE_PATH")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
+    }
+
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home)
+            .join(".config")
+            .join("ruststone")
+            .join("auth.json");
+    }
+
+    PathBuf::from(".ruststone-auth.json")
+}
+
+fn read_auth_cache(path: &Path) -> Option<AuthCache> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn write_auth_cache(path: &Path, cache: &AuthCache) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let raw = serde_json::to_string_pretty(cache)?;
+    std::fs::write(path, raw)?;
+    Ok(())
 }
 
 fn handle_encryption_request(
@@ -699,7 +708,7 @@ fn handle_encryption_request(
     online_account: Option<&Account>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let account = online_account.ok_or_else(|| {
-        "Server requires online-mode authentication; set RS_AUTH_UUID and RS_AUTH_ACCESS_TOKEN"
+        "Server requires online-mode authentication; use Authenticated mode to run Microsoft device login"
             .to_string()
     })?;
     println!(
