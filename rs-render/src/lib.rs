@@ -85,6 +85,15 @@ fn enqueue_chunk_meshes(
                 let key = (chunk.x, chunk.z);
                 chunk::update_store(&mut store, chunk);
                 updated_keys.insert(key);
+                // If the neighbor chunk wasn't loaded when this chunk was meshed, it may have
+                // generated border faces. Remesh neighbors when new chunk data arrives to
+                // avoid chunk seam artifacts (notably visible with water).
+                for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let nk = (key.0 + dx, key.1 + dz);
+                    if store.chunks.contains_key(&nk) {
+                        updated_keys.insert(nk);
+                    }
+                }
             }
             chunk::WorldUpdate::BlockUpdate(block_update) => {
                 for key in chunk::apply_block_update(&mut store, block_update) {
@@ -167,6 +176,7 @@ fn apply_mesh_results(
         let chunk::MeshBatch {
             opaque,
             cutout,
+            cutout_culled,
             transparent,
         } = mesh_batch;
         for (group, data, material) in [
@@ -179,6 +189,11 @@ fn apply_mesh_results(
                 chunk::MaterialGroup::Cutout,
                 cutout,
                 assets.cutout_material.clone(),
+            ),
+            (
+                chunk::MaterialGroup::CutoutCulled,
+                cutout_culled,
+                assets.cutout_culled_material.clone(),
             ),
             (
                 chunk::MaterialGroup::Transparent,
