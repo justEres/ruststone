@@ -1,7 +1,8 @@
 #![recursion_limit = "256"]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
 use rand::Rng;
@@ -9,7 +10,8 @@ use rs_protocol::protocol::Conn;
 use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::packet::Packet;
 use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::Value;
 
 mod chunk_decode;
 mod handle_packet;
@@ -35,6 +37,7 @@ pub fn start_networking(
             &connect_req.username,
             connect_req.auth_mode,
             connect_req.auth_account_uuid.as_deref(),
+            connect_req.prism_accounts_path.as_deref(),
         ) {
             Ok(mut conn) => {
                 println!("Connected to server");
@@ -59,6 +62,7 @@ struct ConnectRequest {
     address: String,
     auth_mode: AuthMode,
     auth_account_uuid: Option<String>,
+    prism_accounts_path: Option<String>,
 }
 
 fn wait_for_connect_request(
@@ -74,12 +78,14 @@ fn wait_for_connect_request(
                 address,
                 auth_mode,
                 auth_account_uuid,
+                prism_accounts_path,
             } => {
                 return Some(ConnectRequest {
                     username,
                     address,
                     auth_mode,
                     auth_account_uuid,
+                    prism_accounts_path,
                 });
             }
             ToNetMessage::Shutdown => return None,
@@ -337,18 +343,25 @@ fn connect(
     username: &str,
     auth_mode: AuthMode,
     auth_account_uuid: Option<&str>,
+    prism_accounts_path: Option<&str>,
 ) -> Result<Conn, Box<dyn std::error::Error>> {
     let mut conn = Conn::new(target, 47)?;
     let online_account = match auth_mode {
         AuthMode::Offline => None,
-        AuthMode::Authenticated => Some(load_online_account(username, auth_account_uuid).map_err(
-            |err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("Microsoft authentication failed: {err}"),
-                )
-            },
-        )?),
+        AuthMode::Authenticated => {
+            let prism_path = prism_accounts_path
+                .map(PathBuf::from)
+                .unwrap_or_else(default_prism_accounts_pathbuf);
+            let prism_path = prism_path.to_string_lossy();
+            Some(
+                load_online_account_from_prism(&prism_path, auth_account_uuid).map_err(|err| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Prism authentication failed: {err}"),
+                    )
+                })?,
+            )
+        }
     };
     let effective_username = online_account
         .as_ref()
@@ -439,31 +452,36 @@ fn connect(
     }
 }
 
-const MSA_TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
+const MSA_TOKEN_URL_V2: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+const MSA_SCOPE: &str = "XboxLive.signin offline_access";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-#[serde(default)]
-struct AuthAccountsFile {
-    version: u32,
-    msa_client_id: String,
-    accounts: Vec<AuthAccountRecord>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-#[serde(default)]
-struct AuthAccountRecord {
-    username: String,
-    uuid: String,
-    refresh_token: String,
+fn default_prism_accounts_pathbuf() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("PrismLauncher")
+            .join("accounts.json");
+    }
+    PathBuf::from("accounts.json")
 }
 
 #[derive(Debug)]
-struct OnlineAuthData {
+struct PrismAuthSelection {
     username: String,
     uuid: String,
-    minecraft_access_token: String,
+    msa_client_id: String,
     refresh_token: String,
+    ygg_token: Option<String>,
+    ygg_exp: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MicrosoftTokenResponseV2 {
+    access_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -472,81 +490,59 @@ struct MinecraftProfileResponse {
     name: String,
 }
 
-fn load_online_account(
-    preferred_username: &str,
+fn load_online_account_from_prism(
+    prism_path: &str,
     selected_uuid: Option<&str>,
 ) -> Result<Account, Box<dyn std::error::Error>> {
-    load_online_account_from_msa(preferred_username, selected_uuid)
-}
-
-fn load_online_account_from_msa(
-    preferred_username: &str,
-    selected_uuid: Option<&str>,
-) -> Result<Account, Box<dyn std::error::Error>> {
-    let store_path = auth_accounts_path();
-    let mut store = read_auth_accounts(&store_path).unwrap_or_default();
-    if store.version == 0 {
-        store.version = 1;
-    }
-    if store.msa_client_id.trim().is_empty() {
-        return Err(format!(
-            "missing `msa_client_id` in {}. Import Prism accounts to populate it.",
-            store_path.display()
-        )
-        .into());
-    }
-    let selected_refresh = select_account(&store, selected_uuid)
-        .map(|record| record.refresh_token.as_str())
-        .filter(|token| !token.trim().is_empty());
+    let selection = select_prism_account(prism_path, selected_uuid)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let auth = runtime.block_on(authenticate_with_msa(preferred_username, selected_refresh))?;
-
-    upsert_account(
-        &mut store,
-        AuthAccountRecord {
-            username: auth.username.clone(),
-            uuid: auth.uuid.clone(),
-            refresh_token: auth.refresh_token.clone(),
-        },
-    );
-
-    if let Err(err) = write_auth_accounts(&store_path, &store) {
-        println!(
-            "Failed to write auth account store {}: {}",
-            store_path.display(),
-            err
-        );
-    }
+    let minecraft_access_token = runtime.block_on(get_minecraft_access_token(&selection))?;
 
     println!(
-        "Auth MSA loaded: username={} uuid={}.. token_len={}",
-        auth.username,
-        &auth.uuid[..8],
-        auth.minecraft_access_token.len()
+        "Auth Prism: username={} uuid={}.. token_len={}",
+        selection.username,
+        &selection.uuid[..8],
+        minecraft_access_token.len()
     );
-    let mut account = Account::new(auth.username, Some(auth.uuid), AccountType::Microsoft);
-    account.verification_tokens = vec![String::new(), String::new(), auth.minecraft_access_token];
+
+    let mut account = Account::new(
+        selection.username,
+        Some(selection.uuid),
+        AccountType::Microsoft,
+    );
+    // Compatibility with rs-protocol microsoft join_server implementation expecting index 2.
+    account.verification_tokens = vec![String::new(), String::new(), minecraft_access_token];
     Ok(account)
 }
 
-async fn authenticate_with_msa(
-    preferred_username: &str,
-    refresh_token_hint: Option<&str>,
-) -> Result<OnlineAuthData, Box<dyn std::error::Error>> {
-    let refresh_token = refresh_token_hint.unwrap_or_default().to_string();
-    if refresh_token.is_empty() {
-        return Err("no refresh token available. Import Prism accounts (and log into Prism once) to obtain one.".into());
+async fn get_minecraft_access_token(
+    selection: &PrismAuthSelection,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if let (Some(token), Some(exp)) = (&selection.ygg_token, selection.ygg_exp) {
+        if exp > unix_now() + 60 && !token.trim().is_empty() {
+            return Ok(token.clone());
+        }
     }
-    let client_id = read_msa_client_id()?;
-    let ms_access_token = refresh_microsoft_access_token_v1(&refresh_token, &client_id).await?;
+
+    if selection.refresh_token.trim().is_empty() {
+        return Err("Prism account is missing msa.refresh_token (log into Prism again)".into());
+    }
+    if selection.msa_client_id.trim().is_empty() {
+        return Err("Prism account is missing msa-client-id".into());
+    }
+
+    let ms_access_token =
+        refresh_microsoft_access_token_v2(&selection.msa_client_id, &selection.refresh_token)
+            .await?;
     let http_client = reqwest::Client::new();
     let mc_flow = MinecraftAuthorizationFlow::new(http_client.clone());
     let mc_token = mc_flow.exchange_microsoft_token(&ms_access_token).await?;
     let minecraft_access_token = mc_token.access_token().as_ref().to_string();
 
+    // Validate token at least maps to a profile.
     let profile = http_client
         .get(MINECRAFT_PROFILE_URL)
         .bearer_auth(&minecraft_access_token)
@@ -555,59 +551,25 @@ async fn authenticate_with_msa(
         .error_for_status()?
         .json::<MinecraftProfileResponse>()
         .await?;
-
-    let mut uuid = profile.id;
-    uuid.retain(|c| c != '-');
-    if uuid.len() != 32 {
-        return Err("minecraft profile id is invalid".into());
+    if profile.id.trim().is_empty() || profile.name.trim().is_empty() {
+        return Err("minecraft profile response missing id/name".into());
     }
 
-    if !preferred_username.is_empty() && !profile.name.eq_ignore_ascii_case(preferred_username) {
-        println!(
-            "Using authenticated profile '{}' instead of requested username '{}'",
-            profile.name, preferred_username
-        );
-    }
-
-    Ok(OnlineAuthData {
-        username: profile.name,
-        uuid,
-        minecraft_access_token,
-        refresh_token,
-    })
+    Ok(minecraft_access_token)
 }
 
-fn read_msa_client_id() -> Result<String, Box<dyn std::error::Error>> {
-    let path = auth_accounts_path();
-    let store = read_auth_accounts(&path).unwrap_or_default();
-    if store.msa_client_id.trim().is_empty() {
-        return Err(format!(
-            "missing `msa_client_id` in {}. Import Prism accounts to populate it.",
-            path.display()
-        )
-        .into());
-    }
-    Ok(store.msa_client_id)
-}
-
-#[derive(Debug, Deserialize)]
-struct MicrosoftTokenResponseV1 {
-    access_token: String,
-}
-
-async fn refresh_microsoft_access_token_v1(
-    refresh_token: &str,
+async fn refresh_microsoft_access_token_v2(
     client_id: &str,
+    refresh_token: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let http = reqwest::Client::new();
     let res = http
-        .post(MSA_TOKEN_URL)
+        .post(MSA_TOKEN_URL_V2)
         .form(&[
             ("client_id", client_id),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
-            ("redirect_uri", "https://login.live.com/oauth20_desktop.srf"),
-            ("scope", "service::user.auth.xboxlive.com::MBI_SSL"),
+            ("scope", MSA_SCOPE),
         ])
         .send()
         .await?;
@@ -620,71 +582,109 @@ async fn refresh_microsoft_access_token_v1(
         )
         .into());
     }
-    let token = res.json::<MicrosoftTokenResponseV1>().await?;
+    let token = res.json::<MicrosoftTokenResponseV2>().await?;
     if token.access_token.trim().is_empty() {
         return Err("Microsoft token response missing access_token".into());
     }
     Ok(token.access_token)
 }
 
-fn auth_accounts_path() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home)
-            .join(".config")
-            .join("ruststone")
-            .join("accounts.json");
-    }
-
-    PathBuf::from(".ruststone-accounts.json")
-}
-
-fn read_auth_accounts(path: &Path) -> Option<AuthAccountsFile> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
-}
-
-fn write_auth_accounts(
-    path: &Path,
-    store: &AuthAccountsFile,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let raw = serde_json::to_string_pretty(store)?;
-    std::fs::write(path, raw)?;
-    Ok(())
-}
-
-fn select_account<'a>(
-    store: &'a AuthAccountsFile,
+fn select_prism_account(
+    prism_path: &str,
     selected_uuid: Option<&str>,
-) -> Option<&'a AuthAccountRecord> {
-    if store.accounts.is_empty() {
-        return None;
+) -> Result<PrismAuthSelection, Box<dyn std::error::Error>> {
+    let raw = std::fs::read_to_string(prism_path)?;
+    let root: Value = serde_json::from_str(&raw)?;
+    let accounts = root
+        .get("accounts")
+        .and_then(Value::as_array)
+        .ok_or("Prism accounts.json missing `accounts` array")?;
+    if accounts.is_empty() {
+        return Err("Prism accounts.json has no accounts".into());
     }
-    if let Some(uuid) = selected_uuid
-        && let Some(found) = store
-            .accounts
-            .iter()
-            .find(|account| account.uuid.eq_ignore_ascii_case(uuid))
-    {
-        return Some(found);
+
+    fn normalize_uuid(s: &str) -> String {
+        let mut out = s.to_string();
+        out.retain(|c| c != '-');
+        out
     }
-    store.accounts.first()
+    let selected_uuid = selected_uuid.map(normalize_uuid);
+
+    let mut best: Option<&Value> = None;
+    for acc in accounts {
+        if acc.get("type").and_then(Value::as_str) != Some("MSA") {
+            continue;
+        }
+        let uuid = acc
+            .pointer("/profile/id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let uuid = normalize_uuid(uuid);
+        if uuid.len() != 32 {
+            continue;
+        }
+
+        if let Some(wanted) = &selected_uuid {
+            if uuid.eq_ignore_ascii_case(wanted) {
+                best = Some(acc);
+                break;
+            }
+        }
+
+        if best.is_none() && acc.get("active").and_then(Value::as_bool).unwrap_or(false) {
+            best = Some(acc);
+        }
+        if best.is_none() {
+            best = Some(acc);
+        }
+    }
+
+    let acc = best.ok_or("No MSA account found in Prism accounts.json")?;
+    let username = acc
+        .pointer("/profile/name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let uuid_raw = acc
+        .pointer("/profile/id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let uuid = normalize_uuid(uuid_raw);
+    let refresh_token = acc
+        .pointer("/msa/refresh_token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let msa_client_id = acc
+        .get("msa-client-id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let ygg_token = acc
+        .pointer("/ygg/token")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+    let ygg_exp = acc.pointer("/ygg/exp").and_then(Value::as_i64);
+
+    if username.trim().is_empty() || uuid.len() != 32 {
+        return Err("Selected Prism account is missing profile.name/profile.id".into());
+    }
+
+    Ok(PrismAuthSelection {
+        username,
+        uuid,
+        msa_client_id,
+        refresh_token,
+        ygg_token,
+        ygg_exp,
+    })
 }
 
-fn upsert_account(store: &mut AuthAccountsFile, record: AuthAccountRecord) {
-    if let Some(existing) = store
-        .accounts
-        .iter_mut()
-        .find(|entry| entry.uuid.eq_ignore_ascii_case(&record.uuid))
-    {
-        *existing = record;
-    } else {
-        store.accounts.push(record);
-    }
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn handle_encryption_request(
@@ -695,7 +695,7 @@ fn handle_encryption_request(
     online_account: Option<&Account>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let account = online_account.ok_or_else(|| {
-        "Server requires online-mode authentication; use Authenticated mode to run Microsoft device login"
+        "Server requires online-mode authentication; use Authenticated mode with Prism auth"
             .to_string()
     })?;
     println!(

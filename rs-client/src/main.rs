@@ -77,6 +77,7 @@ fn main() {
             address: cli.address.clone(),
             auth_mode: cli.auth_mode.into(),
             auth_account_uuid: None,
+            prism_accounts_path: None,
         });
     }
 
