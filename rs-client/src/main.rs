@@ -76,6 +76,7 @@ fn main() {
             username: cli.username.clone(),
             address: cli.address.clone(),
             auth_mode: cli.auth_mode.into(),
+            auth_account_uuid: None,
         });
     }
 
