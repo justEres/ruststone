@@ -5,7 +5,8 @@ use std::thread;
 use rand::Rng;
 use rs_protocol::protocol::Conn;
 use rs_protocol::protocol::login::{Account, AccountType};
-use rs_utils::{EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
+use rs_protocol::protocol::packet::Packet;
+use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 
 mod chunk_decode;
 mod handle_packet;
@@ -18,236 +19,301 @@ pub fn start_networking(
         println!("Loaded environment from .env");
     }
 
-    //enable_network_debug();
-
-    if let Ok(msg) = from_main.recv() {
-        match msg {
-            ToNetMessage::Connect { username, address } => {
-                println!("Connecting to server at {} as {}", address, username);
-                match connect(&address, &username) {
-                    Ok(conn) => {
-                        println!("Connected to server");
-                        let to_main_signal = to_main.clone();
-
-                        message_receiver_thread(conn.clone(), from_main);
-                        to_main_signal.send(FromNetMessage::Connected).unwrap();
-                        packet_handler_loop(conn, to_main_signal.clone());
-                    }
-                    Err(e) => {
-                        println!("Failed to connect to server: {}", e);
-                        to_main.send(FromNetMessage::Disconnected).unwrap();
-                    }
+    loop {
+        let Some(connect_req) = wait_for_connect_request(&from_main) else {
+            break;
+        };
+        println!(
+            "Connecting to server at {} as {} ({:?})",
+            connect_req.address, connect_req.username, connect_req.auth_mode
+        );
+        match connect(
+            &connect_req.address,
+            &connect_req.username,
+            connect_req.auth_mode,
+        ) {
+            Ok(mut conn) => {
+                println!("Connected to server");
+                let _ = to_main.send(FromNetMessage::Connected);
+                let shutdown = run_connected_session(&mut conn, &from_main, &to_main);
+                let _ = to_main.send(FromNetMessage::Disconnected);
+                if shutdown {
+                    break;
                 }
             }
-            _ => {
-                println!("Received unhandled ToNetMessage");
+            Err(e) => {
+                println!("Failed to connect to server: {}", e);
+                let _ = to_main.send(FromNetMessage::Disconnected);
             }
         }
     }
 }
 
-fn message_receiver_thread(mut conn: Conn, from_main: crossbeam::channel::Receiver<ToNetMessage>) {
+#[derive(Debug, Clone)]
+struct ConnectRequest {
+    username: String,
+    address: String,
+    auth_mode: AuthMode,
+}
+
+fn wait_for_connect_request(
+    from_main: &crossbeam::channel::Receiver<ToNetMessage>,
+) -> Option<ConnectRequest> {
+    loop {
+        let Ok(msg) = from_main.recv() else {
+            return None;
+        };
+        match msg {
+            ToNetMessage::Connect {
+                username,
+                address,
+                auth_mode,
+            } => {
+                return Some(ConnectRequest {
+                    username,
+                    address,
+                    auth_mode,
+                });
+            }
+            ToNetMessage::Shutdown => return None,
+            _ => {}
+        }
+    }
+}
+
+fn run_connected_session(
+    conn: &mut Conn,
+    from_main: &crossbeam::channel::Receiver<ToNetMessage>,
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+) -> bool {
+    let (pkt_tx, pkt_rx) = crossbeam::channel::unbounded::<Result<Packet, String>>();
+    let mut reader_conn = conn.clone();
     thread::spawn(move || {
-        while let Ok(msg) = from_main.recv() {
-            match msg {
-                ToNetMessage::Disconnect => {
-                    println!("Received disconnect message");
+        loop {
+            match reader_conn.read_packet() {
+                Ok(pkt) => {
+                    if pkt_tx.send(Ok(pkt)).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = pkt_tx.send(Err(e.to_string()));
                     break;
                 }
-                ToNetMessage::ChatMessage(text) => {
-                    conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::ChatMessage {
-                            message: text,
-                        },
-                    )
-                    .unwrap();
+            }
+        }
+    });
+
+    loop {
+        crossbeam::select! {
+            recv(from_main) -> msg => {
+                let Ok(msg) = msg else {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
+                    return true;
+                };
+                match msg {
+                    ToNetMessage::Disconnect => {
+                        println!("Received disconnect message");
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
+                        return false;
+                    }
+                    ToNetMessage::Shutdown => {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
+                        return true;
+                    }
+                    ToNetMessage::Connect { .. } => {
+                        // Already connected; ignore duplicate connect requests.
+                    }
+                    other => send_session_message(conn, other),
                 }
-                ToNetMessage::PlayerMove {
+            }
+            recv(pkt_rx) -> incoming => {
+                match incoming {
+                    Ok(Ok(pkt)) => handle_packet::handle_packet(pkt, to_main, conn),
+                    Ok(Err(err)) => {
+                        println!("Error reading packet: {}", err);
+                        return false;
+                    }
+                    Err(_) => {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
+    match msg {
+        ToNetMessage::ChatMessage(text) => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::ChatMessage { message: text },
+            );
+        }
+        ToNetMessage::PlayerMove {
+            x,
+            y,
+            z,
+            yaw,
+            pitch,
+            on_ground,
+        } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerPositionLook {
                     x,
                     y,
                     z,
                     yaw,
                     pitch,
                     on_ground,
-                } => {
-                    conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerPositionLook {
-                            x,
-                            y,
-                            z,
-                            yaw,
-                            pitch,
-                            on_ground,
-                        },
-                    )
-                    .unwrap();
-                }
-                ToNetMessage::Respawn => {
-                    let _ = rs_protocol::protocol::packet::send_client_status(
-                        &mut conn,
-                        rs_protocol::protocol::packet::ClientStatus::PerformRespawn,
-                    );
-                }
-                ToNetMessage::PlayerAction { action_id } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerAction {
-                            entity_id: rs_protocol::protocol::VarInt(0),
-                            action_id: rs_protocol::protocol::VarInt(action_id as i32),
-                            jump_boost: rs_protocol::protocol::VarInt(0),
-                        },
-                    );
-                }
-                ToNetMessage::SwingArm => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::ArmSwing_Handsfree {
-                            empty: (),
-                        },
-                    );
-                }
-                ToNetMessage::UseEntity { target_id, action } => {
-                    let ty = match action {
-                        EntityUseAction::Interact => 0,
-                        EntityUseAction::Attack => 1,
-                    };
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::UseEntity_Handsfree {
-                            target_id: rs_protocol::protocol::VarInt(target_id),
-                            ty: rs_protocol::protocol::VarInt(ty),
-                            target_x: 0.0,
-                            target_y: 0.0,
-                            target_z: 0.0,
-                        },
-                    );
-                }
-                ToNetMessage::HeldItemChange { slot } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::HeldItemChange { slot },
-                    );
-                }
-                ToNetMessage::ClickWindow {
+                },
+            );
+        }
+        ToNetMessage::Respawn => {
+            let _ = rs_protocol::protocol::packet::send_client_status(
+                conn,
+                rs_protocol::protocol::packet::ClientStatus::PerformRespawn,
+            );
+        }
+        ToNetMessage::PlayerAction { action_id } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerAction {
+                    entity_id: rs_protocol::protocol::VarInt(0),
+                    action_id: rs_protocol::protocol::VarInt(action_id as i32),
+                    jump_boost: rs_protocol::protocol::VarInt(0),
+                },
+            );
+        }
+        ToNetMessage::SwingArm => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::ArmSwing_Handsfree { empty: () },
+            );
+        }
+        ToNetMessage::UseEntity { target_id, action } => {
+            let ty = match action {
+                EntityUseAction::Interact => 0,
+                EntityUseAction::Attack => 1,
+            };
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::UseEntity_Handsfree {
+                    target_id: rs_protocol::protocol::VarInt(target_id),
+                    ty: rs_protocol::protocol::VarInt(ty),
+                    target_x: 0.0,
+                    target_y: 0.0,
+                    target_z: 0.0,
+                },
+            );
+        }
+        ToNetMessage::HeldItemChange { slot } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::HeldItemChange { slot },
+            );
+        }
+        ToNetMessage::ClickWindow {
+            id,
+            slot,
+            button,
+            mode,
+            action_number,
+            clicked_item,
+        } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::ClickWindow_u8 {
                     id,
                     slot,
                     button,
                     mode,
                     action_number,
-                    clicked_item,
-                } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::ClickWindow_u8 {
-                            id,
-                            slot,
-                            button,
-                            mode,
-                            action_number,
-                            clicked_item: clicked_item.map(to_protocol_stack),
-                        },
-                    );
-                }
-                ToNetMessage::ConfirmTransaction {
+                    clicked_item: clicked_item.map(to_protocol_stack),
+                },
+            );
+        }
+        ToNetMessage::ConfirmTransaction {
+            id,
+            action_number,
+            accepted,
+        } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::ConfirmTransactionServerbound {
                     id,
                     action_number,
                     accepted,
-                } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::ConfirmTransactionServerbound {
-                            id,
-                            action_number,
-                            accepted,
-                        },
-                    );
-                }
-                ToNetMessage::CloseWindow { id } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::CloseWindow { id },
-                    );
-                }
-                ToNetMessage::DigStart { x, y, z, face } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
-                            status: 0,
-                            location: rs_protocol::shared::Position::new(x, y, z),
-                            face,
-                        },
-                    );
-                }
-                ToNetMessage::DigCancel { x, y, z, face } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
-                            status: 1,
-                            location: rs_protocol::shared::Position::new(x, y, z),
-                            face,
-                        },
-                    );
-                }
-                ToNetMessage::DigFinish { x, y, z, face } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
-                            status: 2,
-                            location: rs_protocol::shared::Position::new(x, y, z),
-                            face,
-                        },
-                    );
-                }
-                ToNetMessage::PlaceBlock {
-                    x,
-                    y,
-                    z,
+                },
+            );
+        }
+        ToNetMessage::CloseWindow { id } => {
+            let _ = conn
+                .write_packet(rs_protocol::protocol::packet::play::serverbound::CloseWindow { id });
+        }
+        ToNetMessage::DigStart { x, y, z, face } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                    status: 0,
+                    location: rs_protocol::shared::Position::new(x, y, z),
                     face,
+                },
+            );
+        }
+        ToNetMessage::DigCancel { x, y, z, face } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                    status: 1,
+                    location: rs_protocol::shared::Position::new(x, y, z),
+                    face,
+                },
+            );
+        }
+        ToNetMessage::DigFinish { x, y, z, face } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                    status: 2,
+                    location: rs_protocol::shared::Position::new(x, y, z),
+                    face,
+                },
+            );
+        }
+        ToNetMessage::PlaceBlock {
+            x,
+            y,
+            z,
+            face,
+            cursor_x,
+            cursor_y,
+            cursor_z,
+        } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
+                    location: rs_protocol::shared::Position::new(x, y, z),
+                    face,
+                    hand: None,
                     cursor_x,
                     cursor_y,
                     cursor_z,
-                } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
-                            location: rs_protocol::shared::Position::new(x, y, z),
-                            face,
-                            hand: None,
-                            cursor_x,
-                            cursor_y,
-                            cursor_z,
-                        },
-                    );
-                }
-                ToNetMessage::UseItem { held_item } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
-                            location: rs_protocol::shared::Position::new(-1, -1, -1),
-                            face: -1,
-                            hand: held_item.map(to_protocol_stack),
-                            cursor_x: 0,
-                            cursor_y: 0,
-                            cursor_z: 0,
-                        },
-                    );
-                }
-                ToNetMessage::DropHeldItem { full_stack } => {
-                    let _ = conn.write_packet(
-                        rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
-                            status: if full_stack { 3 } else { 4 },
-                            location: rs_protocol::shared::Position::new(-1, -1, -1),
-                            face: 255,
-                        },
-                    );
-                }
-                _ => {}
-            }
+                },
+            );
         }
-    });
-}
-
-fn packet_handler_loop(mut conn: Conn, to_main: crossbeam::channel::Sender<FromNetMessage>) {
-    loop {
-        match conn.read_packet() {
-            Ok(pkt) => {
-                // Forward packet to main thread
-                handle_packet::handle_packet(pkt, &to_main, &mut conn);
-            }
-            Err(e) => {
-                println!("Error reading packet: {}", e);
-                let _ = to_main.send(FromNetMessage::Disconnected);
-                break;
-            }
+        ToNetMessage::UseItem { held_item } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerBlockPlacement_u8_Item {
+                    location: rs_protocol::shared::Position::new(-1, -1, -1),
+                    face: -1,
+                    hand: held_item.map(to_protocol_stack),
+                    cursor_x: 0,
+                    cursor_y: 0,
+                    cursor_z: 0,
+                },
+            );
         }
+        ToNetMessage::DropHeldItem { full_stack } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerDigging_u8 {
+                    status: if full_stack { 3 } else { 4 },
+                    location: rs_protocol::shared::Position::new(-1, -1, -1),
+                    face: 255,
+                },
+            );
+        }
+        ToNetMessage::Connect { .. } | ToNetMessage::Disconnect | ToNetMessage::Shutdown => {}
     }
 }
 
@@ -259,14 +325,32 @@ fn to_protocol_stack(item: InventoryItemStack) -> rs_protocol::item::Stack {
     stack
 }
 
-fn connect(target: &str, username: &str) -> Result<Conn, Box<dyn std::error::Error>> {
+fn connect(
+    target: &str,
+    username: &str,
+    auth_mode: AuthMode,
+) -> Result<Conn, Box<dyn std::error::Error>> {
     let mut conn = Conn::new(target, 47)?;
-    let effective_username = std::env::var("RS_AUTH_USERNAME")
-        .ok()
-        .map(|v| v.trim().trim_matches('"').to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| username.to_string());
-    let online_account = load_online_account_from_env(&effective_username);
+    let effective_username = if matches!(auth_mode, AuthMode::Authenticated) {
+        std::env::var("RS_AUTH_USERNAME")
+            .ok()
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| username.to_string())
+    } else {
+        username.to_string()
+    };
+    let online_account = match auth_mode {
+        AuthMode::Offline => None,
+        AuthMode::Authenticated => Some(
+            load_online_account_from_env(&effective_username).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Authenticated mode selected but RS_AUTH_UUID/RS_AUTH_ACCESS_TOKEN are missing or invalid",
+                )
+            })?,
+        ),
+    };
 
     conn.write_packet(
         rs_protocol::protocol::packet::handshake::serverbound::Handshake {

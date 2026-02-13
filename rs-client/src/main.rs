@@ -2,12 +2,12 @@ use bevy::time::Fixed;
 use bevy::window::PresentMode;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, log::LogPlugin, prelude::*};
 use bevy_egui::EguiPrimaryContextPass;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use rs_render::RenderPlugin;
-use rs_ui::UiPlugin;
+use rs_ui::{ConnectUiState, UiPlugin};
 use rs_utils::{
-    AppState, ApplicationState, BreakIndicator, Chat, FromNet, InventoryState, PerfTimings,
-    PlayerStatus, ToNet, UiState,
+    AppState, ApplicationState, AuthMode, BreakIndicator, Chat, FromNet, InventoryState,
+    PerfTimings, PlayerStatus, ToNet, UiState,
 };
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
@@ -22,12 +22,36 @@ mod sim_systems;
 const DEFAULT_DEBUG_USERNAME: &str = "RustyPlayer";
 const DEFAULT_DEBUG_ADDRESS: &str = "localhost:25565";
 
+#[derive(ValueEnum, Debug, Clone, Copy)]
+enum CliAuthMode {
+    Offline,
+    Authenticated,
+}
+
+impl From<CliAuthMode> for AuthMode {
+    fn from(value: CliAuthMode) -> Self {
+        match value {
+            CliAuthMode::Offline => AuthMode::Offline,
+            CliAuthMode::Authenticated => AuthMode::Authenticated,
+        }
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "Ruststone client", long_about = None)]
 struct Cli {
-    /// Auto-connect using default debug settings (RustyPlayer @ localhost:25565)
+    /// Auto-connect on startup.
     #[arg(long, default_value_t = false)]
     autoconnect: bool,
+    /// Server address (host:port) used for startup defaults and autoconnect.
+    #[arg(long, default_value = DEFAULT_DEBUG_ADDRESS)]
+    address: String,
+    /// Username used for startup defaults and autoconnect.
+    #[arg(long, default_value = DEFAULT_DEBUG_USERNAME)]
+    username: String,
+    /// Authentication mode for connect requests.
+    #[arg(long, value_enum, default_value_t = CliAuthMode::Offline)]
+    auth_mode: CliAuthMode,
 }
 
 fn main() {
@@ -49,8 +73,9 @@ fn main() {
 
     if cli.autoconnect {
         let _ = tx_outgoing.send(ToNetMessage::Connect {
-            username: DEFAULT_DEBUG_USERNAME.to_string(),
-            address: DEFAULT_DEBUG_ADDRESS.to_string(),
+            username: cli.username.clone(),
+            address: cli.address.clone(),
+            auth_mode: cli.auth_mode.into(),
         });
     }
 
@@ -79,6 +104,12 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_seconds(0.05))
         .add_plugins(RenderPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .insert_resource(ConnectUiState {
+            username: cli.username.clone(),
+            server_address: cli.address.clone(),
+            auth_mode: cli.auth_mode.into(),
+            ..Default::default()
+        })
         .add_plugins(UiPlugin)
         .insert_resource(ToNet(tx_outgoing))
         .insert_resource(FromNet(rx_incoming))
