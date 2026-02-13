@@ -23,7 +23,8 @@ use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
 use crate::entities::RemoteEntity;
-use crate::entities::{PlayerTextureDebugSettings, RemoteVisual};
+use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
+use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 
 #[derive(Resource, Default)]
 pub struct EntityHitboxDebug {
@@ -202,6 +203,84 @@ pub fn camera_zoom_system(
             p.fov = desired_fov;
         }
     }
+}
+
+#[derive(Component)]
+pub struct LocalHeldItemSprite;
+
+pub fn local_held_item_view_system(
+    mut commands: Commands,
+    app_state: Res<AppState>,
+    ui_state: Res<UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    render_debug: Res<RenderDebugSettings>,
+    inventory: Res<InventoryState>,
+    mut item_textures: ResMut<ItemTextureCache>,
+    item_sprite_mesh: Res<ItemSpriteMesh>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    camera: Query<Entity, With<PlayerCamera>>,
+    existing: Query<Entity, With<LocalHeldItemSprite>>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected)
+        || ui_state.chat_open
+        || ui_state.paused
+        || ui_state.inventory_open
+        || player_status.dead
+        || !render_debug.render_held_items
+    {
+        for e in existing.iter() {
+            commands.entity(e).despawn_recursive();
+        }
+        return;
+    }
+
+    let Ok(cam_entity) = camera.get_single() else {
+        return;
+    };
+
+    let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
+    let Some(stack) = held else {
+        for e in existing.iter() {
+            commands.entity(e).despawn_recursive();
+        }
+        return;
+    };
+
+    item_textures.request_stack(stack);
+    let sprite_entity = existing.iter().next();
+    if let Some(e) = sprite_entity {
+        commands.entity(e).insert(ItemSpriteStack(stack));
+        return;
+    }
+
+    let placeholder = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        alpha_mode: AlphaMode::Mask(0.5),
+        cull_mode: None,
+        unlit: true,
+        perceptual_roughness: 1.0,
+        metallic: 0.0,
+        ..Default::default()
+    });
+    let e = commands
+        .spawn((
+            Name::new("LocalHeldItem"),
+            Mesh3d(item_sprite_mesh.0.clone()),
+            MeshMaterial3d(placeholder),
+            Transform {
+                translation: Vec3::new(0.42, -0.36, -0.70),
+                rotation: Quat::from_rotation_x(-0.55) * Quat::from_rotation_y(0.40),
+                scale: Vec3::splat(0.70),
+            },
+            GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            LocalHeldItemSprite,
+            ItemSpriteStack(stack),
+        ))
+        .id();
+    commands.entity(cam_entity).add_child(e);
 }
 
 pub fn frame_timing_start(
@@ -1074,6 +1153,7 @@ pub fn debug_overlay_system(
                 );
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
+                ui.checkbox(&mut render_debug.render_held_items, "Render held items");
                 ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
                 ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
                 ui.checkbox(&mut render_debug.show_look_info, "Look info");

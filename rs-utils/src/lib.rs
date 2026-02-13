@@ -4,7 +4,9 @@ use bevy::{ecs::resource::Resource, prelude::Vec3};
 use crossbeam::channel::{Receiver, Sender};
 use rs_protocol::protocol::UUID;
 
+pub mod item_textures;
 pub mod registry;
+pub use item_textures::item_texture_candidates;
 pub use registry::{
     BlockFace, BlockModelKind, TEXTUREPACK_BLOCKS_BASE, TEXTUREPACK_ITEMS_BASE, block_model_kind,
     block_name, block_registry_key, block_state_id, block_state_meta, block_texture_name,
@@ -195,6 +197,10 @@ pub enum NetEntityMessage {
         entity_id: i32,
         slot: u16,
         item: Option<InventoryItemStack>,
+    },
+    SetItemStack {
+        entity_id: i32,
+        stack: Option<InventoryItemStack>,
     },
     Animation {
         entity_id: i32,

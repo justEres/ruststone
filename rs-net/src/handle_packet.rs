@@ -797,14 +797,29 @@ fn handle_entity_metadata(
         }));
     }
 
-    let Some(MetadataValue::OptionalItemStack(Some(stack))) = metadata.get_raw(10) else {
-        return;
-    };
-    let label = item_stack_label(stack);
-    let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetLabel {
-        entity_id,
-        label,
-    }));
+    if let Some(MetadataValue::OptionalItemStack(stack_opt)) = metadata.get_raw(10) {
+        let stack_converted = stack_opt.as_ref().map(|stack| InventoryItemStack {
+            item_id: stack.id as i32,
+            count: stack.count.clamp(0, u8::MAX as isize) as u8,
+            damage: stack
+                .damage
+                .unwrap_or(0)
+                .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
+        });
+
+        let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetItemStack {
+            entity_id,
+            stack: stack_converted,
+        }));
+
+        if let Some(stack) = stack_opt.as_ref() {
+            let label = item_stack_label(stack);
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetLabel {
+                entity_id,
+                label,
+            }));
+        }
+    }
 }
 
 fn item_stack_label(stack: &rs_protocol::item::Stack) -> String {
