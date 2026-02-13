@@ -147,23 +147,49 @@ fn connect_ui(
                         ui.text_edit_singleline(&mut state.msa_client_id);
                         if ui.button("Save").clicked() {
                             if let Err(err) = save_auth_store_msa_client_id(&state.msa_client_id) {
-                                state.connect_feedback = format!("Failed to save client id: {}", err);
+                                state.connect_feedback =
+                                    format!("Failed to save client id: {}", err);
                             } else {
                                 state.connect_feedback.clear();
                             }
                         }
                     });
-                    ui.label("This is not a secret. You need your own Azure app client id for device login.");
+                    ui.label(
+                        "This is not a secret. Importing from Prism will fill this automatically.",
+                    );
                     if state.msa_client_id.trim().is_empty() {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 140, 80),
-                            "Missing MSA client id: set it above (stored in ~/.config/ruststone/accounts.json)",
+                            "Missing MSA client id: import Prism accounts to populate it",
                         );
                     }
+                    ui.add_space(6.0);
+                    ui.label("Prism import");
+                    ui.horizontal(|ui| {
+                        ui.label("accounts.json");
+                        ui.text_edit_singleline(&mut state.prism_accounts_path);
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Import From Prism").clicked() {
+                            match import_from_prism(&state.prism_accounts_path) {
+                                Ok(summary) => {
+                                    let (msa_client_id, accounts) = load_auth_store();
+                                    state.msa_client_id = msa_client_id;
+                                    state.auth_accounts = accounts;
+                                    state.selected_auth_account = 0;
+                                    state.connect_feedback = summary;
+                                }
+                                Err(err) => {
+                                    state.connect_feedback =
+                                        format!("Prism import failed: {}", err);
+                                }
+                            }
+                        }
+                    });
                     if state.auth_accounts.is_empty() {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 140, 80),
-                            "No saved accounts. Connect will start device login.",
+                            "No saved accounts. Import Prism accounts (and log into Prism once).",
                         );
                     } else {
                         if state.selected_auth_account >= state.auth_accounts.len() {
@@ -229,7 +255,8 @@ fn connect_ui(
                                 }
                             }
                             AuthMode::Authenticated => {
-                                if let Err(err) = save_auth_store_msa_client_id(&state.msa_client_id)
+                                if let Err(err) =
+                                    save_auth_store_msa_client_id(&state.msa_client_id)
                                 {
                                     state.connect_feedback =
                                         format!("Failed to save client id: {}", err);
@@ -238,12 +265,13 @@ fn connect_ui(
                                     state.connect_feedback = "MSA client id is required".into();
                                     None
                                 } else {
-                                let selected = state.auth_accounts.get(state.selected_auth_account);
-                                let username = selected
-                                    .map(|entry| entry.username.clone())
-                                    .unwrap_or_else(|| state.username.trim().to_string());
-                                let uuid = selected.map(|entry| entry.uuid.clone());
-                                Some((username, uuid))
+                                    let selected =
+                                        state.auth_accounts.get(state.selected_auth_account);
+                                    let username = selected
+                                        .map(|entry| entry.username.clone())
+                                        .unwrap_or_else(|| state.username.trim().to_string());
+                                    let uuid = selected.map(|entry| entry.uuid.clone());
+                                    Some((username, uuid))
                                 }
                             }
                         };
@@ -470,6 +498,7 @@ pub struct ConnectUiState {
     pub server_address: String,
     pub auth_mode: AuthMode,
     pub msa_client_id: String,
+    pub prism_accounts_path: String,
     pub auth_accounts: Vec<UiAuthAccount>,
     pub selected_auth_account: usize,
     pub auth_accounts_loaded: bool,
@@ -483,6 +512,7 @@ impl Default for ConnectUiState {
             server_address: "localhost:25565".to_string(),
             auth_mode: AuthMode::Offline,
             msa_client_id: String::new(),
+            prism_accounts_path: default_prism_accounts_path(),
             auth_accounts: Vec::new(),
             selected_auth_account: 0,
             auth_accounts_loaded: false,
@@ -568,6 +598,125 @@ fn save_auth_store_msa_client_id(client_id: &str) -> Result<(), String> {
     let out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
     std::fs::write(&path, out).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn default_prism_accounts_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("PrismLauncher")
+        .join("accounts.json")
+        .display()
+        .to_string()
+}
+
+fn import_from_prism(prism_path: &str) -> Result<String, String> {
+    let raw = std::fs::read_to_string(prism_path).map_err(|e| e.to_string())?;
+    let root: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let accounts = root
+        .get("accounts")
+        .and_then(Value::as_array)
+        .ok_or("missing `accounts` array")?;
+
+    let mut imported = Vec::<Value>::new();
+    let mut msa_client_id: Option<String> = None;
+
+    for acc in accounts {
+        if acc.get("type").and_then(Value::as_str) != Some("MSA") {
+            continue;
+        }
+        let username = acc
+            .pointer("/profile/name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let mut uuid = acc
+            .pointer("/profile/id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        uuid.retain(|c| c != '-');
+        let refresh_token = acc
+            .pointer("/msa/refresh_token")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let cid = acc
+            .get("msa-client-id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+
+        if username.is_empty() || uuid.len() != 32 || refresh_token.is_empty() {
+            continue;
+        }
+        if msa_client_id.is_none() {
+            if let Some(c) = cid {
+                if !c.trim().is_empty() {
+                    msa_client_id = Some(c);
+                }
+            }
+        }
+
+        imported.push(serde_json::json!({
+            "username": username,
+            "uuid": uuid,
+            "refresh_token": refresh_token,
+        }));
+    }
+
+    if imported.is_empty() {
+        return Err("no valid MSA accounts found in Prism accounts.json".into());
+    }
+
+    if msa_client_id.as_deref().unwrap_or("").trim().is_empty() {
+        return Err("Prism accounts missing `msa-client-id`".into());
+    }
+
+    let store_path = auth_store_path();
+    if let Some(parent) = store_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut root_store = if let Ok(existing) = std::fs::read_to_string(&store_path) {
+        serde_json::from_str::<Value>(&existing)
+            .unwrap_or_else(|_| Value::Object(Default::default()))
+    } else {
+        Value::Object(Default::default())
+    };
+    if !root_store.is_object() {
+        root_store = Value::Object(Default::default());
+    }
+
+    let msa_client_id = msa_client_id.unwrap();
+    if let Some(obj) = root_store.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(1));
+        obj.insert("msa_client_id".to_string(), Value::from(msa_client_id));
+
+        // Merge by uuid (dedupe).
+        let mut by_uuid = std::collections::BTreeMap::<String, Value>::new();
+        if let Some(existing) = obj.get("accounts").and_then(Value::as_array) {
+            for entry in existing {
+                if let Some(uuid) = entry.get("uuid").and_then(Value::as_str) {
+                    by_uuid.insert(uuid.to_string(), entry.clone());
+                }
+            }
+        }
+        for entry in &imported {
+            if let Some(uuid) = entry.get("uuid").and_then(Value::as_str) {
+                by_uuid.insert(uuid.to_string(), entry.clone());
+            }
+        }
+        obj.insert(
+            "accounts".to_string(),
+            Value::Array(by_uuid.into_values().collect()),
+        );
+    }
+
+    let out = serde_json::to_string_pretty(&root_store).map_err(|e| e.to_string())?;
+    std::fs::write(&store_path, out).map_err(|e| e.to_string())?;
+
+    Ok(format!("Imported {} account(s) from Prism", imported.len()))
 }
 
 fn draw_hotbar_ui(
