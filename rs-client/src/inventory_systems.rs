@@ -30,6 +30,12 @@ pub fn hotbar_input_system(
         return;
     }
 
+    // If zoom is active, keep hotbar stable and let wheel events drive zoom instead.
+    if keys.pressed(KeyCode::KeyC) {
+        for _ in mouse_wheel_events.read() {}
+        // Number keys should still work while zooming, so don't early-return before that logic.
+    }
+
     let selected = if keys.just_pressed(KeyCode::Digit1) {
         Some(0)
     } else if keys.just_pressed(KeyCode::Digit2) {
@@ -53,6 +59,9 @@ pub fn hotbar_input_system(
     };
 
     let Some(slot) = selected else {
+        if keys.pressed(KeyCode::KeyC) {
+            return;
+        }
         let mut wheel_delta = 0.0f32;
         for ev in mouse_wheel_events.read() {
             wheel_delta += ev.y;

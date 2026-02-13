@@ -135,6 +135,7 @@ fn main() {
         .insert_resource(sim::DebugStats::default())
         .insert_resource(sim::SimReady::default())
         .insert_resource(sim::DebugUiState::default())
+        .insert_resource(sim::ZoomState::default())
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
@@ -169,6 +170,8 @@ fn main() {
                 inventory_systems::hotbar_input_system,
                 inventory_systems::inventory_transaction_ack_system,
                 sim_systems::input_collect_system,
+                sim_systems::camera_zoom_system
+                    .after(rs_render::debug::apply_render_debug_settings),
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
                 sim_systems::draw_entity_hitboxes_system
