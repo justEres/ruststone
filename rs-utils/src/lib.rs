@@ -672,6 +672,7 @@ pub enum ToNetMessage {
         address: String,
         auth_mode: AuthMode,
         auth_account_uuid: Option<String>,
+        prism_accounts_path: Option<String>,
     },
     Disconnect,
     Shutdown,
