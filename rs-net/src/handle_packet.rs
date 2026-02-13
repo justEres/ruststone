@@ -344,7 +344,18 @@ pub fn handle_packet(
                 on_ground: None,
             }));
         }
-        Packet::EntityHeadLook(_ehl) => {}
+        Packet::EntityHeadLook(ehl) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::HeadLook {
+                entity_id: ehl.entity_id.0,
+                head_yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(ehl.head_yaw)),
+            }));
+        }
+        Packet::EntityHeadLook_i32(ehl) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::HeadLook {
+                entity_id: ehl.entity_id,
+                head_yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(ehl.head_yaw)),
+            }));
+        }
         Packet::EntityMove_i8(em) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::MoveDelta {
                 entity_id: em.entity_id.0,
@@ -413,7 +424,20 @@ pub fn handle_packet(
                 on_ground: None,
             }));
         }
-        Packet::EntityEquipment_u16(_ee) => {}
+        Packet::EntityEquipment_u16(ee) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Equipment {
+                entity_id: ee.entity_id.0,
+                slot: ee.slot,
+                item: protocol_stack_to_inventory_item(ee.item),
+            }));
+        }
+        Packet::EntityEquipment_u16_i32(ee) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Equipment {
+                entity_id: ee.entity_id,
+                slot: ee.slot,
+                item: protocol_stack_to_inventory_item(ee.item),
+            }));
+        }
         Packet::EntityLookAndMove_i8(elm) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::MoveDelta {
                 entity_id: elm.entity_id.0,
@@ -473,6 +497,28 @@ pub fn handle_packet(
         Packet::EntityDestroy_u8(ed) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Destroy {
                 entity_ids: ed.entity_ids.data,
+            }));
+        }
+        Packet::EntityStatus(es) => {
+            // Map common status codes into our existing animation events.
+            // 2 = hurt animation, 3 = death animation in vanilla.
+            if es.entity_status == 2 {
+                let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Animation {
+                    entity_id: es.entity_id,
+                    animation: NetEntityAnimation::TakeDamage,
+                }));
+            }
+        }
+        Packet::CollectItem_nocount(ci) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::CollectItem {
+                collected_entity_id: ci.collected_entity_id.0,
+                collector_entity_id: ci.collector_entity_id.0,
+            }));
+        }
+        Packet::CollectItem_nocount_i32(ci) => {
+            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::CollectItem {
+                collected_entity_id: ci.collected_entity_id,
+                collector_entity_id: ci.collector_entity_id,
             }));
         }
         Packet::BlockChange_VarInt(bc) => {

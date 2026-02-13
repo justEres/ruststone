@@ -124,6 +124,7 @@ pub struct RemoteEntity {
 pub struct RemoteEntityLook {
     pub yaw: f32,
     pub pitch: f32,
+    pub head_yaw: f32,
 }
 
 #[derive(Component, Debug, Clone)]
@@ -164,6 +165,9 @@ pub struct RemoteVisual {
     pub y_offset: f32,
     pub name_y_offset: f32,
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteHeldItem(pub Entity);
 
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct RemotePoseState {
@@ -225,6 +229,8 @@ pub fn apply_remote_entity_events(
     mut entity_query: Query<(&mut RemoteEntity, &mut RemoteEntityLook)>,
     mut player_anim_query: Query<&mut RemotePlayerAnimation>,
     mut name_query: Query<&mut RemoteEntityName>,
+    player_parts_query: Query<&RemotePlayerModelParts, With<RemotePlayer>>,
+    held_item_query: Query<&RemoteHeldItem>,
     visual_query: Query<&RemoteVisual>,
     texture_debug: Res<PlayerTextureDebugSettings>,
 ) {
@@ -349,7 +355,11 @@ pub fn apply_remote_entity_events(
                         kind,
                         on_ground: on_ground.unwrap_or(false),
                     },
-                    RemoteEntityLook { yaw, pitch },
+                    RemoteEntityLook {
+                        yaw,
+                        pitch,
+                        head_yaw: yaw,
+                    },
                     RemoteEntityName(display_name),
                     visual,
                     RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs),
@@ -446,11 +456,25 @@ pub fn apply_remote_entity_events(
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
                     if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
+                        let old_yaw = look.yaw;
                         look.yaw = yaw;
                         look.pitch = pitch;
+                        if (look.head_yaw - old_yaw).abs() < 0.001 {
+                            look.head_yaw = yaw;
+                        }
                         if let Some(on_ground) = on_ground {
                             remote_entity.on_ground = on_ground;
                         }
+                    }
+                }
+            }
+            NetEntityMessage::HeadLook {
+                entity_id,
+                head_yaw,
+            } => {
+                if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
+                    if let Ok((_remote_entity, mut look)) = entity_query.get_mut(entity) {
+                        look.head_yaw = head_yaw;
                     }
                 }
             }
@@ -487,8 +511,12 @@ pub fn apply_remote_entity_events(
                                 Quat::from_axis_angle(Vec3::Y, yaw)
                             };
                         }
+                        let old_yaw = look.yaw;
                         look.yaw = yaw;
                         look.pitch = pitch;
+                        if (look.head_yaw - old_yaw).abs() < 0.001 {
+                            look.head_yaw = yaw;
+                        }
                         remote_entity.on_ground = on_ground.unwrap_or(remote_entity.on_ground);
                     }
                 }
@@ -503,6 +531,69 @@ pub fn apply_remote_entity_events(
                 {
                     commands_entity.insert(RemotePoseState { sneaking });
                 }
+            }
+            NetEntityMessage::Equipment {
+                entity_id,
+                slot,
+                item,
+            } => {
+                // For now, only visualize the held item (slot 0) on remote players as a colored cube.
+                if slot != 0 {
+                    continue;
+                }
+                let Some(root) = registry.by_server_id.get(&entity_id).copied() else {
+                    continue;
+                };
+                if registry.local_entity_id == Some(entity_id) {
+                    continue;
+                }
+                let Ok((remote, _look)) = entity_query.get_mut(root) else {
+                    continue;
+                };
+                if remote.kind != NetEntityKind::Player {
+                    continue;
+                }
+                let Ok(parts) = player_parts_query.get(root) else {
+                    continue;
+                };
+
+                if let Ok(existing) = held_item_query.get(root) {
+                    commands.entity(existing.0).despawn_recursive();
+                    commands.entity(root).remove::<RemoteHeldItem>();
+                }
+
+                let Some(stack) = item else {
+                    continue;
+                };
+                let mesh = meshes.add(Mesh::from(Cuboid::new(0.22, 0.22, 0.22)));
+                let c = (stack.item_id as u32).wrapping_mul(2654435761);
+                let r = ((c >> 16) & 0xFF) as f32 / 255.0;
+                let g = ((c >> 8) & 0xFF) as f32 / 255.0;
+                let b = (c & 0xFF) as f32 / 255.0;
+                let material = materials.add(StandardMaterial {
+                    base_color: Color::srgb(r.max(0.2), g.max(0.2), b.max(0.2)),
+                    unlit: false,
+                    perceptual_roughness: 0.9,
+                    ..Default::default()
+                });
+                let item_entity = commands
+                    .spawn((
+                        Name::new("RemoteHeldItem"),
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        Transform {
+                            translation: Vec3::new(0.0, -0.78, -0.18),
+                            rotation: Quat::from_rotation_x(-0.35),
+                            ..Default::default()
+                        },
+                        GlobalTransform::default(),
+                        Visibility::Visible,
+                        InheritedVisibility::default(),
+                        ViewVisibility::default(),
+                    ))
+                    .id();
+                commands.entity(parts.arm_right).add_child(item_entity);
+                commands.entity(root).insert(RemoteHeldItem(item_entity));
             }
             NetEntityMessage::Animation {
                 entity_id,
@@ -521,6 +612,16 @@ pub fn apply_remote_entity_events(
                         }
                     }
                 }
+            }
+            NetEntityMessage::CollectItem {
+                collected_entity_id,
+                ..
+            } => {
+                // For now, despawn immediately to avoid "ghost" items lingering.
+                if let Some(entity) = registry.by_server_id.remove(&collected_entity_id) {
+                    commands.entity(entity).despawn_recursive();
+                }
+                registry.pending_labels.remove(&collected_entity_id);
             }
             NetEntityMessage::Destroy { entity_ids } => {
                 for entity_id in entity_ids {
@@ -857,6 +958,9 @@ pub fn animate_remote_player_models(
 
         let swing = anim.walk_phase.sin() * 0.7 * stride;
         let head_pitch = look.pitch.clamp(-1.4, 1.4);
+        let mut head_yaw_delta = look.head_yaw - look.yaw;
+        head_yaw_delta = (head_yaw_delta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
         let sneak_amount = if pose.sneaking { 1.0 } else { 0.0 };
         let arm_attack = if anim.swing_progress < 1.0 {
             (anim.swing_progress * std::f32::consts::PI).sin() * 1.2
@@ -871,7 +975,8 @@ pub fn animate_remote_player_models(
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
             t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
-            t.rotation = Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
+            t.rotation = Quat::from_rotation_y(head_yaw_delta)
+                * Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
             t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
