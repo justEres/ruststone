@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::time::Fixed;
 use bevy_egui::{EguiContexts, egui};
@@ -15,7 +16,7 @@ use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use crate::sim::{
     CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
-    VisualCorrectionOffset,
+    VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
@@ -126,6 +127,81 @@ pub fn input_collect_system(
     input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     timings.input_collect_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+pub fn camera_zoom_system(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut wheel: EventReader<MouseWheel>,
+    app_state: Res<AppState>,
+    ui_state: Res<UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    render_debug: Res<RenderDebugSettings>,
+    mut zoom: ResMut<ZoomState>,
+    mut cameras: Query<&mut Projection, With<PlayerCamera>>,
+) {
+    // Drain wheel events every frame to avoid scroll backlog when zoom isn't active.
+    let mut wheel_delta = 0.0f32;
+    for ev in wheel.read() {
+        wheel_delta += ev.y;
+    }
+
+    let input_allowed = matches!(app_state.0, ApplicationState::Connected)
+        && !ui_state.chat_open
+        && !ui_state.paused
+        && !ui_state.inventory_open
+        && !player_status.dead;
+
+    const BASE_ZOOM_FACTOR: f32 = 2.0; // 200% zoom
+    const MIN_ZOOM_FACTOR: f32 = 1.1;
+    const MAX_ZOOM_FACTOR: f32 = 12.0;
+
+    if !input_allowed {
+        zoom.active = false;
+        zoom.target_factor = 1.0;
+        zoom.wheel_factor = 1.0;
+    } else {
+        if keys.just_pressed(KeyCode::KeyC) {
+            zoom.active = true;
+            zoom.wheel_factor = 1.0;
+            zoom.target_factor = BASE_ZOOM_FACTOR;
+        }
+
+        if keys.just_released(KeyCode::KeyC) {
+            zoom.active = false;
+            zoom.target_factor = 1.0;
+        }
+
+        if keys.pressed(KeyCode::KeyC) {
+            zoom.active = true;
+            if wheel_delta.abs() > f32::EPSILON {
+                // Wheel up zooms in further (higher factor), wheel down zooms out (lower factor).
+                zoom.wheel_factor *= 1.1f32.powf(wheel_delta);
+                zoom.wheel_factor = zoom
+                    .wheel_factor
+                    .clamp(0.6, MAX_ZOOM_FACTOR / BASE_ZOOM_FACTOR);
+            }
+            zoom.target_factor =
+                (BASE_ZOOM_FACTOR * zoom.wheel_factor).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+        }
+    }
+
+    // Smooth factor transition (exponential smoothing).
+    let dt = time.delta_secs().clamp(0.0, 0.05);
+    let alpha = 1.0 - (-22.0 * dt).exp();
+    zoom.current_factor += (zoom.target_factor - zoom.current_factor) * alpha;
+    if (zoom.current_factor - zoom.target_factor).abs() < 0.0005 {
+        zoom.current_factor = zoom.target_factor;
+    }
+    zoom.current_factor = zoom.current_factor.clamp(1.0, MAX_ZOOM_FACTOR);
+
+    let base_fov = render_debug.fov_deg.max(1.0).to_radians();
+    let desired_fov = (base_fov / zoom.current_factor).clamp(0.01, std::f32::consts::PI - 0.01);
+    for mut projection in &mut cameras {
+        if let Projection::Perspective(p) = &mut *projection {
+            p.fov = desired_fov;
+        }
+    }
 }
 
 pub fn frame_timing_start(

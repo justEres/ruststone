@@ -296,6 +296,8 @@ fn camera_fov_params(
         Projection::Perspective(p) => (p.fov, p.aspect_ratio, p.near, p.far),
         _ => (settings.fov_deg.to_radians(), 1.0, 0.1, 1000.0),
     };
+    // Keep culling stable even when the camera FOV is temporarily modified (e.g. zoom).
+    fov_y = fov_y.max(settings.fov_deg.to_radians());
     if settings.frustum_fov_debug {
         fov_y = settings.frustum_fov_deg.max(1.0).to_radians();
     }

@@ -40,6 +40,25 @@ pub struct DebugStats {
 #[derive(Debug, Default, Resource)]
 pub struct SimReady(pub bool);
 
+#[derive(Debug, Resource, Clone, Copy)]
+pub struct ZoomState {
+    pub active: bool,
+    pub current_factor: f32,
+    pub target_factor: f32,
+    pub wheel_factor: f32,
+}
+
+impl Default for ZoomState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            current_factor: 1.0,
+            target_factor: 1.0,
+            wheel_factor: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Resource)]
 pub struct DebugUiState {
     pub open: bool,
