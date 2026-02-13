@@ -670,6 +670,7 @@ pub enum ToNetMessage {
     Connect {
         username: String,
         address: String,
+        auth_mode: AuthMode,
     },
     Disconnect,
     Shutdown,
@@ -743,6 +744,13 @@ pub enum ToNetMessage {
     DropHeldItem {
         full_stack: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthMode {
+    #[default]
+    Offline,
+    Authenticated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

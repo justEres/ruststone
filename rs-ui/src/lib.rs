@@ -12,7 +12,7 @@ use bevy_egui::{
 };
 use rs_render::RenderDebugSettings;
 use rs_utils::{
-    AppState, ApplicationState, BreakIndicator, Chat, InventoryItemStack, InventoryState,
+    AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, block_registry_key, item_name,
     item_registry_key,
 };
@@ -34,7 +34,7 @@ impl Plugin for UiPlugin {
 fn connect_ui(
     mut contexts: EguiContexts,
     mut state: ResMut<ConnectUiState>,
-    app_state: Res<AppState>,
+    mut app_state: ResMut<AppState>,
     to_net: Res<ToNet>,
     mut chat: ResMut<Chat>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -97,24 +97,82 @@ fn connect_ui(
     }
 
     if show_connect_window {
-        egui::Window::new("Connect to Server").show(ctx, |ui| {
-            ui.label("Server Address:");
-            ui.text_edit_singleline(&mut state.server_address);
-            ui.label("Username:");
-            ui.text_edit_singleline(&mut state.username);
-            if ui.button("Connect").clicked() {
-                to_net
-                    .0
-                    .send(ToNetMessage::Connect {
-                        username: state.username.clone(),
-                        address: state.server_address.clone(),
-                    })
-                    .unwrap();
-            }
-            if let ApplicationState::Connecting = app_state.0 {
-                ui.label("Connecting...");
-            }
-        });
+        let auth_env_ready =
+            std::env::var("RS_AUTH_UUID").is_ok() && std::env::var("RS_AUTH_ACCESS_TOKEN").is_ok();
+        egui::Window::new("Ruststone")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.heading("Connect to Server");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Server");
+                    ui.text_edit_singleline(&mut state.server_address);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Username");
+                    ui.text_edit_singleline(&mut state.username);
+                });
+                ui.add_space(6.0);
+                ui.label("Mode");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut state.auth_mode, AuthMode::Offline, "Offline");
+                    ui.selectable_value(
+                        &mut state.auth_mode,
+                        AuthMode::Authenticated,
+                        "Authenticated",
+                    );
+                });
+                if matches!(state.auth_mode, AuthMode::Authenticated) {
+                    if auth_env_ready {
+                        ui.label("Auth env detected: RS_AUTH_UUID + RS_AUTH_ACCESS_TOKEN");
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(220, 140, 80),
+                            "Missing auth env: set RS_AUTH_UUID and RS_AUTH_ACCESS_TOKEN",
+                        );
+                    }
+                }
+                ui.add_space(8.0);
+                let connect_clicked = ui
+                    .add_sized([220.0, 30.0], egui::Button::new("Connect"))
+                    .clicked();
+                if connect_clicked {
+                    let username = state.username.trim().to_string();
+                    let address = state.server_address.trim().to_string();
+                    if username.is_empty() || address.is_empty() {
+                        state.connect_feedback = "Username and server address are required".into();
+                    } else {
+                        match to_net.0.send(ToNetMessage::Connect {
+                            username,
+                            address,
+                            auth_mode: state.auth_mode,
+                        }) {
+                            Ok(()) => {
+                                *app_state = AppState(ApplicationState::Connecting);
+                                state.connect_feedback.clear();
+                            }
+                            Err(e) => {
+                                state.connect_feedback =
+                                    format!("Network thread unavailable: {}", e);
+                                *app_state = AppState(ApplicationState::Disconnected);
+                            }
+                        }
+                    }
+                }
+                if let ApplicationState::Connecting = app_state.0 {
+                    ui.add_space(4.0);
+                    ui.label("Connecting...");
+                }
+                if !state.connect_feedback.is_empty() {
+                    ui.add_space(4.0);
+                    ui.colored_label(
+                        egui::Color32::from_rgb(220, 120, 120),
+                        &state.connect_feedback,
+                    );
+                }
+            });
     }
 
     if ui_state.chat_open {
@@ -176,6 +234,14 @@ fn connect_ui(
                 ui.add_space(8.0);
                 if ui.button("Video Settings (todo)").clicked() {}
                 if ui.button("Controls (todo)").clicked() {}
+                if ui.button("Disconnect").clicked() {
+                    let _ = to_net.0.send(ToNetMessage::Disconnect);
+                    close_open_window_if_needed(&to_net, &mut inventory_state);
+                    ui_state.chat_open = false;
+                    ui_state.inventory_open = false;
+                    ui_state.paused = false;
+                    *app_state = AppState(ApplicationState::Disconnected);
+                }
                 if ui.button("Done").clicked() {
                     ui_state.paused = false;
                 }
@@ -296,6 +362,8 @@ fn connect_ui(
 pub struct ConnectUiState {
     pub username: String,
     pub server_address: String,
+    pub auth_mode: AuthMode,
+    pub connect_feedback: String,
     pub vsync_enabled: bool,
 }
 impl Default for ConnectUiState {
@@ -303,6 +371,8 @@ impl Default for ConnectUiState {
         Self {
             username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
+            auth_mode: AuthMode::Offline,
+            connect_feedback: String::new(),
             vsync_enabled: false,
         }
     }
