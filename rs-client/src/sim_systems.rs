@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::time::Fixed;
 use bevy_egui::{EguiContexts, egui};
 
-use rs_render::{LookAngles, Player, PlayerCamera};
+use rs_render::{ChunkRoot, LookAngles, Player, PlayerCamera};
 use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
 
 use crate::net::events::NetEventQueue;
@@ -806,6 +806,41 @@ pub fn draw_entity_hitboxes_system(
     }
 }
 
+pub fn draw_chunk_debug_system(
+    mut gizmos: Gizmos,
+    render_debug: Res<RenderDebugSettings>,
+    app_state: Res<AppState>,
+    chunks: Query<(&ChunkRoot, &Visibility)>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected) {
+        return;
+    }
+
+    if render_debug.show_chunk_borders {
+        let color = Color::srgba(0.25, 0.75, 1.0, 1.0);
+        for (chunk, vis) in &chunks {
+            if matches!(*vis, Visibility::Hidden) {
+                continue;
+            }
+            let base = Vec3::new(chunk.key.0 as f32 * 16.0, 0.0, chunk.key.1 as f32 * 16.0);
+            let min = base;
+            let max = base + Vec3::new(16.0, 256.0, 16.0);
+            draw_aabb_lines(&mut gizmos, min, max, color);
+        }
+    }
+
+    if render_debug.show_look_ray {
+        let Ok(cam) = camera.get_single() else {
+            return;
+        };
+        let origin = cam.translation();
+        let dir = *cam.forward();
+        let end = origin + dir * 3.0;
+        gizmos.line(origin, end, Color::srgba(1.0, 0.2, 0.2, 1.0));
+    }
+}
+
 fn draw_aabb_lines(gizmos: &mut Gizmos, min: Vec3, max: Vec3, color: Color) {
     let p000 = Vec3::new(min.x, min.y, min.z);
     let p001 = Vec3::new(min.x, min.y, max.z);
@@ -889,6 +924,18 @@ fn normal_to_face_index(normal: IVec3) -> u8 {
     }
 }
 
+fn yaw_deg_to_cardinal(yaw_deg_mc: f32) -> (&'static str, &'static str) {
+    // Minecraft 1.8 yaw: 0 = South (+Z), 90 = West (-X), 180 = North (-Z), 270 = East (+X).
+    let yaw = yaw_deg_mc.rem_euclid(360.0);
+    let idx = ((yaw / 90.0).round() as i32).rem_euclid(4);
+    match idx {
+        0 => ("South", "+Z"),
+        1 => ("West", "-X"),
+        2 => ("North", "-Z"),
+        _ => ("East", "+X"),
+    }
+}
+
 pub fn debug_overlay_system(
     mut contexts: EguiContexts,
     debug: Res<DebugStats>,
@@ -900,6 +947,8 @@ pub fn debug_overlay_system(
     mut render_debug: ResMut<RenderDebugSettings>,
     mut player_tex_debug: ResMut<PlayerTextureDebugSettings>,
     render_perf: Res<RenderPerfStats>,
+    sim_state: Res<SimState>,
+    input: Res<CurrentInput>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
@@ -949,6 +998,10 @@ pub fn debug_overlay_system(
                 );
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
+                ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
+                ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
+                ui.checkbox(&mut render_debug.show_look_info, "Look info");
+                ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
@@ -966,6 +1019,26 @@ pub fn debug_overlay_system(
                     render_debug.render_distance_chunks = dist;
                 }
                 ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"));
+
+                if render_debug.show_coordinates || render_debug.show_look_info {
+                    ui.separator();
+                }
+                if render_debug.show_coordinates {
+                    let pos = sim_state.current.pos;
+                    let block = pos.floor().as_ivec3();
+                    let chunk_x = block.x.div_euclid(16);
+                    let chunk_z = block.z.div_euclid(16);
+                    ui.label(format!("pos: {:.3} {:.3} {:.3}", pos.x, pos.y, pos.z));
+                    ui.label(format!("block: {} {} {}", block.x, block.y, block.z));
+                    ui.label(format!("chunk: {} {}", chunk_x, chunk_z));
+                }
+                if render_debug.show_look_info {
+                    let yaw_mc = (std::f32::consts::PI - input.0.yaw).to_degrees();
+                    let pitch_mc = (-input.0.pitch).to_degrees();
+                    let (card, axis) = yaw_deg_to_cardinal(yaw_mc);
+                    ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
+                    ui.label(format!("facing: {} ({})", card, axis));
+                }
             }
 
             if debug_ui.show_prediction {

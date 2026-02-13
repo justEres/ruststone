@@ -24,6 +24,10 @@ pub struct RenderDebugSettings {
     pub manual_frustum_cull: bool,
     pub frustum_fov_debug: bool,
     pub frustum_fov_deg: f32,
+    pub show_chunk_borders: bool,
+    pub show_coordinates: bool,
+    pub show_look_info: bool,
+    pub show_look_ray: bool,
 }
 
 impl Default for RenderDebugSettings {
@@ -38,6 +42,10 @@ impl Default for RenderDebugSettings {
             manual_frustum_cull: true,
             frustum_fov_debug: false,
             frustum_fov_deg: 110.0,
+            show_chunk_borders: false,
+            show_coordinates: false,
+            show_look_info: false,
+            show_look_ray: false,
         }
     }
 }
