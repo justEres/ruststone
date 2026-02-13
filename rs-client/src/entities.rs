@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::thread;
 
 use crate::sim::collision::{WorldCollisionMap, is_solid};
+use bevy::ecs::system::SystemParam;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::mesh::Indices;
@@ -12,10 +13,13 @@ use bevy_egui::{EguiContexts, egui};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::PlayerCamera;
 use rs_utils::{
-    AppState, ApplicationState, MobKind, NetEntityAnimation, NetEntityKind, NetEntityMessage,
-    ObjectKind, PlayerSkinModel,
+    AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
+    NetEntityMessage, ObjectKind, PlayerSkinModel,
 };
 use tracing::{info, warn};
+
+use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
+use rs_render::RenderDebugSettings;
 
 const PLAYER_SCALE: Vec3 = Vec3::ONE;
 const PLAYER_Y_OFFSET: f32 = 0.0;
@@ -36,6 +40,30 @@ const ORB_NAME_Y_OFFSET: f32 = 0.45;
 const OBJECT_SCALE: Vec3 = Vec3::splat(0.28);
 const OBJECT_Y_OFFSET: f32 = 0.28;
 const OBJECT_NAME_Y_OFFSET: f32 = 0.65;
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteItemSprite;
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteItemStackState(pub InventoryItemStack);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ItemSpriteStack(pub InventoryItemStack);
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct ItemSpin(pub f32);
+
+#[derive(SystemParam)]
+pub(crate) struct RemoteEntityApplyParams<'w, 's> {
+    transform_query: Query<'w, 's, &'static mut Transform>,
+    smoothing_query: Query<'w, 's, &'static mut RemoteMotionSmoothing>,
+    entity_query: Query<'w, 's, (&'static mut RemoteEntity, &'static mut RemoteEntityLook)>,
+    player_anim_query: Query<'w, 's, &'static mut RemotePlayerAnimation>,
+    name_query: Query<'w, 's, &'static mut RemoteEntityName>,
+    visual_query: Query<'w, 's, &'static RemoteVisual>,
+    player_parts_query: Query<'w, 's, &'static RemotePlayerModelParts, With<RemotePlayer>>,
+    held_item_query: Query<'w, 's, &'static RemoteHeldItem>,
+}
 
 #[derive(Debug)]
 struct SkinDownloadResult {
@@ -222,16 +250,11 @@ pub fn apply_remote_entity_events(
     mut queue: ResMut<RemoteEntityEventQueue>,
     mut registry: ResMut<RemoteEntityRegistry>,
     mut skin_downloader: ResMut<RemoteSkinDownloader>,
+    mut item_textures: ResMut<ItemTextureCache>,
+    item_sprite_mesh: Res<ItemSpriteMesh>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut transform_query: Query<&mut Transform>,
-    mut smoothing_query: Query<&mut RemoteMotionSmoothing>,
-    mut entity_query: Query<(&mut RemoteEntity, &mut RemoteEntityLook)>,
-    mut player_anim_query: Query<&mut RemotePlayerAnimation>,
-    mut name_query: Query<&mut RemoteEntityName>,
-    player_parts_query: Query<&RemotePlayerModelParts, With<RemotePlayer>>,
-    held_item_query: Query<&RemoteHeldItem>,
-    visual_query: Query<&RemoteVisual>,
+    mut params: RemoteEntityApplyParams,
     texture_debug: Res<PlayerTextureDebugSettings>,
 ) {
     let now_secs = time.elapsed_secs_f64();
@@ -271,7 +294,7 @@ pub fn apply_remote_entity_events(
                 }
                 if let Some(server_id) = registry.player_entity_by_uuid.get(&uuid).copied()
                     && let Some(entity) = registry.by_server_id.get(&server_id).copied()
-                    && let Ok(mut entity_name) = name_query.get_mut(entity)
+                    && let Ok(mut entity_name) = params.name_query.get_mut(entity)
                 {
                     entity_name.0 = name;
                 }
@@ -395,19 +418,38 @@ pub fn apply_remote_entity_events(
                         RemotePlayerSkinModel(player_skin_model),
                     ));
                 } else {
-                    let mesh = meshes.add(match spec.mesh {
-                        VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
-                        VisualMesh::Sphere => Mesh::from(Sphere::default()),
-                    });
-                    let material = materials.add(StandardMaterial {
-                        base_color: spec.color,
-                        perceptual_roughness: 0.95,
-                        metallic: 0.0,
-                        ..Default::default()
-                    });
-                    commands
-                        .entity(root)
-                        .insert((Mesh3d(mesh), MeshMaterial3d(material)));
+                    if kind == NetEntityKind::Item {
+                        // Dropped item sprite (texture applied once metadata arrives).
+                        let material = materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            alpha_mode: AlphaMode::Mask(0.5),
+                            cull_mode: None,
+                            unlit: true,
+                            perceptual_roughness: 1.0,
+                            metallic: 0.0,
+                            ..Default::default()
+                        });
+                        commands.entity(root).insert((
+                            Mesh3d(item_sprite_mesh.0.clone()),
+                            MeshMaterial3d(material),
+                            RemoteItemSprite,
+                            ItemSpin::default(),
+                        ));
+                    } else {
+                        let mesh = meshes.add(match spec.mesh {
+                            VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
+                            VisualMesh::Sphere => Mesh::from(Sphere::default()),
+                        });
+                        let material = materials.add(StandardMaterial {
+                            base_color: spec.color,
+                            perceptual_roughness: 0.95,
+                            metallic: 0.0,
+                            ..Default::default()
+                        });
+                        commands
+                            .entity(root)
+                            .insert((Mesh3d(mesh), MeshMaterial3d(material)));
+                    }
                 }
 
                 if let Some(uuid) = uuid {
@@ -421,11 +463,37 @@ pub fn apply_remote_entity_events(
             }
             NetEntityMessage::SetLabel { entity_id, label } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok(mut name_comp) = name_query.get_mut(entity) {
+                    if let Ok(mut name_comp) = params.name_query.get_mut(entity) {
                         name_comp.0 = label;
                     }
                 } else {
                     registry.pending_labels.insert(entity_id, label);
+                }
+            }
+            NetEntityMessage::SetItemStack { entity_id, stack } => {
+                let Some(entity) = registry.by_server_id.get(&entity_id).copied() else {
+                    continue;
+                };
+                let Ok((remote, _look)) = params.entity_query.get_mut(entity) else {
+                    continue;
+                };
+                if remote.kind != NetEntityKind::Item {
+                    continue;
+                }
+                match stack {
+                    Some(stack) => {
+                        item_textures.request_stack(stack);
+                        if let Ok(mut commands_entity) = commands.get_entity(entity) {
+                            commands_entity
+                                .insert((RemoteItemStackState(stack), ItemSpriteStack(stack)));
+                        }
+                    }
+                    None => {
+                        if let Ok(mut commands_entity) = commands.get_entity(entity) {
+                            commands_entity.remove::<RemoteItemStackState>();
+                            commands_entity.remove::<ItemSpriteStack>();
+                        }
+                    }
                 }
             }
             NetEntityMessage::MoveDelta {
@@ -434,14 +502,14 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok(mut smoothing) = smoothing_query.get_mut(entity) {
+                    if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
                         let previous = smoothing.target_translation;
                         let next = previous + delta;
                         update_motion_velocity(&mut smoothing, previous, next, now_secs);
-                    } else if let Ok(mut transform) = transform_query.get_mut(entity) {
+                    } else if let Ok(mut transform) = params.transform_query.get_mut(entity) {
                         transform.translation += delta;
                     }
-                    if let Ok((mut remote_entity, _)) = entity_query.get_mut(entity)
+                    if let Ok((mut remote_entity, _)) = params.entity_query.get_mut(entity)
                         && let Some(on_ground) = on_ground
                     {
                         remote_entity.on_ground = on_ground;
@@ -455,7 +523,7 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
+                    if let Ok((mut remote_entity, mut look)) = params.entity_query.get_mut(entity) {
                         let old_yaw = look.yaw;
                         look.yaw = yaw;
                         look.pitch = pitch;
@@ -473,7 +541,7 @@ pub fn apply_remote_entity_events(
                 head_yaw,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((_remote_entity, mut look)) = entity_query.get_mut(entity) {
+                    if let Ok((_remote_entity, mut look)) = params.entity_query.get_mut(entity) {
                         look.head_yaw = head_yaw;
                     }
                 }
@@ -486,25 +554,26 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok((mut remote_entity, mut look)) = entity_query.get_mut(entity) {
+                    if let Ok((mut remote_entity, mut look)) = params.entity_query.get_mut(entity) {
                         let target = pos
                             + Vec3::Y
-                                * visual_query
+                                * params
+                                    .visual_query
                                     .get(entity)
                                     .map_or(PLAYER_Y_OFFSET, |v| v.y_offset);
-                        if let Ok(mut smoothing) = smoothing_query.get_mut(entity) {
+                        if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
                             let previous = smoothing.target_translation;
                             update_motion_velocity(&mut smoothing, previous, target, now_secs);
                             // Big teleports should still snap to avoid long catch-up.
-                            if let Ok(mut transform) = transform_query.get_mut(entity)
+                            if let Ok(mut transform) = params.transform_query.get_mut(entity)
                                 && transform.translation.distance_squared(target) > 64.0
                             {
                                 transform.translation = target;
                             }
-                        } else if let Ok(mut transform) = transform_query.get_mut(entity) {
+                        } else if let Ok(mut transform) = params.transform_query.get_mut(entity) {
                             transform.translation = target;
                         }
-                        if let Ok(mut transform) = transform_query.get_mut(entity) {
+                        if let Ok(mut transform) = params.transform_query.get_mut(entity) {
                             transform.rotation = if remote_entity.kind == NetEntityKind::Player {
                                 player_root_rotation(yaw)
                             } else {
@@ -537,7 +606,7 @@ pub fn apply_remote_entity_events(
                 slot,
                 item,
             } => {
-                // For now, only visualize the held item (slot 0) on remote players as a colored cube.
+                // For now, only visualize the held item (slot 0) on remote players.
                 if slot != 0 {
                     continue;
                 }
@@ -547,17 +616,17 @@ pub fn apply_remote_entity_events(
                 if registry.local_entity_id == Some(entity_id) {
                     continue;
                 }
-                let Ok((remote, _look)) = entity_query.get_mut(root) else {
+                let Ok((remote, _look)) = params.entity_query.get_mut(root) else {
                     continue;
                 };
                 if remote.kind != NetEntityKind::Player {
                     continue;
                 }
-                let Ok(parts) = player_parts_query.get(root) else {
+                let Ok(parts) = params.player_parts_query.get(root) else {
                     continue;
                 };
 
-                if let Ok(existing) = held_item_query.get(root) {
+                if let Ok(existing) = params.held_item_query.get(root) {
                     commands.entity(existing.0).despawn_recursive();
                     commands.entity(root).remove::<RemoteHeldItem>();
                 }
@@ -565,31 +634,35 @@ pub fn apply_remote_entity_events(
                 let Some(stack) = item else {
                     continue;
                 };
-                let mesh = meshes.add(Mesh::from(Cuboid::new(0.22, 0.22, 0.22)));
-                let c = (stack.item_id as u32).wrapping_mul(2654435761);
-                let r = ((c >> 16) & 0xFF) as f32 / 255.0;
-                let g = ((c >> 8) & 0xFF) as f32 / 255.0;
-                let b = (c & 0xFF) as f32 / 255.0;
-                let material = materials.add(StandardMaterial {
-                    base_color: Color::srgb(r.max(0.2), g.max(0.2), b.max(0.2)),
-                    unlit: false,
-                    perceptual_roughness: 0.9,
-                    ..Default::default()
+
+                item_textures.request_stack(stack);
+                let material = item_textures.material_for_stack(stack).unwrap_or_else(|| {
+                    materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        alpha_mode: AlphaMode::Mask(0.5),
+                        cull_mode: None,
+                        unlit: true,
+                        perceptual_roughness: 1.0,
+                        metallic: 0.0,
+                        ..Default::default()
+                    })
                 });
                 let item_entity = commands
                     .spawn((
                         Name::new("RemoteHeldItem"),
-                        Mesh3d(mesh),
+                        Mesh3d(item_sprite_mesh.0.clone()),
                         MeshMaterial3d(material),
                         Transform {
-                            translation: Vec3::new(0.0, -0.78, -0.18),
-                            rotation: Quat::from_rotation_x(-0.35),
+                            translation: Vec3::new(0.02, -0.86, -0.18),
+                            rotation: Quat::from_rotation_x(-0.30) * Quat::from_rotation_y(0.35),
+                            scale: Vec3::splat(0.55),
                             ..Default::default()
                         },
                         GlobalTransform::default(),
                         Visibility::Visible,
                         InheritedVisibility::default(),
                         ViewVisibility::default(),
+                        ItemSpriteStack(stack),
                     ))
                     .id();
                 commands.entity(parts.arm_right).add_child(item_entity);
@@ -600,7 +673,7 @@ pub fn apply_remote_entity_events(
                 animation,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok(mut anim) = player_anim_query.get_mut(entity) {
+                    if let Ok(mut anim) = params.player_anim_query.get_mut(entity) {
                         match animation {
                             NetEntityAnimation::SwingMainArm => {
                                 anim.swing_progress = 0.0;
@@ -676,6 +749,11 @@ pub fn smooth_remote_entity_motion(
             transform.translation += delta * pos_alpha;
         }
 
+        if remote.kind == NetEntityKind::Item {
+            // Item sprites use a dedicated billboard/spin system; don't fight it here.
+            continue;
+        }
+
         let desired_rot = if remote.kind == NetEntityKind::Player {
             player_root_rotation(look.yaw)
         } else {
@@ -727,6 +805,61 @@ pub fn draw_remote_entity_names(
             egui::TextStyle::Body.resolve(&ctx.style()),
             egui::Color32::WHITE,
         );
+    }
+}
+
+pub fn apply_item_sprite_textures_system(
+    mut cache: ResMut<ItemTextureCache>,
+    mut query: Query<(&ItemSpriteStack, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    for (stack, mut material) in &mut query {
+        cache.request_stack(stack.0);
+        if let Some(handle) = cache.material_for_stack(stack.0) {
+            if material.0 != handle {
+                material.0 = handle;
+            }
+        }
+    }
+}
+
+pub fn apply_held_item_visibility_system(
+    settings: Res<RenderDebugSettings>,
+    held: Query<&RemoteHeldItem>,
+    mut vis: Query<&mut Visibility>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    let target = if settings.render_held_items {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for held in &held {
+        if let Ok(mut v) = vis.get_mut(held.0) {
+            *v = target;
+        }
+    }
+}
+
+pub fn billboard_item_sprites(
+    time: Res<Time>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut items: Query<(&GlobalTransform, &mut Transform, &mut ItemSpin), With<RemoteItemSprite>>,
+) {
+    let Ok(cam) = camera.get_single() else {
+        return;
+    };
+    let cam_pos = cam.translation();
+    let dt = time.delta_secs().clamp(0.0, 0.05);
+
+    for (global, mut local, mut spin) in &mut items {
+        // Use the global translation so culling offsets don't matter.
+        let pos = global.translation();
+        let to_cam = cam_pos - pos;
+        let yaw = to_cam.x.atan2(to_cam.z);
+        spin.0 = (spin.0 + dt * 1.2).rem_euclid(std::f32::consts::TAU);
+        local.rotation = Quat::from_rotation_y(yaw + spin.0);
     }
 }
 

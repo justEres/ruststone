@@ -28,6 +28,7 @@ pub struct RenderDebugSettings {
     pub show_coordinates: bool,
     pub show_look_info: bool,
     pub show_look_ray: bool,
+    pub render_held_items: bool,
 }
 
 impl Default for RenderDebugSettings {
@@ -46,6 +47,7 @@ impl Default for RenderDebugSettings {
             show_coordinates: false,
             show_look_info: false,
             show_look_ray: false,
+            render_held_items: true,
         }
     }
 }
