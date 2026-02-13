@@ -17,6 +17,7 @@ use rs_utils::{
     item_registry_key,
 };
 use serde::Deserialize;
+use serde_json::Value;
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
 const INVENTORY_SLOT_SPACING: f32 = 4.0;
@@ -96,7 +97,9 @@ fn connect_ui(
     if show_connect_window {
         ui_state.inventory_open = false;
         if !state.auth_accounts_loaded {
-            state.auth_accounts = load_auth_accounts();
+            let (msa_client_id, accounts) = load_auth_store();
+            state.msa_client_id = msa_client_id;
+            state.auth_accounts = accounts;
             state.selected_auth_account = 0;
             state.auth_accounts_loaded = true;
         }
@@ -138,6 +141,25 @@ fn connect_ui(
                     );
                 });
                 if matches!(state.auth_mode, AuthMode::Authenticated) {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("MSA client id");
+                        ui.text_edit_singleline(&mut state.msa_client_id);
+                        if ui.button("Save").clicked() {
+                            if let Err(err) = save_auth_store_msa_client_id(&state.msa_client_id) {
+                                state.connect_feedback = format!("Failed to save client id: {}", err);
+                            } else {
+                                state.connect_feedback.clear();
+                            }
+                        }
+                    });
+                    ui.label("This is not a secret. You need your own Azure app client id for device login.");
+                    if state.msa_client_id.trim().is_empty() {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(220, 140, 80),
+                            "Missing MSA client id: set it above (stored in ~/.config/ruststone/accounts.json)",
+                        );
+                    }
                     if state.auth_accounts.is_empty() {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 140, 80),
@@ -173,13 +195,22 @@ fn connect_ui(
                             });
                     }
                     if ui.button("Reload Accounts").clicked() {
-                        state.auth_accounts = load_auth_accounts();
+                        let (msa_client_id, accounts) = load_auth_store();
+                        state.msa_client_id = msa_client_id;
+                        state.auth_accounts = accounts;
                         state.selected_auth_account = 0;
                     }
                 }
                 ui.add_space(8.0);
+                let connect_enabled = match state.auth_mode {
+                    AuthMode::Offline => true,
+                    AuthMode::Authenticated => !state.msa_client_id.trim().is_empty(),
+                };
                 let connect_clicked = ui
-                    .add_sized([220.0, 30.0], egui::Button::new("Connect"))
+                    .add_enabled_ui(connect_enabled, |ui| {
+                        ui.add_sized([220.0, 30.0], egui::Button::new("Connect"))
+                    })
+                    .inner
                     .clicked();
                 if connect_clicked {
                     let address = state.server_address.trim().to_string();
@@ -198,12 +229,22 @@ fn connect_ui(
                                 }
                             }
                             AuthMode::Authenticated => {
+                                if let Err(err) = save_auth_store_msa_client_id(&state.msa_client_id)
+                                {
+                                    state.connect_feedback =
+                                        format!("Failed to save client id: {}", err);
+                                    None
+                                } else if state.msa_client_id.trim().is_empty() {
+                                    state.connect_feedback = "MSA client id is required".into();
+                                    None
+                                } else {
                                 let selected = state.auth_accounts.get(state.selected_auth_account);
                                 let username = selected
                                     .map(|entry| entry.username.clone())
                                     .unwrap_or_else(|| state.username.trim().to_string());
                                 let uuid = selected.map(|entry| entry.uuid.clone());
                                 Some((username, uuid))
+                                }
                             }
                         };
                         if let Some((username, auth_account_uuid)) = connect_payload {
@@ -428,6 +469,7 @@ pub struct ConnectUiState {
     pub username: String,
     pub server_address: String,
     pub auth_mode: AuthMode,
+    pub msa_client_id: String,
     pub auth_accounts: Vec<UiAuthAccount>,
     pub selected_auth_account: usize,
     pub auth_accounts_loaded: bool,
@@ -440,6 +482,7 @@ impl Default for ConnectUiState {
             username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
             auth_mode: AuthMode::Offline,
+            msa_client_id: String::new(),
             auth_accounts: Vec::new(),
             selected_auth_account: 0,
             auth_accounts_loaded: false,
@@ -462,6 +505,7 @@ pub struct UiAuthAccount {
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct AuthAccountsFile {
+    msa_client_id: String,
     accounts: Vec<AuthAccountRecord>,
 }
 
@@ -472,26 +516,58 @@ struct AuthAccountRecord {
     uuid: String,
 }
 
-fn load_auth_accounts() -> Vec<UiAuthAccount> {
+fn auth_store_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
-    let path = PathBuf::from(home)
+    PathBuf::from(home)
         .join(".config")
         .join("ruststone")
-        .join("accounts.json");
+        .join("accounts.json")
+}
+
+fn load_auth_store() -> (String, Vec<UiAuthAccount>) {
+    let path = auth_store_path();
     let Ok(raw) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+        return (String::new(), Vec::new());
     };
     let Ok(store) = serde_json::from_str::<AuthAccountsFile>(&raw) else {
-        return Vec::new();
+        return (String::new(), Vec::new());
     };
-    store
+    let accounts = store
         .accounts
         .into_iter()
         .map(|a| UiAuthAccount {
             username: a.username,
             uuid: a.uuid,
         })
-        .collect()
+        .collect();
+    (store.msa_client_id, accounts)
+}
+
+fn save_auth_store_msa_client_id(client_id: &str) -> Result<(), String> {
+    let path = auth_store_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut root = if let Ok(raw) = std::fs::read_to_string(&path) {
+        serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| Value::Object(Default::default()))
+    } else {
+        Value::Object(Default::default())
+    };
+
+    if !root.is_object() {
+        root = Value::Object(Default::default());
+    }
+    if let Some(obj) = root.as_object_mut() {
+        obj.entry("version").or_insert(Value::from(1));
+        obj.insert("msa_client_id".to_string(), Value::from(client_id));
+        obj.entry("accounts")
+            .or_insert_with(|| Value::Array(Vec::new()));
+    }
+
+    let out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    std::fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn draw_hotbar_ui(
