@@ -173,6 +173,8 @@ fn main() {
                 sim_systems::apply_visual_transform_system,
                 sim_systems::draw_entity_hitboxes_system
                     .after(sim_systems::apply_visual_transform_system),
+                sim_systems::draw_chunk_debug_system
+                    .after(sim_systems::apply_visual_transform_system),
                 sim_systems::world_interaction_system
                     .after(sim_systems::apply_visual_transform_system),
             ),
