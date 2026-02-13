@@ -1,8 +1,10 @@
 #![recursion_limit = "256"]
 
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
+use serde_json::Value;
 use rs_protocol::protocol::Conn;
 use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::packet::Packet;
@@ -331,26 +333,21 @@ fn connect(
     auth_mode: AuthMode,
 ) -> Result<Conn, Box<dyn std::error::Error>> {
     let mut conn = Conn::new(target, 47)?;
-    let effective_username = if matches!(auth_mode, AuthMode::Authenticated) {
-        std::env::var("RS_AUTH_USERNAME")
-            .ok()
-            .map(|v| v.trim().trim_matches('"').to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| username.to_string())
-    } else {
-        username.to_string()
-    };
     let online_account = match auth_mode {
         AuthMode::Offline => None,
         AuthMode::Authenticated => Some(
-            load_online_account_from_env(&effective_username).ok_or_else(|| {
+            load_online_account(username).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "Authenticated mode selected but RS_AUTH_UUID/RS_AUTH_ACCESS_TOKEN are missing or invalid",
+                    "Authenticated mode selected but no valid account could be loaded (set env vars or use Prism account)",
                 )
             })?,
         ),
     };
+    let effective_username = online_account
+        .as_ref()
+        .map(|account| account.name.clone())
+        .unwrap_or_else(|| username.to_string());
 
     conn.write_packet(
         rs_protocol::protocol::packet::handshake::serverbound::Handshake {
@@ -436,7 +433,19 @@ fn connect(
     }
 }
 
-fn load_online_account_from_env(username: &str) -> Option<Account> {
+fn load_online_account(preferred_username: &str) -> Option<Account> {
+    if let Some(account) = load_online_account_from_prism(preferred_username) {
+        return Some(account);
+    }
+    load_online_account_from_env(preferred_username)
+}
+
+fn load_online_account_from_env(preferred_username: &str) -> Option<Account> {
+    let username = std::env::var("RS_AUTH_USERNAME")
+        .ok()
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| preferred_username.to_string());
     let access_token = std::env::var("RS_AUTH_ACCESS_TOKEN")
         .ok()?
         .trim()
@@ -452,6 +461,10 @@ fn load_online_account_from_env(username: &str) -> Option<Account> {
         println!("RS_AUTH_UUID is set but invalid (expected 32 hex chars, optionally with '-')");
         return None;
     }
+    if token_expired_soon(&access_token, 60) {
+        println!("RS_AUTH_ACCESS_TOKEN appears expired/near expiry; falling back to Prism auth");
+        return None;
+    }
     println!(
         "Auth env loaded: username={} uuid={}.. token_len={}",
         username,
@@ -462,6 +475,220 @@ fn load_online_account_from_env(username: &str) -> Option<Account> {
     // Compatibility with rs-protocol microsoft join_server implementation expecting index 2.
     account.verification_tokens = vec![String::new(), String::new(), access_token];
     Some(account)
+}
+
+fn load_online_account_from_prism(preferred_username: &str) -> Option<Account> {
+    let path = std::env::var("RS_PRISM_ACCOUNTS_PATH")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{home}/.local/share/PrismLauncher/accounts.json")
+        });
+
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let root: Value = serde_json::from_str(&raw).ok()?;
+    let accounts = root.get("accounts")?.as_array()?;
+    if accounts.is_empty() {
+        return None;
+    }
+
+    let selected = accounts
+        .iter()
+        .find(|acc| {
+            acc.get("active")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && acc.get("type").and_then(Value::as_str) == Some("MSA")
+        })
+        .or_else(|| {
+            accounts.iter().find(|acc| {
+                acc.get("type").and_then(Value::as_str) == Some("MSA")
+                    && acc
+                        .pointer("/profile/name")
+                        .and_then(Value::as_str)
+                        .map(|n| n.eq_ignore_ascii_case(preferred_username))
+                        .unwrap_or(false)
+            })
+        })
+        .or_else(|| {
+            accounts
+                .iter()
+                .find(|acc| acc.get("type").and_then(Value::as_str) == Some("MSA"))
+        })?;
+
+    let profile_name = selected.pointer("/profile/name")?.as_str()?.to_string();
+    let profile_id = selected.pointer("/profile/id")?.as_str()?.to_string();
+    if profile_id.len() != 32 {
+        println!("Prism profile id is invalid length for account {}", profile_name);
+        return None;
+    }
+
+    let mut access_token = selected
+        .pointer("/ygg/token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let ygg_exp = selected.pointer("/ygg/exp").and_then(Value::as_i64);
+
+    if access_token.is_empty()
+        || ygg_exp
+            .map(|exp| exp <= unix_ts_now() as i64 + 60)
+            .unwrap_or(true)
+        || token_expired_soon(&access_token, 60)
+    {
+        let refresh_token = selected
+            .pointer("/msa/refresh_token")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let client_id = selected
+            .get("msa-client-id")
+            .and_then(Value::as_str)
+            .unwrap_or("00000000402b5328");
+        match refresh_minecraft_access_token(refresh_token, client_id) {
+            Ok(token) => {
+                access_token = token;
+                println!("Refreshed Minecraft access token from Prism account {}", profile_name);
+            }
+            Err(err) => {
+                println!("Failed to refresh Prism account token: {}", err);
+                return None;
+            }
+        }
+    }
+
+    if access_token.is_empty() {
+        return None;
+    }
+
+    println!(
+        "Auth Prism loaded: username={} uuid={}.. token_len={}",
+        profile_name,
+        &profile_id[..8],
+        access_token.len()
+    );
+    let mut account = Account::new(profile_name, Some(profile_id), AccountType::Microsoft);
+    account.verification_tokens = vec![String::new(), String::new(), access_token];
+    Some(account)
+}
+
+fn refresh_minecraft_access_token(
+    refresh_token: &str,
+    client_id: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if refresh_token.is_empty() {
+        return Err("missing msa refresh token".into());
+    }
+
+    let client = reqwest::blocking::Client::new();
+
+    let oauth: Value = client
+        .post("https://login.live.com/oauth20_token.srf")
+        .form(&[
+            ("client_id", client_id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("redirect_uri", "https://login.live.com/oauth20_desktop.srf"),
+            ("scope", "service::user.auth.xboxlive.com::MBI_SSL"),
+        ])
+        .send()?
+        .error_for_status()?
+        .json()?;
+    let msa_access = oauth
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or("oauth refresh response missing access_token")?;
+
+    let xbl: Value = client
+        .post("https://user.auth.xboxlive.com/user/authenticate")
+        .json(&serde_json::json!({
+            "Properties": {
+                "AuthMethod": "RPS",
+                "SiteName": "user.auth.xboxlive.com",
+                "RpsTicket": format!("d={}", msa_access),
+            },
+            "RelyingParty": "http://auth.xboxlive.com",
+            "TokenType": "JWT",
+        }))
+        .send()?
+        .error_for_status()?
+        .json()?;
+    let user_token = xbl
+        .get("Token")
+        .and_then(Value::as_str)
+        .ok_or("xbl response missing Token")?;
+
+    let xsts: Value = client
+        .post("https://xsts.auth.xboxlive.com/xsts/authorize")
+        .json(&serde_json::json!({
+            "Properties": {
+                "SandboxId": "RETAIL",
+                "UserTokens": [user_token],
+            },
+            "RelyingParty": "rp://api.minecraftservices.com/",
+            "TokenType": "JWT",
+        }))
+        .send()?
+        .error_for_status()?
+        .json()?;
+    let xsts_token = xsts
+        .get("Token")
+        .and_then(Value::as_str)
+        .ok_or("xsts response missing Token")?;
+    let uhs = xsts
+        .pointer("/DisplayClaims/xui/0/uhs")
+        .and_then(Value::as_str)
+        .ok_or("xsts response missing uhs")?;
+
+    let mc_auth: Value = client
+        .post("https://api.minecraftservices.com/authentication/login_with_xbox")
+        .json(&serde_json::json!({
+            "identityToken": format!("XBL3.0 x={};{}", uhs, xsts_token),
+        }))
+        .send()?
+        .error_for_status()?
+        .json()?;
+    let minecraft_access = mc_auth
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or("minecraft login response missing access_token")?;
+
+    Ok(minecraft_access.to_string())
+}
+
+fn token_expired_soon(token: &str, leeway_secs: u64) -> bool {
+    use base64::Engine;
+
+    let mut parts = token.split('.');
+    let _header = parts.next();
+    let payload = parts.next();
+    if payload.is_none() {
+        return false;
+    }
+
+    let mut payload = payload.unwrap().to_string();
+    let rem = payload.len() % 4;
+    if rem != 0 {
+        payload.extend(std::iter::repeat_n('=', 4 - rem));
+    }
+
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(payload) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    let Some(exp) = value.get("exp").and_then(Value::as_u64) else {
+        return false;
+    };
+    exp <= unix_ts_now() + leeway_secs
+}
+
+fn unix_ts_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn handle_encryption_request(
