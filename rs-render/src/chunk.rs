@@ -162,6 +162,7 @@ impl ChunkColumnSnapshot {
 pub struct MeshBatch {
     pub opaque: MeshData,
     pub cutout: MeshData,
+    pub cutout_culled: MeshData,
     pub transparent: MeshData,
 }
 
@@ -170,6 +171,7 @@ impl MeshBatch {
         match render_group_for_block(block_id) {
             MaterialGroup::Opaque => &mut self.opaque,
             MaterialGroup::Cutout => &mut self.cutout,
+            MaterialGroup::CutoutCulled => &mut self.cutout_culled,
             MaterialGroup::Transparent => &mut self.transparent,
         }
     }
@@ -180,6 +182,7 @@ impl Default for MeshBatch {
         Self {
             opaque: MeshData::empty(),
             cutout: MeshData::empty(),
+            cutout_culled: MeshData::empty(),
             transparent: MeshData::empty(),
         }
     }
@@ -189,6 +192,7 @@ impl Default for MeshBatch {
 pub enum MaterialGroup {
     Opaque,
     Cutout,
+    CutoutCulled,
     Transparent,
 }
 
@@ -244,6 +248,7 @@ impl MeshData {
 pub struct ChunkRenderAssets {
     pub opaque_material: Handle<ChunkAtlasMaterial>,
     pub cutout_material: Handle<ChunkAtlasMaterial>,
+    pub cutout_culled_material: Handle<ChunkAtlasMaterial>,
     pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
     pub texture_mapping: Arc<AtlasBlockMapping>,
@@ -301,10 +306,24 @@ impl FromWorld for ChunkRenderAssets {
                 atlas: atlas_handle.clone(),
             },
         });
+        let cutout_culled_material = materials.add(ChunkAtlasMaterial {
+            base: StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: None,
+                perceptual_roughness: 1.0,
+                alpha_mode: AlphaMode::Mask(0.5),
+                cull_mode: Some(bevy::render::render_resource::Face::Back),
+                ..default()
+            },
+            extension: AtlasTextureExtension {
+                atlas: atlas_handle.clone(),
+            },
+        });
 
         Self {
             opaque_material,
             cutout_material,
+            cutout_culled_material,
             transparent_material,
             atlas: atlas_handle,
             texture_mapping,
@@ -1659,7 +1678,7 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
         return MaterialGroup::Transparent;
     }
     if is_leaves_block(block_type(block_id)) {
-        return MaterialGroup::Cutout;
+        return MaterialGroup::CutoutCulled;
     }
     if matches!(
         block_model_kind(block_type(block_id)),
