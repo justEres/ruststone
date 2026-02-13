@@ -187,6 +187,15 @@ pub enum NetEntityMessage {
         entity_id: i32,
         sneaking: bool,
     },
+    HeadLook {
+        entity_id: i32,
+        head_yaw: f32,
+    },
+    Equipment {
+        entity_id: i32,
+        slot: u16,
+        item: Option<InventoryItemStack>,
+    },
     Animation {
         entity_id: i32,
         animation: NetEntityAnimation,
@@ -194,6 +203,10 @@ pub enum NetEntityMessage {
     SetLabel {
         entity_id: i32,
         label: String,
+    },
+    CollectItem {
+        collected_entity_id: i32,
+        collector_entity_id: i32,
     },
     Destroy {
         entity_ids: Vec<i32>,
