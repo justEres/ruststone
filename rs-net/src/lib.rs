@@ -630,10 +630,7 @@ fn select_prism_account(
                 break;
             }
         }
-
-        if best.is_none() && acc.get("active").and_then(Value::as_bool).unwrap_or(false) {
-            best = Some(acc);
-        }
+        // Default to the first Prism account in the file (predictable and matches UI default).
         if best.is_none() {
             best = Some(acc);
         }

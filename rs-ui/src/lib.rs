@@ -97,11 +97,7 @@ fn connect_ui(
         ui_state.inventory_open = false;
         if !state.auth_accounts_loaded {
             state.auth_accounts = load_prism_accounts(&state.prism_accounts_path);
-            state.selected_auth_account = state
-                .auth_accounts
-                .iter()
-                .position(|a| a.active)
-                .unwrap_or(0);
+            state.selected_auth_account = 0;
             state.auth_accounts_loaded = true;
         }
     }
@@ -151,11 +147,7 @@ fn connect_ui(
                     ui.horizontal(|ui| {
                         if ui.button("Reload Prism Accounts").clicked() {
                             state.auth_accounts = load_prism_accounts(&state.prism_accounts_path);
-                            state.selected_auth_account = state
-                                .auth_accounts
-                                .iter()
-                                .position(|a| a.active)
-                                .unwrap_or(0);
+                            state.selected_auth_account = 0;
                         }
                     });
                     if state.auth_accounts.is_empty() {
@@ -472,7 +464,7 @@ impl Default for ConnectUiState {
         Self {
             username: "RustyPlayer".to_string(),
             server_address: "localhost:25565".to_string(),
-            auth_mode: AuthMode::Offline,
+            auth_mode: AuthMode::Authenticated,
             prism_accounts_path: default_prism_accounts_path(),
             auth_accounts: Vec::new(),
             selected_auth_account: 0,
