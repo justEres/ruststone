@@ -19,7 +19,7 @@ use crate::block_models::{BlockModelResolver, default_model_roots};
 use crate::block_textures::{
     ATLAS_COLUMNS, ATLAS_ROWS, ATLAS_TILE_CAPACITY, AtlasBlockMapping, BiomeTint,
     BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
-    classify_tint, is_transparent_block, uv_for_texture,
+    classify_tint, is_leaves_block, is_transparent_block, uv_for_texture,
 };
 
 const CHUNK_SIZE: i32 = 16;
@@ -1622,18 +1622,16 @@ fn block_at(
     }
 
     let Some(column) = snapshot.columns.get(&(target_chunk_x, target_chunk_z)) else {
-        return block_state_from_id(1);
+        // Neighbor chunk not loaded: treat as air so border faces get generated.
+        return 0;
     };
 
     let section_index = (y / SECTION_HEIGHT) as usize;
     let local_y = (y % SECTION_HEIGHT) as usize;
 
     let Some(section) = column.sections.get(section_index).and_then(|v| v.as_ref()) else {
-        return if column.full {
-            0
-        } else {
-            block_state_from_id(1)
-        };
+        // Unloaded section: treat as air for rendering purposes.
+        return 0;
     };
 
     let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
@@ -1660,6 +1658,9 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
     if is_transparent_block(block_type(block_id)) {
         return MaterialGroup::Transparent;
     }
+    if is_leaves_block(block_type(block_id)) {
+        return MaterialGroup::Cutout;
+    }
     if matches!(
         block_model_kind(block_type(block_id)),
         BlockModelKind::Cross | BlockModelKind::Pane | BlockModelKind::TorchLike
@@ -1676,6 +1677,9 @@ fn is_occluding_block(block_id: u16) -> bool {
     if is_liquid(block_id) {
         return true;
     }
+    if is_leaves_block(block_type(block_id)) {
+        return false;
+    }
     !is_custom_block(block_id)
 }
 
@@ -1685,6 +1689,11 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
     }
     if is_liquid(neighbor_id) {
         return is_liquid(block_id);
+    }
+    // Leaves should not hide adjacent solid faces (so holes show what's behind),
+    // but we still want to cull internal faces between leaves for performance.
+    if is_leaves_block(block_type(neighbor_id)) {
+        return is_leaves_block(block_type(block_id));
     }
     is_occluding_block(neighbor_id)
 }
