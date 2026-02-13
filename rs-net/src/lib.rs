@@ -347,14 +347,14 @@ fn connect(
     let mut conn = Conn::new(target, 47)?;
     let online_account = match auth_mode {
         AuthMode::Offline => None,
-        AuthMode::Authenticated => Some(
-            load_online_account(username, auth_account_uuid).ok_or_else(|| {
+        AuthMode::Authenticated => Some(load_online_account(username, auth_account_uuid).map_err(
+            |err| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "Authenticated mode selected but no valid account could be loaded",
+                    format!("Microsoft authentication failed: {err}"),
                 )
-            })?,
-        ),
+            },
+        )?),
     };
     let effective_username = online_account
         .as_ref()
@@ -445,16 +445,17 @@ fn connect(
     }
 }
 
-const DEFAULT_MSA_CLIENT_ID: &str = "00000000402b5328";
+const MSA_SCOPE: &str = "XboxLive.signin offline_access";
 const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
 const MSA_AUTHORIZE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
-const MSA_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MSA_TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct AuthAccountsFile {
     version: u32,
+    msa_client_id: String,
     accounts: Vec<AuthAccountRecord>,
 }
 
@@ -480,14 +481,11 @@ struct MinecraftProfileResponse {
     name: String,
 }
 
-fn load_online_account(preferred_username: &str, selected_uuid: Option<&str>) -> Option<Account> {
-    match load_online_account_from_msa(preferred_username, selected_uuid) {
-        Ok(account) => Some(account),
-        Err(err) => {
-            println!("Microsoft authentication failed: {}", err);
-            None
-        }
-    }
+fn load_online_account(
+    preferred_username: &str,
+    selected_uuid: Option<&str>,
+) -> Result<Account, Box<dyn std::error::Error>> {
+    load_online_account_from_msa(preferred_username, selected_uuid)
 }
 
 fn load_online_account_from_msa(
@@ -499,6 +497,13 @@ fn load_online_account_from_msa(
     if store.version == 0 {
         store.version = 1;
     }
+    if store.msa_client_id.trim().is_empty() {
+        return Err(format!(
+            "missing MSA client id. Set it in {} under `msa_client_id`",
+            store_path.display()
+        )
+        .into());
+    }
     let selected_refresh = select_account(&store, selected_uuid)
         .map(|record| record.refresh_token.as_str())
         .filter(|token| !token.trim().is_empty());
@@ -507,7 +512,7 @@ fn load_online_account_from_msa(
         .enable_all()
         .build()?;
     let auth = runtime.block_on(authenticate_with_msa(
-        DEFAULT_MSA_CLIENT_ID,
+        &store.msa_client_id,
         preferred_username,
         selected_refresh,
     ))?;
@@ -626,7 +631,7 @@ async fn authenticate_with_device_code(
 > {
     let details: StandardDeviceAuthorizationResponse = oauth
         .exchange_device_code()?
-        .add_scope(Scope::new("XboxLive.signin offline_access".to_string()))
+        .add_scope(Scope::new(MSA_SCOPE.to_string()))
         .request_async(async_http_client)
         .await?;
 
