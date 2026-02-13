@@ -4,12 +4,6 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
-use oauth2::basic::BasicClient;
-use oauth2::devicecode::StandardDeviceAuthorizationResponse;
-use oauth2::reqwest::async_http_client;
-use oauth2::{
-    AuthUrl, ClientId, DeviceAuthorizationUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
-};
 use rand::Rng;
 use rs_protocol::protocol::Conn;
 use rs_protocol::protocol::login::{Account, AccountType};
@@ -445,10 +439,7 @@ fn connect(
     }
 }
 
-const MSA_SCOPE: &str = "XboxLive.signin offline_access";
-const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
-const MSA_AUTHORIZE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
-const MSA_TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+const MSA_TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -499,7 +490,7 @@ fn load_online_account_from_msa(
     }
     if store.msa_client_id.trim().is_empty() {
         return Err(format!(
-            "missing MSA client id. Set it in {} under `msa_client_id`",
+            "missing `msa_client_id` in {}. Import Prism accounts to populate it.",
             store_path.display()
         )
         .into());
@@ -511,11 +502,7 @@ fn load_online_account_from_msa(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let auth = runtime.block_on(authenticate_with_msa(
-        &store.msa_client_id,
-        preferred_username,
-        selected_refresh,
-    ))?;
+    let auth = runtime.block_on(authenticate_with_msa(preferred_username, selected_refresh))?;
 
     upsert_account(
         &mut store,
@@ -546,48 +533,15 @@ fn load_online_account_from_msa(
 }
 
 async fn authenticate_with_msa(
-    client_id: &str,
     preferred_username: &str,
     refresh_token_hint: Option<&str>,
 ) -> Result<OnlineAuthData, Box<dyn std::error::Error>> {
-    let oauth = BasicClient::new(
-        ClientId::new(client_id.to_string()),
-        None,
-        AuthUrl::new(MSA_AUTHORIZE_URL.to_string())?,
-        Some(TokenUrl::new(MSA_TOKEN_URL.to_string())?),
-    )
-    .set_device_authorization_url(DeviceAuthorizationUrl::new(DEVICE_CODE_URL.to_string())?);
-
-    let mut refresh_token = refresh_token_hint.unwrap_or_default().to_string();
-
-    let token = if !refresh_token.is_empty() {
-        match oauth
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
-            .request_async(async_http_client)
-            .await
-        {
-            Ok(token) => {
-                println!("Authenticated via cached refresh token");
-                token
-            }
-            Err(err) => {
-                println!("Refresh token auth failed ({}), starting device auth", err);
-                refresh_token.clear();
-                authenticate_with_device_code(&oauth).await?
-            }
-        }
-    } else {
-        authenticate_with_device_code(&oauth).await?
-    };
-
-    if let Some(new_refresh) = token.refresh_token() {
-        refresh_token = new_refresh.secret().to_string();
-    }
+    let refresh_token = refresh_token_hint.unwrap_or_default().to_string();
     if refresh_token.is_empty() {
-        return Err("missing refresh token after Microsoft auth".into());
+        return Err("no refresh token available. Import Prism accounts (and log into Prism once) to obtain one.".into());
     }
-
-    let ms_access_token = token.access_token().secret().to_string();
+    let client_id = read_msa_client_id()?;
+    let ms_access_token = refresh_microsoft_access_token_v1(&refresh_token, &client_id).await?;
     let http_client = reqwest::Client::new();
     let mc_flow = MinecraftAuthorizationFlow::new(http_client.clone());
     let mc_token = mc_flow.exchange_microsoft_token(&ms_access_token).await?;
@@ -623,29 +577,54 @@ async fn authenticate_with_msa(
     })
 }
 
-async fn authenticate_with_device_code(
-    oauth: &BasicClient,
-) -> Result<
-    oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
-    Box<dyn std::error::Error>,
-> {
-    let details: StandardDeviceAuthorizationResponse = oauth
-        .exchange_device_code()?
-        .add_scope(Scope::new(MSA_SCOPE.to_string()))
-        .request_async(async_http_client)
-        .await?;
+fn read_msa_client_id() -> Result<String, Box<dyn std::error::Error>> {
+    let path = auth_accounts_path();
+    let store = read_auth_accounts(&path).unwrap_or_default();
+    if store.msa_client_id.trim().is_empty() {
+        return Err(format!(
+            "missing `msa_client_id` in {}. Import Prism accounts to populate it.",
+            path.display()
+        )
+        .into());
+    }
+    Ok(store.msa_client_id)
+}
 
-    println!(
-        "Open this URL in your browser:\n{}\nEnter code: {}",
-        details.verification_uri().to_string(),
-        details.user_code().secret()
-    );
+#[derive(Debug, Deserialize)]
+struct MicrosoftTokenResponseV1 {
+    access_token: String,
+}
 
-    let token = oauth
-        .exchange_device_access_token(&details)
-        .request_async(async_http_client, tokio::time::sleep, None)
+async fn refresh_microsoft_access_token_v1(
+    refresh_token: &str,
+    client_id: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let http = reqwest::Client::new();
+    let res = http
+        .post(MSA_TOKEN_URL)
+        .form(&[
+            ("client_id", client_id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("redirect_uri", "https://login.live.com/oauth20_desktop.srf"),
+            ("scope", "service::user.auth.xboxlive.com::MBI_SSL"),
+        ])
+        .send()
         .await?;
-    Ok(token)
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "Microsoft refresh token request failed (status={} body={})",
+            status, body
+        )
+        .into());
+    }
+    let token = res.json::<MicrosoftTokenResponseV1>().await?;
+    if token.access_token.trim().is_empty() {
+        return Err("Microsoft token response missing access_token".into());
+    }
+    Ok(token.access_token)
 }
 
 fn auth_accounts_path() -> PathBuf {
