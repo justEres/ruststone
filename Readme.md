@@ -52,11 +52,11 @@ Legend:
 | --- | --- | --- | --- | --- |
 | Handshake | Serverbound | `Handshake` | Implemented | Sent during connect sequence. |
 | Login | Serverbound | `LoginStart` | Implemented | Username login start. |
-| Login | Serverbound | `EncryptionResponse` | Not implemented | Offline-mode path currently. |
+| Login | Serverbound | `EncryptionResponse` | Implemented | Sent when server requests encryption (online mode). |
 | Login | Clientbound | `SetInitialCompression` | Implemented | Compression threshold applied. |
 | Login | Clientbound | `LoginSuccess_String` / `LoginSuccess_UUID` | Implemented | Transition to play state. |
-| Login | Clientbound | `LoginDisconnect` | Not implemented | Disconnect path not explicitly mapped. |
-| Login | Clientbound | `EncryptionRequest` | Not implemented | Online-mode auth/encryption not wired yet. |
+| Login | Clientbound | `LoginDisconnect` | Implemented | Reported to UI as connect failure. |
+| Login | Clientbound | `EncryptionRequest` | Implemented | Online-mode auth via Prism account selection. |
 
 ### Serverbound Play packets
 
@@ -97,7 +97,7 @@ Legend:
 | `0x01` | `JoinGame_i8` | Implemented | Local player entity id wiring. |
 | `0x02` | `ServerMessage_Position` | Implemented | Chat ingest (`ServerMessage_*` variants). |
 | `0x03` | `TimeUpdate` | Not implemented |  |
-| `0x04` | `EntityEquipment_u16` | Partial | Parsed, ignored. |
+| `0x04` | `EntityEquipment_u16` | Implemented | Remote player held-item is visualized (slot 0); armor slots TODO. |
 | `0x05` | `SpawnPosition` | Not implemented |  |
 | `0x06` | `UpdateHealth` | Implemented | Health/food/death state. |
 | `0x07` | `Respawn_Gamemode` | Not implemented |  |
@@ -106,20 +106,20 @@ Legend:
 | `0x0A` | `EntityUsedBed` | Not implemented |  |
 | `0x0B` | `Animation` | Implemented | Remote animation events parsed and applied to remote visuals. |
 | `0x0C` | `SpawnPlayer_i32_HeldItem` | Implemented | Also handles other spawn player variants. |
-| `0x0D` | `CollectItem_nocount` | Not implemented |  |
+| `0x0D` | `CollectItem_nocount` | Partial | Currently despawns collected item to avoid ghost entities (no fly-to animation yet). |
 | `0x0E` | `SpawnObject_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
 | `0x0F` | `SpawnMob_u8_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
 | `0x10` | `SpawnPainting_NoUUID` | Not implemented |  |
 | `0x11` | `SpawnExperienceOrb_i32` | Implemented | Spawned as placeholder orb visuals. |
-| `0x12` | `EntityVelocity` | Implemented | Local player/server entity knockback velocity applied. |
+| `0x12` | `EntityVelocity` | Partial | Local player knockback velocity applied; remote entity velocity is decoded but not yet simulated. |
 | `0x13` | `EntityDestroy` | Implemented | Also handles `EntityDestroy_u8`. |
 | `0x14` | `Entity` | Not implemented |  |
 | `0x15` | `EntityMove_i8` | Implemented | Also handles alternate move variants. |
 | `0x16` | `EntityLook_VarInt` | Implemented | Also handles alternate look variants. |
 | `0x17` | `EntityLookAndMove_i8` | Implemented | Also handles alternate variants. |
 | `0x18` | `EntityTeleport_i32` | Implemented | Also handles alternate variants. |
-| `0x19` | `EntityHeadLook` | Partial | Parsed, ignored. |
-| `0x1A` | `EntityStatus` | Not implemented |  |
+| `0x19` | `EntityHeadLook` | Implemented | Remote player head yaw is applied independently from body yaw. |
+| `0x1A` | `EntityStatus` | Partial | Hurt animation mapped for common status codes. |
 | `0x1B` | `EntityAttach_leashed` | Not implemented |  |
 | `0x1C` | `EntityMetadata` | Implemented | Parsed for pose flags (sneak) and dropped-item labels from stack metadata. |
 | `0x1D` | `EntityEffect` | Not implemented |  |
