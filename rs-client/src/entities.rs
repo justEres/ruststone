@@ -1407,9 +1407,14 @@ pub fn first_person_viewmodel_system(
         item_textures.request_stack(stack);
     }
 
-    let base_pose_translation = Vec3::new(0.62, -0.58, -0.95);
-    let base_pose_rotation =
-        Quat::from_rotation_x(-0.85) * Quat::from_rotation_y(0.32) * Quat::from_rotation_z(-0.12);
+    let base_pose_rotation = Quat::from_rotation_y(std::f32::consts::PI)
+        * Quat::from_rotation_x(-1.835)
+        * Quat::from_rotation_y(0.32)
+        * Quat::from_rotation_z(-0.12);
+    let hand_offset = Vec3::new(0.0, -(14.0 / 16.0), -(1.0 / 16.0));
+    // Target hand position in viewmodel space; pivot is computed from this and the arm rotation.
+    let hand_target = Vec3::new(0.75, -0.30, -0.75);
+    let base_pose_translation = hand_target - (base_pose_rotation * hand_offset);
 
     // Recreate if missing or if the skin model changed (classic vs slim affects arm geometry).
     if let Ok((root, parts)) = existing.get_single() {
@@ -1471,7 +1476,8 @@ pub fn first_person_viewmodel_system(
     let hand_anchor = commands
         .spawn((
             Name::new("FirstPersonHandAnchor"),
-            Transform::from_translation(Vec3::new(0.0, 10.0 / 16.0, -(2.0 / 16.0))),
+            // Hand at the bottom of the arm (12px from the shoulder pivot).
+            Transform::from_translation(hand_offset),
             GlobalTransform::default(),
             Visibility::Inherited,
             InheritedVisibility::default(),
@@ -1495,8 +1501,10 @@ pub fn first_person_viewmodel_system(
             Mesh3d(item_sprite_mesh.0.clone()),
             MeshMaterial3d(item_placeholder),
             Transform {
-                translation: Vec3::ZERO,
-                rotation: Quat::from_rotation_y(std::f32::consts::PI) * Quat::from_rotation_x(0.35),
+                translation: Vec3::new(0.05, 0.1, 0.38),
+                rotation: Quat::from_rotation_y(std::f32::consts::PI)
+                    * Quat::from_rotation_x(0.35)
+                    * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
                 scale: Vec3::splat(0.72),
             },
             GlobalTransform::default(),
@@ -1543,18 +1551,22 @@ pub fn animate_first_person_viewmodel_system(
     };
 
     let (s, s2) = swing;
-    let base_t = Vec3::new(0.62, -0.58, -0.95);
-    let base_r =
-        Quat::from_rotation_x(-0.85) * Quat::from_rotation_y(0.32) * Quat::from_rotation_z(-0.12);
+    let base_r = Quat::from_rotation_y(std::f32::consts::PI)
+        * Quat::from_rotation_x(-1.835)
+        * Quat::from_rotation_y(0.32)
+        * Quat::from_rotation_z(-0.12);
+    let hand_offset = Vec3::new(0.0, -(14.0 / 16.0), -(1.0 / 16.0));
+    let hand_target = Vec3::new(0.75, -0.30, -0.75);
+    let base_t = hand_target - (base_r * hand_offset);
 
     // Small idle damping so it doesn't snap if the transform was recreated.
     let alpha = 1.0 - (-18.0 * dt).exp();
     if let Ok(mut arm_t) = transforms.get_mut(parts.arm_right) {
         let target_t = base_t;
         let target_r = base_r
-            * Quat::from_rotation_x(-1.25 * s)
-            * Quat::from_rotation_y(0.55 * s2)
-            * Quat::from_rotation_z(-0.25 * s2);
+            * Quat::from_rotation_x(1.25 * s)
+            * Quat::from_rotation_y(-0.55 * s2)
+            * Quat::from_rotation_z(0.25 * s2);
         let current_t = arm_t.translation;
         arm_t.translation = current_t + (target_t - current_t) * alpha;
         arm_t.rotation = arm_t.rotation.slerp(target_r, alpha);
@@ -2255,8 +2267,8 @@ fn limb_child_offset() -> Vec3 {
 }
 
 fn first_person_arm_child_offset() -> Vec3 {
-    // Match ModelBiped arm box (-2..10) so pivot is at shoulder.
-    Vec3::new(0.0, -(2.0 / 16.0), 0.0)
+    // Pivot at shoulder; cube extends downward (12px total).
+    Vec3::new(0.0, -(6.0 / 16.0), 0.0)
 }
 
 fn player_head_pivot_y_sneak(amount: f32) -> f32 {

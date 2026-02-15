@@ -252,7 +252,8 @@ fn build_item_quad_mesh() -> Mesh {
         [-0.5, 0.5, 0.0],
     ];
     let normals = vec![[0.0, 0.0, 1.0]; 4];
-    let uvs = vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    // Rotate sprite UVs 90° so item textures render vertically.
+    let uvs = vec![[1.0, 1.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0]];
     let indices = vec![0u32, 1, 2, 0, 2, 3];
 
     let mut mesh = Mesh::new(
