@@ -139,6 +139,7 @@ fn main() {
         .insert_resource(sim::SimReady::default())
         .insert_resource(sim::DebugUiState::default())
         .insert_resource(sim::ZoomState::default())
+        .insert_resource(sim::CameraPerspectiveState::default())
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
@@ -174,6 +175,7 @@ fn main() {
             Update,
             (
                 sim_systems::debug_toggle_system,
+                sim_systems::camera_perspective_toggle_system,
                 inventory_systems::hotbar_input_system,
                 inventory_systems::inventory_transaction_ack_system,
                 sim_systems::input_collect_system,
@@ -188,8 +190,15 @@ fn main() {
                     .after(entity_model::entity_texture_cache_tick),
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
                 entities::spawn_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
+                entities::apply_local_player_model_visibility_system
+                    .after(entities::spawn_local_player_model_system),
                 entities::update_local_player_skin_system
                     .after(entities::spawn_local_player_model_system),
                 entities::animate_local_player_model_system

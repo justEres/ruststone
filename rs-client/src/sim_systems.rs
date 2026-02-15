@@ -15,8 +15,8 @@ use crate::sim::movement::{WorldCollision, effective_sprint, simulate_tick};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use crate::sim::{
-    CurrentInput, DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
-    VisualCorrectionOffset, ZoomState,
+    CameraPerspectiveMode, CameraPerspectiveState, CurrentInput, DebugStats, DebugUiState,
+    PredictedFrame, SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
@@ -214,6 +214,7 @@ pub fn local_held_item_view_system(
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
     render_debug: Res<RenderDebugSettings>,
+    perspective: Res<CameraPerspectiveState>,
     inventory: Res<InventoryState>,
     mut item_textures: ResMut<ItemTextureCache>,
     item_sprite_mesh: Res<ItemSpriteMesh>,
@@ -227,6 +228,7 @@ pub fn local_held_item_view_system(
         || ui_state.inventory_open
         || player_status.dead
         || !render_debug.render_held_items
+        || !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson)
     {
         for e in existing.iter() {
             commands.entity(e).despawn_recursive();
@@ -349,6 +351,26 @@ pub fn debug_toggle_system(
     if keys.just_pressed(KeyCode::KeyH) {
         hitbox_debug.enabled = !hitbox_debug.enabled;
     }
+}
+
+pub fn camera_perspective_toggle_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    ui_state: Res<UiState>,
+    mut perspective: ResMut<CameraPerspectiveState>,
+) {
+    if ui_state.chat_open || ui_state.inventory_open {
+        return;
+    }
+
+    if !keys.just_pressed(KeyCode::F5) {
+        return;
+    }
+
+    perspective.mode = match perspective.mode {
+        CameraPerspectiveMode::FirstPerson => CameraPerspectiveMode::ThirdPersonBack,
+        CameraPerspectiveMode::ThirdPersonBack => CameraPerspectiveMode::ThirdPersonFront,
+        CameraPerspectiveMode::ThirdPersonFront => CameraPerspectiveMode::FirstPerson,
+    };
 }
 
 pub fn fixed_sim_tick_system(
@@ -523,11 +545,14 @@ pub fn visual_smoothing_system(
 pub fn apply_visual_transform_system(
     fixed_time: Res<Time<Fixed>>,
     input: Res<CurrentInput>,
+    perspective: Res<CameraPerspectiveState>,
     sim_render: Res<SimRenderState>,
     sim_state: Res<SimState>,
     offset: Res<VisualCorrectionOffset>,
+    collision_map: Res<WorldCollisionMap>,
     mut player_query: Query<(&mut Transform, &mut LookAngles), With<Player>>,
     mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    mut eye_height: Local<f32>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
@@ -542,17 +567,80 @@ pub fn apply_visual_transform_system(
         look.pitch = input.0.pitch;
         player_transform.rotation = Quat::from_axis_angle(Vec3::Y, look.yaw);
         if let Ok(mut camera_transform) = camera_query.get_single_mut() {
-            camera_transform.rotation = Quat::from_axis_angle(Vec3::X, look.pitch);
             let target_eye_height = if input.0.sneak {
                 EYE_HEIGHT_SNEAK
             } else {
                 EYE_HEIGHT_STAND
             };
-            camera_transform.translation.y +=
-                (target_eye_height - camera_transform.translation.y) * 0.5;
+            if *eye_height <= 0.0 {
+                *eye_height = target_eye_height;
+            } else {
+                *eye_height += (target_eye_height - *eye_height) * 0.5;
+            }
+
+            let pitch_rot = Quat::from_axis_angle(Vec3::X, look.pitch);
+            let base_eye_local = Vec3::new(0.0, *eye_height, 0.0);
+
+            let (mut cam_local, cam_local_rot) = match perspective.mode {
+                CameraPerspectiveMode::FirstPerson => (base_eye_local, pitch_rot),
+                CameraPerspectiveMode::ThirdPersonBack => {
+                    let offset_local =
+                        pitch_rot * Vec3::new(0.0, 0.0, perspective.third_person_distance);
+                    (base_eye_local + offset_local, pitch_rot)
+                }
+                CameraPerspectiveMode::ThirdPersonFront => {
+                    let offset_local =
+                        pitch_rot * Vec3::new(0.0, 0.0, -perspective.third_person_distance);
+                    (
+                        base_eye_local + offset_local,
+                        pitch_rot * Quat::from_rotation_y(std::f32::consts::PI),
+                    )
+                }
+            };
+
+            // Third-person camera collision: shorten the camera distance when a solid block is in the way.
+            if !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson) {
+                let player_rot = player_transform.rotation;
+                let anchor_world = player_transform.translation + Vec3::Y * *eye_height;
+                let desired_world = player_transform.translation + (player_rot * cam_local);
+                let clipped_world =
+                    clip_camera_to_world(&collision_map, anchor_world, desired_world);
+                cam_local = player_rot.inverse() * (clipped_world - player_transform.translation);
+            }
+
+            camera_transform.translation = cam_local;
+            camera_transform.rotation = cam_local_rot;
         }
     }
     timings.apply_transform_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+fn clip_camera_to_world(world: &WorldCollisionMap, anchor: Vec3, desired: Vec3) -> Vec3 {
+    let delta = desired - anchor;
+    let dist = delta.length();
+    if dist <= 0.001 {
+        return desired;
+    }
+
+    let dir = delta / dist;
+    let step = 0.08f32;
+    let mut t = step;
+    let mut prev_cell = anchor.floor().as_ivec3();
+    while t <= dist {
+        let point = anchor + dir * t;
+        let cell = point.floor().as_ivec3();
+        if cell != prev_cell {
+            let block_state = world.block_at(cell.x, cell.y, cell.z);
+            if crate::sim::collision::is_solid(block_state) {
+                // Keep a small offset so the camera doesn't sit exactly on the block face.
+                return anchor + dir * (t - 0.12).max(0.0);
+            }
+            prev_cell = cell;
+        }
+        t += step;
+    }
+
+    desired
 }
 
 pub fn world_interaction_system(
