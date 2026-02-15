@@ -13,6 +13,7 @@ use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
 
 mod entities;
+mod entity_model;
 mod inventory_systems;
 mod item_textures;
 mod message_handler;
@@ -145,6 +146,7 @@ fn main() {
         .insert_resource(sim_systems::FrameTimingState::default())
         .insert_resource(sim_systems::EntityHitboxDebug::default())
         .insert_resource(item_textures::ItemTextureCache::default())
+        .insert_resource(entity_model::EntityTextureCache::default())
         .add_systems(First, sim_systems::frame_timing_start)
         .add_systems(
             Update,
@@ -164,6 +166,7 @@ fn main() {
                     .after(entities::apply_remote_entity_events)
                     .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
                 entities::animate_remote_player_models.after(entities::smooth_remote_entity_motion),
+                entities::animate_remote_biped_models.after(entities::smooth_remote_entity_motion),
                 entities::billboard_item_sprites.after(entities::smooth_remote_entity_motion),
             ),
         )
@@ -177,9 +180,12 @@ fn main() {
                 sim_systems::camera_zoom_system
                     .after(rs_render::debug::apply_render_debug_settings),
                 item_textures::item_texture_cache_tick,
+                entity_model::entity_texture_cache_tick,
                 entities::apply_held_item_visibility_system,
                 entities::apply_item_sprite_textures_system
                     .after(item_textures::item_texture_cache_tick),
+                entities::apply_entity_model_textures_system
+                    .after(entity_model::entity_texture_cache_tick),
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
                 sim_systems::local_held_item_view_system
