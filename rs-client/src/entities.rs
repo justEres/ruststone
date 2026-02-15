@@ -231,6 +231,9 @@ pub struct LocalPlayerAnimation {
     pub hurt_progress: f32,
 }
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LocalPlayerSkinModel(pub PlayerSkinModel);
+
 #[derive(Component, Debug, Clone)]
 pub struct LocalPlayerSkinMaterial(pub Handle<StandardMaterial>);
 
@@ -1153,6 +1156,7 @@ pub fn spawn_local_player_model_system(
             InheritedVisibility::default(),
             ViewVisibility::default(),
             LocalPlayerSkinMaterial(base_mat.clone()),
+            LocalPlayerSkinModel(skin_model),
         ))
         .id();
     commands.entity(player_entity).add_child(model_root);
@@ -1185,19 +1189,40 @@ pub fn spawn_local_player_model_system(
 pub fn apply_local_player_model_visibility_system(
     render_debug: Res<RenderDebugSettings>,
     perspective: Res<CameraPerspectiveState>,
-    mut query: Query<&mut Visibility, With<LocalPlayerModel>>,
+    mut query: Query<(&LocalPlayerModelParts, &mut Visibility), With<LocalPlayerModel>>,
+    mut part_vis: Query<&mut Visibility, Without<LocalPlayerModel>>,
 ) {
-    let Ok(mut vis) = query.get_single_mut() else {
+    let Ok((parts, mut root_vis)) = query.get_single_mut() else {
         return;
     };
 
     let should_show = render_debug.render_self_model
         && !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
-    *vis = if should_show {
+    *root_vis = if should_show {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
+
+    // Redundantly toggle part pivots so first-person never renders any of the model, even if
+    // some other system later overrides the root visibility.
+    let target_part_vis = if should_show {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for part in [
+        parts.head,
+        parts.body,
+        parts.arm_left,
+        parts.arm_right,
+        parts.leg_left,
+        parts.leg_right,
+    ] {
+        if let Ok(mut v) = part_vis.get_mut(part) {
+            *v = target_part_vis;
+        }
+    }
 }
 
 pub fn update_local_player_skin_system(
@@ -1261,7 +1286,14 @@ pub fn animate_local_player_model_system(
     input: Res<crate::sim::CurrentInput>,
     sim_state: Res<crate::sim::SimState>,
     render_debug: Res<RenderDebugSettings>,
-    mut roots: Query<(&LocalPlayerModelParts, &mut LocalPlayerAnimation), With<LocalPlayerModel>>,
+    mut roots: Query<
+        (
+            &LocalPlayerModelParts,
+            &LocalPlayerSkinModel,
+            &mut LocalPlayerAnimation,
+        ),
+        With<LocalPlayerModel>,
+    >,
     mut part_transforms: Query<&mut Transform, Without<LocalPlayerModel>>,
     player_query: Query<&LookAngles, With<Player>>,
 ) {
@@ -1272,7 +1304,7 @@ pub fn animate_local_player_model_system(
     let Ok(look) = player_query.get_single() else {
         return;
     };
-    let Ok((parts, mut anim)) = roots.get_single_mut() else {
+    let Ok((parts, skin_model, mut anim)) = roots.get_single_mut() else {
         return;
     };
 
@@ -1284,6 +1316,7 @@ pub fn animate_local_player_model_system(
 
     let swing = anim.walk_phase.sin() * 0.7 * stride;
     let sneak_amount = if input.0.sneak { 1.0 } else { 0.0 };
+    let arm_x = player_arm_pivot_x(skin_model.0);
 
     // Head follows camera pitch; yaw comes from the player root rotation.
     if let Ok(mut t) = part_transforms.get_mut(parts.head) {
@@ -1295,11 +1328,11 @@ pub fn animate_local_player_model_system(
         t.rotation = Quat::from_rotation_x(0.5 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-        t.translation = Vec3::new(-0.375, 1.125, 0.0);
+        t.translation = Vec3::new(-arm_x, 1.125, 0.0);
         t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-        t.translation = Vec3::new(0.375, 1.125, 0.0);
+        t.translation = Vec3::new(arm_x, 1.125, 0.0);
         t.rotation = Quat::from_rotation_x(-swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
@@ -1421,6 +1454,7 @@ pub fn animate_remote_player_models(
             &RemoteEntityLook,
             &RemotePoseState,
             &RemotePlayerModelParts,
+            &RemotePlayerSkinModel,
             &mut RemotePlayerAnimation,
         ),
         With<RemotePlayer>,
@@ -1428,7 +1462,7 @@ pub fn animate_remote_player_models(
     mut part_transforms: Query<&mut Transform, Without<RemotePlayer>>,
 ) {
     let dt = time.delta_secs().max(1e-4);
-    for (root_transform, look, pose, parts, mut anim) in &mut roots {
+    for (root_transform, look, pose, parts, skin_model, mut anim) in &mut roots {
         let pos = root_transform.translation;
         let horizontal_delta = Vec2::new(pos.x - anim.previous_pos.x, pos.z - anim.previous_pos.z);
         let speed = (horizontal_delta.length() / dt).min(8.0);
@@ -1454,6 +1488,7 @@ pub fn animate_remote_player_models(
         } else {
             0.0
         };
+        let arm_x = player_arm_pivot_x(skin_model.0);
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
             t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
@@ -1466,11 +1501,11 @@ pub fn animate_remote_player_models(
                 Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-            t.translation = Vec3::new(-0.375, 1.125, 0.0);
+            t.translation = Vec3::new(-arm_x, 1.125, 0.0);
             t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-            t.translation = Vec3::new(0.375, 1.125, 0.0);
+            t.translation = Vec3::new(arm_x, 1.125, 0.0);
             t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
@@ -1646,7 +1681,7 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_left_arm_meshes(skin_model, texture_debug),
-        Vec3::new(-0.375, 1.125, 0.0),
+        Vec3::new(-player_arm_pivot_x(skin_model), 1.125, 0.0),
     );
     let arm_right = spawn_player_part(
         commands,
@@ -1654,7 +1689,7 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_right_arm_meshes(skin_model, texture_debug),
-        Vec3::new(0.375, 1.125, 0.0),
+        Vec3::new(player_arm_pivot_x(skin_model), 1.125, 0.0),
     );
     let leg_left = spawn_player_part(
         commands,
@@ -1716,7 +1751,7 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_left_arm_meshes(skin_model, texture_debug),
-        Vec3::new(-0.375, 1.125, 0.0),
+        Vec3::new(-player_arm_pivot_x(skin_model), 1.125, 0.0),
     );
     let arm_right = spawn_player_part(
         commands,
@@ -1724,7 +1759,7 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_right_arm_meshes(skin_model, texture_debug),
-        Vec3::new(0.375, 1.125, 0.0),
+        Vec3::new(player_arm_pivot_x(skin_model), 1.125, 0.0),
     );
     let leg_left = spawn_player_part(
         commands,
@@ -1812,6 +1847,14 @@ fn player_body_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
             texture_debug,
         ),
     ]
+}
+
+fn player_arm_pivot_x(skin_model: PlayerSkinModel) -> f32 {
+    match skin_model {
+        // Vanilla `ModelPlayer` uses 3px arms and shifts them in by 0.5px.
+        PlayerSkinModel::Slim => 5.5 / 16.0,
+        PlayerSkinModel::Classic => 6.0 / 16.0,
+    }
 }
 
 fn player_right_arm_meshes(

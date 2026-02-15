@@ -37,6 +37,11 @@ impl Default for CameraPerspectiveState {
 }
 
 #[derive(Debug, Default, Resource)]
+pub struct CameraPerspectiveAltHold {
+    pub saved_mode: Option<CameraPerspectiveMode>,
+}
+
+#[derive(Debug, Default, Resource)]
 pub struct SimClock {
     pub tick: u32,
 }

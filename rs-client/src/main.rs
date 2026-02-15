@@ -140,6 +140,7 @@ fn main() {
         .insert_resource(sim::DebugUiState::default())
         .insert_resource(sim::ZoomState::default())
         .insert_resource(sim::CameraPerspectiveState::default())
+        .insert_resource(sim::CameraPerspectiveAltHold::default())
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
@@ -176,6 +177,7 @@ fn main() {
             (
                 sim_systems::debug_toggle_system,
                 sim_systems::camera_perspective_toggle_system,
+                sim_systems::camera_perspective_alt_hold_system,
                 inventory_systems::hotbar_input_system,
                 inventory_systems::inventory_transaction_ack_system,
                 sim_systems::input_collect_system,
