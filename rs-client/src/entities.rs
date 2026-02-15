@@ -1436,11 +1436,7 @@ pub fn first_person_viewmodel_system(
         .spawn((
             Name::new("FirstPersonViewModel"),
             FirstPersonViewModel,
-            Transform {
-                translation: base_pose_translation,
-                rotation: base_pose_rotation,
-                ..Default::default()
-            },
+            Transform::IDENTITY,
             GlobalTransform::default(),
             Visibility::Inherited,
             InheritedVisibility::default(),
@@ -1460,15 +1456,22 @@ pub fn first_person_viewmodel_system(
         &mut materials,
         &skin_mat.0,
         player_right_arm_meshes(skin_model.0, &texture_debug),
-        Vec3::ZERO,
+        base_pose_translation,
         arm_child_offset,
     );
+    if let Ok(mut arm_cmd) = commands.get_entity(arm_right) {
+        arm_cmd.insert(Transform {
+            translation: base_pose_translation,
+            rotation: base_pose_rotation,
+            ..Default::default()
+        });
+    }
     commands.entity(root).add_child(arm_right);
 
     let hand_anchor = commands
         .spawn((
             Name::new("FirstPersonHandAnchor"),
-            Transform::from_translation(Vec3::new(-1.0 / 16.0, -(12.0 / 16.0), -(2.0 / 16.0))),
+            Transform::from_translation(Vec3::new(0.0, -(10.5 / 16.0), -(2.5 / 16.0))),
             GlobalTransform::default(),
             Visibility::Inherited,
             InheritedVisibility::default(),
@@ -1492,7 +1495,7 @@ pub fn first_person_viewmodel_system(
             Mesh3d(item_sprite_mesh.0.clone()),
             MeshMaterial3d(item_placeholder),
             Transform {
-                translation: Vec3::ZERO,
+                translation: Vec3::new(0.0, -(0.5 / 16.0), -(1.0 / 16.0)),
                 rotation: Quat::from_rotation_y(std::f32::consts::PI) * Quat::from_rotation_x(0.35),
                 scale: Vec3::splat(0.72),
             },
@@ -1521,10 +1524,10 @@ pub fn first_person_viewmodel_system(
 pub fn animate_first_person_viewmodel_system(
     time: Res<Time>,
     swing_state: Res<LocalArmSwing>,
-    query: Query<Entity, With<FirstPersonViewModel>>,
+    query: Query<&FirstPersonViewModelParts, With<FirstPersonViewModel>>,
     mut transforms: Query<&mut Transform>,
 ) {
-    let Ok(root) = query.get_single() else {
+    let Ok(parts) = query.get_single() else {
         return;
     };
 
@@ -1546,15 +1549,15 @@ pub fn animate_first_person_viewmodel_system(
 
     // Small idle damping so it doesn't snap if the transform was recreated.
     let alpha = 1.0 - (-18.0 * dt).exp();
-    if let Ok(mut root_t) = transforms.get_mut(root) {
-        let target_t = base_t + Vec3::new(0.08 * s2, 0.04 * s, 0.02 * s2);
+    if let Ok(mut arm_t) = transforms.get_mut(parts.arm_right) {
+        let target_t = base_t;
         let target_r = base_r
             * Quat::from_rotation_x(-1.25 * s)
             * Quat::from_rotation_y(0.55 * s2)
             * Quat::from_rotation_z(-0.25 * s2);
-        let current_t = root_t.translation;
-        root_t.translation = current_t + (target_t - current_t) * alpha;
-        root_t.rotation = root_t.rotation.slerp(target_r, alpha);
+        let current_t = arm_t.translation;
+        arm_t.translation = current_t + (target_t - current_t) * alpha;
+        arm_t.rotation = arm_t.rotation.slerp(target_r, alpha);
     }
 }
 
