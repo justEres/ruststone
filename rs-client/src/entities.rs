@@ -1447,7 +1447,7 @@ pub fn first_person_viewmodel_system(
 
     let arm_child_offset = Vec3::new(
         player_arm_child_offset_x(skin_model.0, true),
-        limb_child_offset().y,
+        first_person_arm_child_offset().y,
         0.0,
     );
     let arm_right = spawn_player_part(
@@ -1471,7 +1471,7 @@ pub fn first_person_viewmodel_system(
     let hand_anchor = commands
         .spawn((
             Name::new("FirstPersonHandAnchor"),
-            Transform::from_translation(Vec3::new(0.0, -(10.5 / 16.0), -(2.5 / 16.0))),
+            Transform::from_translation(Vec3::new(0.0, 10.0 / 16.0, -(2.0 / 16.0))),
             GlobalTransform::default(),
             Visibility::Inherited,
             InheritedVisibility::default(),
@@ -1495,7 +1495,7 @@ pub fn first_person_viewmodel_system(
             Mesh3d(item_sprite_mesh.0.clone()),
             MeshMaterial3d(item_placeholder),
             Transform {
-                translation: Vec3::new(0.0, -(0.5 / 16.0), -(1.0 / 16.0)),
+                translation: Vec3::ZERO,
                 rotation: Quat::from_rotation_y(std::f32::consts::PI) * Quat::from_rotation_x(0.35),
                 scale: Vec3::splat(0.72),
             },
@@ -2252,6 +2252,11 @@ fn torso_child_offset() -> Vec3 {
 fn limb_child_offset() -> Vec3 {
     // Pivot at top; cube extends downward.
     Vec3::new(0.0, -(6.0 / 16.0), 0.0)
+}
+
+fn first_person_arm_child_offset() -> Vec3 {
+    // Match ModelBiped arm box (-2..10) so pivot is at shoulder.
+    Vec3::new(0.0, -(2.0 / 16.0), 0.0)
 }
 
 fn player_head_pivot_y_sneak(amount: f32) -> f32 {
