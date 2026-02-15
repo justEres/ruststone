@@ -8,6 +8,34 @@ pub mod types;
 
 pub use types::{InputState, PlayerSimState, PredictedFrame};
 
+#[derive(Debug, Resource, Clone, Copy, PartialEq, Eq)]
+pub enum CameraPerspectiveMode {
+    FirstPerson,
+    ThirdPersonBack,
+    ThirdPersonFront,
+}
+
+impl Default for CameraPerspectiveMode {
+    fn default() -> Self {
+        Self::FirstPerson
+    }
+}
+
+#[derive(Debug, Resource, Clone, Copy)]
+pub struct CameraPerspectiveState {
+    pub mode: CameraPerspectiveMode,
+    pub third_person_distance: f32,
+}
+
+impl Default for CameraPerspectiveState {
+    fn default() -> Self {
+        Self {
+            mode: CameraPerspectiveMode::FirstPerson,
+            third_person_distance: 4.0,
+        }
+    }
+}
+
 #[derive(Debug, Default, Resource)]
 pub struct SimClock {
     pub tick: u32,

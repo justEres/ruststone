@@ -24,6 +24,7 @@ use crate::entity_model::{
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
+use crate::sim::{CameraPerspectiveMode, CameraPerspectiveState};
 use rs_render::RenderDebugSettings;
 use rs_render::{LookAngles, Player};
 use rs_ui::ConnectUiState;
@@ -1171,9 +1172,6 @@ pub fn spawn_local_player_model_system(
     commands.entity(model_root).add_child(parts.leg_left);
     commands.entity(model_root).add_child(parts.leg_right);
 
-    // First-person: hide head so we don't stare at the inside of our skull.
-    commands.entity(parts.head).insert(Visibility::Hidden);
-
     commands.entity(model_root).insert((
         parts,
         LocalPlayerAnimation {
@@ -1182,6 +1180,24 @@ pub fn spawn_local_player_model_system(
             hurt_progress: 1.0,
         },
     ));
+}
+
+pub fn apply_local_player_model_visibility_system(
+    render_debug: Res<RenderDebugSettings>,
+    perspective: Res<CameraPerspectiveState>,
+    mut query: Query<&mut Visibility, With<LocalPlayerModel>>,
+) {
+    let Ok(mut vis) = query.get_single_mut() else {
+        return;
+    };
+
+    let should_show = render_debug.render_self_model
+        && !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
+    *vis = if should_show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
 }
 
 pub fn update_local_player_skin_system(
@@ -1202,11 +1218,9 @@ pub fn update_local_player_skin_system(
     let Some(material) = materials.get_mut(&local_mat.0) else {
         return;
     };
-    if material.base_color_texture.is_some() {
-        return;
-    }
 
-    // Try online skin first.
+    // Prefer online skin; fall back to steve from the pack until it's available.
+    let mut desired: Option<Handle<Image>> = None;
     if connect_ui.auth_mode == rs_utils::AuthMode::Authenticated
         && connect_ui.selected_auth_account < connect_ui.auth_accounts.len()
     {
@@ -1221,9 +1235,7 @@ pub fn update_local_player_skin_system(
                 }
                 && let Some(tex) = downloader.skin_handle(url)
             {
-                material.base_color_texture = Some(tex);
-                material.base_color = Color::WHITE;
-                return;
+                desired = Some(tex);
             }
         }
     }
@@ -1231,8 +1243,15 @@ pub fn update_local_player_skin_system(
     // Fall back to steve from the pack when available.
     const STEVE: &str = "entity/steve.png";
     entity_textures.request(STEVE);
-    if let Some(tex) = entity_textures.texture(STEVE) {
-        material.base_color_texture = Some(tex);
+    if desired.is_none() {
+        desired = entity_textures.texture(STEVE);
+    }
+
+    let Some(desired) = desired else {
+        return;
+    };
+    if material.base_color_texture.as_ref() != Some(&desired) {
+        material.base_color_texture = Some(desired);
         material.base_color = Color::WHITE;
     }
 }
