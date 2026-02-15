@@ -1154,6 +1154,7 @@ pub fn debug_overlay_system(
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
                 ui.checkbox(&mut render_debug.render_held_items, "Render held items");
+                ui.checkbox(&mut render_debug.render_self_model, "Render self model");
                 ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
                 ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
                 ui.checkbox(&mut render_debug.show_look_info, "Look info");
