@@ -163,7 +163,8 @@ fn add_cube(
     let uv4 = |u1: u32, v1: u32, u2: u32, v2: u32| -> [[f32; 2]; 4] {
         let to_uv = |uu: u32, vv: u32| -> [f32; 2] {
             let u = uu as f32 / tex_w as f32;
-            let v = 1.0 - (vv as f32 / tex_h as f32);
+            // Bevy/WGPU uses top-left UV convention with our texture data.
+            let v = vv as f32 / tex_h as f32;
             [u, v]
         };
         [to_uv(u2, v1), to_uv(u1, v1), to_uv(u1, v2), to_uv(u2, v2)]
