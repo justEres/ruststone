@@ -18,6 +18,11 @@ use rs_utils::{
 };
 use tracing::{info, warn};
 
+use crate::entity_model::{
+    BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL, BIPED_RIGHT_ARM,
+    BIPED_RIGHT_LEG, EntityTextureCache, EntityTexturePath, spawn_model,
+};
+
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use rs_render::RenderDebugSettings;
 
@@ -59,6 +64,7 @@ pub(crate) struct RemoteEntityApplyParams<'w, 's> {
     smoothing_query: Query<'w, 's, &'static mut RemoteMotionSmoothing>,
     entity_query: Query<'w, 's, (&'static mut RemoteEntity, &'static mut RemoteEntityLook)>,
     player_anim_query: Query<'w, 's, &'static mut RemotePlayerAnimation>,
+    biped_anim_query: Query<'w, 's, &'static mut RemoteBipedAnimation>,
     name_query: Query<'w, 's, &'static mut RemoteEntityName>,
     visual_query: Query<'w, 's, &'static RemoteVisual>,
     player_parts_query: Query<'w, 's, &'static RemotePlayerModelParts, With<RemotePlayer>>,
@@ -202,6 +208,25 @@ pub struct RemotePoseState {
     pub sneaking: bool,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct RemoteBipedModelParts {
+    pub model_root: Entity,
+    pub head: Entity,
+    pub body: Entity,
+    pub arm_right: Entity,
+    pub arm_left: Entity,
+    pub leg_right: Entity,
+    pub leg_left: Entity,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteBipedAnimation {
+    pub previous_pos: Vec3,
+    pub limb_swing: f32,
+    pub limb_swing_amount: f32,
+    pub swing_progress: f32,
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteMotionSmoothing {
     pub target_translation: Vec3,
@@ -251,6 +276,7 @@ pub fn apply_remote_entity_events(
     mut registry: ResMut<RemoteEntityRegistry>,
     mut skin_downloader: ResMut<RemoteSkinDownloader>,
     mut item_textures: ResMut<ItemTextureCache>,
+    mut entity_textures: ResMut<EntityTextureCache>,
     item_sprite_mesh: Res<ItemSpriteMesh>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -358,16 +384,26 @@ pub fn apply_remote_entity_events(
                         .unwrap_or_else(|| kind_label(kind).to_string())
                 };
 
+                let biped_mob = match kind {
+                    NetEntityKind::Mob(m) if mob_uses_biped_model(m) => Some(m),
+                    _ => None,
+                };
+                let use_player_rot = kind == NetEntityKind::Player || biped_mob.is_some();
+
                 let spawn_cmd = commands.spawn((
                     Name::new(format!("RemoteEntity[{entity_id}]")),
                     Transform {
                         translation: pos + Vec3::Y * visual.y_offset,
-                        rotation: if kind == NetEntityKind::Player {
+                        rotation: if use_player_rot {
                             player_root_rotation(yaw)
                         } else {
                             Quat::from_axis_angle(Vec3::Y, yaw)
                         },
-                        scale: spec.scale,
+                        scale: if biped_mob.is_some() {
+                            Vec3::ONE
+                        } else {
+                            spec.scale
+                        },
                     },
                     GlobalTransform::default(),
                     Visibility::Visible,
@@ -434,6 +470,49 @@ pub fn apply_remote_entity_events(
                             MeshMaterial3d(material),
                             RemoteItemSprite,
                             ItemSpin::default(),
+                        ));
+                    } else if let Some(mob) = biped_mob {
+                        let Some(texture_path) = mob_texture_path(mob) else {
+                            // Shouldn't happen since `biped_mob` is gated above.
+                            continue;
+                        };
+                        entity_textures.request(texture_path);
+                        let material =
+                            entity_textures.material(texture_path).unwrap_or_else(|| {
+                                materials.add(StandardMaterial {
+                                    base_color: Color::srgb(1.0, 0.0, 1.0),
+                                    alpha_mode: AlphaMode::Mask(0.5),
+                                    unlit: true,
+                                    perceptual_roughness: 1.0,
+                                    metallic: 0.0,
+                                    ..Default::default()
+                                })
+                            });
+
+                        let spawned = spawn_model(
+                            &mut commands,
+                            &mut meshes,
+                            material,
+                            &BIPED_MODEL,
+                            texture_path,
+                        );
+                        commands.entity(root).add_child(spawned.root);
+                        commands.entity(root).insert((
+                            RemoteBipedModelParts {
+                                model_root: spawned.root,
+                                head: spawned.parts[BIPED_HEAD],
+                                body: spawned.parts[BIPED_BODY],
+                                arm_right: spawned.parts[BIPED_RIGHT_ARM],
+                                arm_left: spawned.parts[BIPED_LEFT_ARM],
+                                leg_right: spawned.parts[BIPED_RIGHT_LEG],
+                                leg_left: spawned.parts[BIPED_LEFT_LEG],
+                            },
+                            RemoteBipedAnimation {
+                                previous_pos: pos,
+                                limb_swing: 0.0,
+                                limb_swing_amount: 0.0,
+                                swing_progress: 1.0,
+                            },
                         ));
                     } else {
                         let mesh = meshes.add(match spec.mesh {
@@ -574,7 +653,9 @@ pub fn apply_remote_entity_events(
                             transform.translation = target;
                         }
                         if let Ok(mut transform) = params.transform_query.get_mut(entity) {
-                            transform.rotation = if remote_entity.kind == NetEntityKind::Player {
+                            let use_player_rot = remote_entity.kind == NetEntityKind::Player
+                                || matches!(remote_entity.kind, NetEntityKind::Mob(m) if mob_uses_biped_model(m));
+                            transform.rotation = if use_player_rot {
                                 player_root_rotation(yaw)
                             } else {
                                 Quat::from_axis_angle(Vec3::Y, yaw)
@@ -675,13 +756,14 @@ pub fn apply_remote_entity_events(
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
                     if let Ok(mut anim) = params.player_anim_query.get_mut(entity) {
                         match animation {
-                            NetEntityAnimation::SwingMainArm => {
-                                anim.swing_progress = 0.0;
-                            }
-                            NetEntityAnimation::TakeDamage => {
-                                anim.hurt_progress = 0.0;
-                            }
+                            NetEntityAnimation::SwingMainArm => anim.swing_progress = 0.0,
+                            NetEntityAnimation::TakeDamage => anim.hurt_progress = 0.0,
                             NetEntityAnimation::LeaveBed | NetEntityAnimation::Unknown(_) => {}
+                        }
+                    }
+                    if let Ok(mut anim) = params.biped_anim_query.get_mut(entity) {
+                        if matches!(animation, NetEntityAnimation::SwingMainArm) {
+                            anim.swing_progress = 0.0;
                         }
                     }
                 }
@@ -754,7 +836,9 @@ pub fn smooth_remote_entity_motion(
             continue;
         }
 
-        let desired_rot = if remote.kind == NetEntityKind::Player {
+        let use_player_rot = matches!(remote.kind, NetEntityKind::Player)
+            || matches!(remote.kind, NetEntityKind::Mob(m) if mob_uses_biped_model(m));
+        let desired_rot = if use_player_rot {
             player_root_rotation(look.yaw)
         } else {
             Quat::from_axis_angle(Vec3::Y, look.yaw)
@@ -815,6 +899,20 @@ pub fn apply_item_sprite_textures_system(
     for (stack, mut material) in &mut query {
         cache.request_stack(stack.0);
         if let Some(handle) = cache.material_for_stack(stack.0) {
+            if material.0 != handle {
+                material.0 = handle;
+            }
+        }
+    }
+}
+
+pub fn apply_entity_model_textures_system(
+    mut cache: ResMut<EntityTextureCache>,
+    mut query: Query<(&EntityTexturePath, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    for (path, mut material) in &mut query {
+        cache.request(path.0);
+        if let Some(handle) = cache.material(path.0) {
             if material.0 != handle {
                 material.0 = handle;
             }
@@ -1131,6 +1229,125 @@ pub fn animate_remote_player_models(
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
             t.translation = Vec3::new(0.125, 0.375 - 0.2 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
+        }
+    }
+}
+
+pub fn animate_remote_biped_models(
+    time: Res<Time>,
+    mut roots: Query<
+        (
+            &Transform,
+            &RemoteEntityLook,
+            &RemotePoseState,
+            &RemoteBipedModelParts,
+            &mut RemoteBipedAnimation,
+        ),
+        With<RemoteBipedModelParts>,
+    >,
+    mut part_transforms: Query<&mut Transform, Without<RemoteBipedModelParts>>,
+) {
+    // Core 1.8.9 `ModelBiped#setRotationAngles` behavior for remote entities.
+    let dt = time.delta_secs().max(1e-4);
+    let px = 1.0 / 16.0;
+
+    for (root_transform, look, pose, parts, mut anim) in &mut roots {
+        let pos = root_transform.translation;
+        let horizontal_delta = Vec2::new(pos.x - anim.previous_pos.x, pos.z - anim.previous_pos.z);
+        let speed = (horizontal_delta.length() / dt).min(10.0);
+        anim.previous_pos = pos;
+
+        anim.limb_swing_amount = (speed / 4.0).clamp(0.0, 1.0);
+        anim.limb_swing += speed * dt * 1.3;
+
+        if anim.swing_progress < 1.0 {
+            anim.swing_progress = (anim.swing_progress + dt * 3.6).min(1.0);
+        }
+
+        let limb_swing = anim.limb_swing;
+        let limb_swing_amount = anim.limb_swing_amount;
+
+        let head_pitch = look.pitch.clamp(-1.4, 1.4);
+        let mut head_yaw_delta = look.head_yaw - look.yaw;
+        head_yaw_delta = (head_yaw_delta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+
+        // Vanilla constants.
+        let right_arm_x =
+            (limb_swing * 0.6662 + std::f32::consts::PI).cos() * 2.0 * limb_swing_amount * 0.5;
+        let left_arm_x = (limb_swing * 0.6662).cos() * 2.0 * limb_swing_amount * 0.5;
+        let right_leg_x = (limb_swing * 0.6662).cos() * 1.4 * limb_swing_amount;
+        let left_leg_x =
+            (limb_swing * 0.6662 + std::f32::consts::PI).cos() * 1.4 * limb_swing_amount;
+
+        let mut body_yaw = 0.0f32;
+        let mut arm_r_yaw = 0.0f32;
+        let mut arm_l_yaw = 0.0f32;
+        let mut arm_r_z = 0.0f32;
+        let arm_l_z = 0.0f32;
+        let mut arm_r_x = right_arm_x;
+        let mut arm_l_x = left_arm_x;
+
+        // Swing attack (main hand).
+        if anim.swing_progress < 1.0 {
+            let f = anim.swing_progress;
+            body_yaw = (f.sqrt() * std::f32::consts::PI * 2.0).sin() * 0.2;
+            arm_r_yaw += body_yaw;
+            arm_l_yaw += body_yaw;
+            arm_l_x += body_yaw;
+
+            let mut f0 = 1.0 - f;
+            f0 = f0 * f0;
+            f0 = f0 * f0;
+            f0 = 1.0 - f0;
+            let f1 = (f0 * std::f32::consts::PI).sin();
+            let f2 = (f * std::f32::consts::PI).sin() * -(-head_pitch - 0.7) * 0.75;
+            arm_r_x = arm_r_x - (f1 * 1.2 + f2);
+            arm_r_yaw += body_yaw * 2.0;
+            arm_r_z += (f * std::f32::consts::PI).sin() * -0.4;
+        }
+
+        let is_sneak = pose.sneaking;
+        let body_x = if is_sneak { 0.5 } else { 0.0 };
+        if is_sneak {
+            arm_r_x += 0.4;
+            arm_l_x += 0.4;
+        }
+
+        // Pivots (vanilla model pixels; +Y down => bevy Y is negative).
+        let (arm_y, leg_y, leg_z, head_y) = if is_sneak {
+            (2.0, 9.0, 4.0, 1.0)
+        } else {
+            (2.0, 12.0, 0.1, 0.0)
+        };
+
+        if let Ok(mut t) = part_transforms.get_mut(parts.head) {
+            t.translation = Vec3::new(0.0, -head_y * px, 0.0);
+            t.rotation = Quat::from_rotation_y(head_yaw_delta) * Quat::from_rotation_x(-head_pitch);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.body) {
+            t.translation = Vec3::ZERO;
+            t.rotation = Quat::from_rotation_y(body_yaw) * Quat::from_rotation_x(body_x);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
+            t.translation = Vec3::new(-5.0 * px, -arm_y * px, 0.0);
+            t.rotation = Quat::from_rotation_y(arm_r_yaw)
+                * Quat::from_rotation_z(arm_r_z)
+                * Quat::from_rotation_x(arm_r_x);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
+            t.translation = Vec3::new(5.0 * px, -arm_y * px, 0.0);
+            t.rotation = Quat::from_rotation_y(arm_l_yaw)
+                * Quat::from_rotation_z(arm_l_z)
+                * Quat::from_rotation_x(arm_l_x);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
+            t.translation = Vec3::new(-1.9 * px, -leg_y * px, leg_z * px);
+            t.rotation = Quat::from_rotation_x(right_leg_x);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
+            t.translation = Vec3::new(1.9 * px, -leg_y * px, leg_z * px);
+            t.rotation = Quat::from_rotation_x(left_leg_x);
         }
     }
 }
@@ -1795,9 +2012,21 @@ fn visual_spec(kind: NetEntityKind) -> VisualSpec {
         },
         NetEntityKind::Mob(mob) => VisualSpec {
             mesh: VisualMesh::Capsule,
-            scale: MOB_SCALE,
-            y_offset: MOB_Y_OFFSET,
-            name_y_offset: MOB_NAME_Y_OFFSET,
+            scale: if mob_uses_biped_model(mob) {
+                Vec3::ONE
+            } else {
+                MOB_SCALE
+            },
+            y_offset: if mob_uses_biped_model(mob) {
+                0.0
+            } else {
+                MOB_Y_OFFSET
+            },
+            name_y_offset: if mob_uses_biped_model(mob) {
+                2.05
+            } else {
+                MOB_NAME_Y_OFFSET
+            },
             color: mob_color(mob),
         },
         NetEntityKind::Item => VisualSpec {
@@ -1954,4 +2183,20 @@ fn object_label(kind: ObjectKind) -> &'static str {
         ObjectKind::FallingBlock => "Falling Block",
         ObjectKind::Unknown(_) => "Object",
     }
+}
+
+fn mob_uses_biped_model(mob: MobKind) -> bool {
+    matches!(
+        mob,
+        MobKind::Zombie | MobKind::Skeleton | MobKind::PigZombie
+    )
+}
+
+fn mob_texture_path(mob: MobKind) -> Option<&'static str> {
+    Some(match mob {
+        MobKind::Zombie => "entity/zombie/zombie.png",
+        MobKind::Skeleton => "entity/skeleton/skeleton.png",
+        MobKind::PigZombie => "entity/zombie_pigman.png",
+        _ => return None,
+    })
 }
