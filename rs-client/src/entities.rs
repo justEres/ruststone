@@ -388,17 +388,12 @@ pub fn apply_remote_entity_events(
                     NetEntityKind::Mob(m) if mob_uses_biped_model(m) => Some(m),
                     _ => None,
                 };
-                let use_player_rot = kind == NetEntityKind::Player || biped_mob.is_some();
 
                 let spawn_cmd = commands.spawn((
                     Name::new(format!("RemoteEntity[{entity_id}]")),
                     Transform {
                         translation: pos + Vec3::Y * visual.y_offset,
-                        rotation: if use_player_rot {
-                            player_root_rotation(yaw)
-                        } else {
-                            Quat::from_axis_angle(Vec3::Y, yaw)
-                        },
+                        rotation: entity_root_rotation(kind, yaw),
                         scale: if biped_mob.is_some() {
                             Vec3::ONE
                         } else {
@@ -653,13 +648,7 @@ pub fn apply_remote_entity_events(
                             transform.translation = target;
                         }
                         if let Ok(mut transform) = params.transform_query.get_mut(entity) {
-                            let use_player_rot = remote_entity.kind == NetEntityKind::Player
-                                || matches!(remote_entity.kind, NetEntityKind::Mob(m) if mob_uses_biped_model(m));
-                            transform.rotation = if use_player_rot {
-                                player_root_rotation(yaw)
-                            } else {
-                                Quat::from_axis_angle(Vec3::Y, yaw)
-                            };
+                            transform.rotation = entity_root_rotation(remote_entity.kind, yaw);
                         }
                         let old_yaw = look.yaw;
                         look.yaw = yaw;
@@ -836,13 +825,7 @@ pub fn smooth_remote_entity_motion(
             continue;
         }
 
-        let use_player_rot = matches!(remote.kind, NetEntityKind::Player)
-            || matches!(remote.kind, NetEntityKind::Mob(m) if mob_uses_biped_model(m));
-        let desired_rot = if use_player_rot {
-            player_root_rotation(look.yaw)
-        } else {
-            Quat::from_axis_angle(Vec3::Y, look.yaw)
-        };
+        let desired_rot = entity_root_rotation(remote.kind, look.yaw);
         let rot_alpha = 1.0 - (-22.0 * dt).exp();
         transform.rotation = transform.rotation.slerp(desired_rot, rot_alpha);
     }
@@ -1977,6 +1960,16 @@ fn uv_rect(rect: SkinUvRect, flip_u: bool, flip_v: bool) -> [[f32; 2]; 4] {
 fn player_root_rotation(yaw: f32) -> Quat {
     // Align model forward/back with Minecraft protocol-facing direction.
     Quat::from_axis_angle(Vec3::Y, yaw + std::f32::consts::PI)
+}
+
+fn entity_root_rotation(kind: NetEntityKind, yaw: f32) -> Quat {
+    match kind {
+        // Player skin model pipeline has its own historic 180deg alignment.
+        NetEntityKind::Player => player_root_rotation(yaw),
+        // Vanilla biped mob models should use yaw directly (no extra PI).
+        NetEntityKind::Mob(m) if mob_uses_biped_model(m) => Quat::from_axis_angle(Vec3::Y, yaw),
+        _ => Quat::from_axis_angle(Vec3::Y, yaw),
+    }
 }
 
 #[derive(Clone, Copy)]

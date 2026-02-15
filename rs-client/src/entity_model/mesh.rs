@@ -185,6 +185,15 @@ fn add_cube(
         v + d_i + h_i,
     );
 
+    // Base normals in vanilla model space (+Y is down).
+    // We'll transform them into our bevy space (Y flipped) and apply mirroring.
+    let n_east = face_normal([1.0, 0.0, 0.0], mirrored);
+    let n_west = face_normal([-1.0, 0.0, 0.0], mirrored);
+    let n_top = face_normal([0.0, -1.0, 0.0], mirrored);
+    let n_bottom = face_normal([0.0, 1.0, 0.0], mirrored);
+    let n_north = face_normal([0.0, 0.0, -1.0], mirrored);
+    let n_south = face_normal([0.0, 0.0, 1.0], mirrored);
+
     // Quads in the exact vertex order from vanilla `ModelBox`.
     add_quad(
         positions,
@@ -192,7 +201,7 @@ fn add_cube(
         uvs,
         indices,
         [v4, v0, v1, v5],
-        [1.0, 0.0, 0.0],
+        n_east,
         east,
         mirrored,
     ); // +X
@@ -202,7 +211,7 @@ fn add_cube(
         uvs,
         indices,
         [v7, v3, v6, v2],
-        [-1.0, 0.0, 0.0],
+        n_west,
         west,
         mirrored,
     ); // -X
@@ -212,7 +221,7 @@ fn add_cube(
         uvs,
         indices,
         [v4, v3, v7, v0],
-        [0.0, 1.0, 0.0],
+        n_top,
         top,
         mirrored,
     ); // +Y in model space (down) => this is "bottom" in bevy, but normals are fixed by winding.
@@ -222,7 +231,7 @@ fn add_cube(
         uvs,
         indices,
         [v1, v2, v6, v5],
-        [0.0, -1.0, 0.0],
+        n_bottom,
         bottom,
         mirrored,
     );
@@ -232,7 +241,7 @@ fn add_cube(
         uvs,
         indices,
         [v0, v7, v2, v1],
-        [0.0, 0.0, -1.0],
+        n_north,
         north,
         mirrored,
     );
@@ -242,10 +251,21 @@ fn add_cube(
         uvs,
         indices,
         [v3, v4, v5, v6],
-        [0.0, 0.0, 1.0],
+        n_south,
         south,
         mirrored,
     );
+}
+
+fn face_normal(model_space: [f32; 3], mirrored: bool) -> [f32; 3] {
+    let mut n = Vec3::from_array(model_space);
+    if mirrored {
+        // Mirror reflects X.
+        n.x = -n.x;
+    }
+    // We flip model Y -> bevy Y (model +Y is down).
+    n.y = -n.y;
+    n.normalize_or_zero().to_array()
 }
 
 fn add_quad(
