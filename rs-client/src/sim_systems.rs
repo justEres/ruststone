@@ -15,8 +15,9 @@ use crate::sim::movement::{WorldCollision, effective_sprint, simulate_tick};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use crate::sim::{
-    CameraPerspectiveMode, CameraPerspectiveState, CurrentInput, DebugStats, DebugUiState,
-    PredictedFrame, SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
+    CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CurrentInput,
+    DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
+    VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
@@ -371,6 +372,28 @@ pub fn camera_perspective_toggle_system(
         CameraPerspectiveMode::ThirdPersonBack => CameraPerspectiveMode::ThirdPersonFront,
         CameraPerspectiveMode::ThirdPersonFront => CameraPerspectiveMode::FirstPerson,
     };
+}
+
+pub fn camera_perspective_alt_hold_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    ui_state: Res<UiState>,
+    mut perspective: ResMut<CameraPerspectiveState>,
+    mut alt_hold: ResMut<CameraPerspectiveAltHold>,
+) {
+    if ui_state.chat_open || ui_state.inventory_open {
+        alt_hold.saved_mode = None;
+        return;
+    }
+
+    let alt_pressed = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if alt_pressed {
+        if alt_hold.saved_mode.is_none() {
+            alt_hold.saved_mode = Some(perspective.mode);
+        }
+        perspective.mode = CameraPerspectiveMode::ThirdPersonBack;
+    } else if let Some(saved) = alt_hold.saved_mode.take() {
+        perspective.mode = saved;
+    }
 }
 
 pub fn fixed_sim_tick_system(
