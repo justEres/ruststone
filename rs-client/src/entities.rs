@@ -1436,7 +1436,11 @@ pub fn first_person_viewmodel_system(
         .spawn((
             Name::new("FirstPersonViewModel"),
             FirstPersonViewModel,
-            Transform::IDENTITY,
+            Transform {
+                translation: base_pose_translation,
+                rotation: base_pose_rotation,
+                ..Default::default()
+            },
             GlobalTransform::default(),
             Visibility::Inherited,
             InheritedVisibility::default(),
@@ -1456,10 +1460,22 @@ pub fn first_person_viewmodel_system(
         &mut materials,
         &skin_mat.0,
         player_right_arm_meshes(skin_model.0, &texture_debug),
-        base_pose_translation,
+        Vec3::ZERO,
         arm_child_offset,
     );
     commands.entity(root).add_child(arm_right);
+
+    let hand_anchor = commands
+        .spawn((
+            Name::new("FirstPersonHandAnchor"),
+            Transform::from_translation(Vec3::new(-1.0 / 16.0, -(12.0 / 16.0), -(2.0 / 16.0))),
+            GlobalTransform::default(),
+            Visibility::Inherited,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+    commands.entity(arm_right).add_child(hand_anchor);
 
     let item_placeholder = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -1476,9 +1492,9 @@ pub fn first_person_viewmodel_system(
             Mesh3d(item_sprite_mesh.0.clone()),
             MeshMaterial3d(item_placeholder),
             Transform {
-                translation: Vec3::new(-0.05, -(11.5 / 16.0), -0.12),
+                translation: Vec3::ZERO,
                 rotation: Quat::from_rotation_y(std::f32::consts::PI) * Quat::from_rotation_x(0.35),
-                scale: Vec3::splat(0.70),
+                scale: Vec3::splat(0.72),
             },
             GlobalTransform::default(),
             if held.is_some() {
@@ -1493,16 +1509,7 @@ pub fn first_person_viewmodel_system(
     if let Some(stack) = held {
         commands.entity(item).insert(ItemSpriteStack(stack));
     }
-    commands.entity(arm_right).add_child(item);
-
-    // Set base rotation on the arm pivot; swing animation will layer on top.
-    if let Ok(mut arm_cmd) = commands.get_entity(arm_right) {
-        arm_cmd.insert(Transform {
-            translation: base_pose_translation,
-            rotation: base_pose_rotation,
-            ..Default::default()
-        });
-    }
+    commands.entity(hand_anchor).add_child(item);
 
     commands.entity(root).insert(FirstPersonViewModelParts {
         arm_right,
@@ -1514,10 +1521,10 @@ pub fn first_person_viewmodel_system(
 pub fn animate_first_person_viewmodel_system(
     time: Res<Time>,
     swing_state: Res<LocalArmSwing>,
-    query: Query<&FirstPersonViewModelParts, With<FirstPersonViewModel>>,
+    query: Query<Entity, With<FirstPersonViewModel>>,
     mut transforms: Query<&mut Transform>,
 ) {
-    let Ok(parts) = query.get_single() else {
+    let Ok(root) = query.get_single() else {
         return;
     };
 
@@ -1539,15 +1546,15 @@ pub fn animate_first_person_viewmodel_system(
 
     // Small idle damping so it doesn't snap if the transform was recreated.
     let alpha = 1.0 - (-18.0 * dt).exp();
-    if let Ok(mut arm) = transforms.get_mut(parts.arm_right) {
+    if let Ok(mut root_t) = transforms.get_mut(root) {
         let target_t = base_t + Vec3::new(0.08 * s2, 0.04 * s, 0.02 * s2);
         let target_r = base_r
             * Quat::from_rotation_x(-1.25 * s)
             * Quat::from_rotation_y(0.55 * s2)
             * Quat::from_rotation_z(-0.25 * s2);
-        let current_t = arm.translation;
-        arm.translation = current_t + (target_t - current_t) * alpha;
-        arm.rotation = arm.rotation.slerp(target_r, alpha);
+        let current_t = root_t.translation;
+        root_t.translation = current_t + (target_t - current_t) * alpha;
+        root_t.rotation = root_t.rotation.slerp(target_r, alpha);
     }
 }
 
@@ -1589,8 +1596,8 @@ pub fn animate_local_player_model_system(
     let sneak_amount = if input.0.sneak { 1.0 } else { 0.0 };
     let arm_x = player_arm_pivot_x(skin_model.0);
     let leg_x = player_leg_pivot_x();
-    let sneak_z = sneak_z_offset(sneak_amount);
-    let leg_y = sneak_leg_pivot_y(sneak_amount);
+    let leg_y = player_leg_pivot_y_sneak(sneak_amount);
+    let leg_z = player_leg_pivot_z_sneak(sneak_amount);
     let arm_attack = if swing_state.progress < 1.0 {
         (swing_state.progress * std::f32::consts::PI).sin() * 1.2
     } else {
@@ -1599,27 +1606,27 @@ pub fn animate_local_player_model_system(
 
     // Head follows camera pitch; yaw comes from the player root rotation.
     if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-        t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(0.0, player_head_pivot_y_sneak(sneak_amount), 0.0);
         t.rotation = Quat::from_rotation_x(-look.pitch - 0.2 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-        t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(0.0, player_body_pivot_y(), 0.0);
         t.rotation = Quat::from_rotation_x(0.5 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-        t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(-arm_x, player_arm_pivot_y(), 0.0);
         t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-        t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(arm_x, player_arm_pivot_y(), 0.0);
         t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-        t.translation = Vec3::new(-leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(-leg_x, leg_y, leg_z);
         t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-        t.translation = Vec3::new(leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
+        t.translation = Vec3::new(leg_x, leg_y, leg_z);
         t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
     }
 }
@@ -1784,33 +1791,33 @@ pub fn animate_remote_player_models(
         };
         let arm_x = player_arm_pivot_x(skin_model.0);
         let leg_x = player_leg_pivot_x();
-        let sneak_z = sneak_z_offset(sneak_amount);
-        let leg_y = sneak_leg_pivot_y(sneak_amount);
+        let leg_y = player_leg_pivot_y_sneak(sneak_amount);
+        let leg_z = player_leg_pivot_z_sneak(sneak_amount);
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-            t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(0.0, player_head_pivot_y_sneak(sneak_amount), 0.0);
             t.rotation = Quat::from_rotation_y(head_yaw_delta)
                 * Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-            t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(0.0, player_body_pivot_y(), 0.0);
             t.rotation =
                 Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-            t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(-arm_x, player_arm_pivot_y(), 0.0);
             t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-            t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(arm_x, player_arm_pivot_y(), 0.0);
             t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-            t.translation = Vec3::new(-leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(-leg_x, leg_y, leg_z);
             t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-            t.translation = Vec3::new(leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
+            t.translation = Vec3::new(leg_x, leg_y, leg_z);
             t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
         }
     }
@@ -2006,7 +2013,11 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_left_leg_meshes(texture_debug),
-        Vec3::new(-player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        Vec3::new(
+            -player_leg_pivot_x(),
+            player_leg_pivot_y_sneak(0.0),
+            player_leg_pivot_z_sneak(0.0),
+        ),
         limb_child_offset(),
     );
     let leg_right = spawn_player_part(
@@ -2015,7 +2026,11 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_right_leg_meshes(texture_debug),
-        Vec3::new(player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        Vec3::new(
+            player_leg_pivot_x(),
+            player_leg_pivot_y_sneak(0.0),
+            player_leg_pivot_z_sneak(0.0),
+        ),
         limb_child_offset(),
     );
 
@@ -2090,7 +2105,11 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_left_leg_meshes(texture_debug),
-        Vec3::new(-player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        Vec3::new(
+            -player_leg_pivot_x(),
+            player_leg_pivot_y_sneak(0.0),
+            player_leg_pivot_z_sneak(0.0),
+        ),
         limb_child_offset(),
     );
     let leg_right = spawn_player_part(
@@ -2099,7 +2118,11 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_right_leg_meshes(texture_debug),
-        Vec3::new(player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        Vec3::new(
+            player_leg_pivot_x(),
+            player_leg_pivot_y_sneak(0.0),
+            player_leg_pivot_z_sneak(0.0),
+        ),
         limb_child_offset(),
     );
 
@@ -2228,14 +2251,22 @@ fn limb_child_offset() -> Vec3 {
     Vec3::new(0.0, -(6.0 / 16.0), 0.0)
 }
 
-fn sneak_z_offset(amount: f32) -> f32 {
-    // Vanilla `ModelBiped` shifts parts forward when sneaking.
-    (4.0 / 16.0) * amount
+fn player_head_pivot_y_sneak(amount: f32) -> f32 {
+    // `ModelBiped`: head rotationPointY = 1.0 when sneaking (y-positive is down in MC model space),
+    // so in our y-up space this is a small downward shift.
+    player_head_pivot_y() - (1.0 / 16.0) * amount
 }
 
-fn sneak_leg_pivot_y(amount: f32) -> f32 {
-    // Vanilla uses ~9px for leg rotation points when sneaking.
-    player_leg_pivot_y().lerp(9.0 / 16.0, amount)
+fn player_leg_pivot_y_sneak(amount: f32) -> f32 {
+    // `ModelBiped`: legs rotationPointY = 9.0 when sneaking (from 12.0), i.e. +3px up in y-up space.
+    player_leg_pivot_y() + (3.0 / 16.0) * amount
+}
+
+fn player_leg_pivot_z_sneak(amount: f32) -> f32 {
+    // `ModelBiped`: legs rotationPointZ = 4.0 when sneaking; in our "forward is -Z" space this is -4px.
+    let stand = -0.1 / 16.0;
+    let sneak = -4.0 / 16.0;
+    stand.lerp(sneak, amount)
 }
 
 fn player_right_arm_meshes(
