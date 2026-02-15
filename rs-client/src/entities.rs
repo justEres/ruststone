@@ -24,7 +24,7 @@ use crate::entity_model::{
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
-use crate::sim::{CameraPerspectiveMode, CameraPerspectiveState};
+use crate::sim::{CameraPerspectiveMode, CameraPerspectiveState, LocalArmSwing};
 use rs_render::RenderDebugSettings;
 use rs_render::{LookAngles, Player};
 use rs_ui::ConnectUiState;
@@ -236,6 +236,16 @@ pub struct LocalPlayerSkinModel(pub PlayerSkinModel);
 
 #[derive(Component, Debug, Clone)]
 pub struct LocalPlayerSkinMaterial(pub Handle<StandardMaterial>);
+
+#[derive(Component)]
+pub struct FirstPersonViewModel;
+
+#[derive(Component, Debug, Clone)]
+pub struct FirstPersonViewModelParts {
+    pub arm_right: Entity,
+    pub item: Entity,
+    pub skin_model: PlayerSkinModel,
+}
 
 #[derive(Component, Debug, Clone)]
 pub struct RemoteBipedModelParts {
@@ -1092,7 +1102,7 @@ pub fn spawn_local_player_model_system(
     };
 
     let connected = matches!(app_state.0, ApplicationState::Connected);
-    if !connected || !render_debug.render_self_model {
+    if !connected || (!render_debug.render_self_model && !render_debug.render_first_person_arms) {
         for e in &existing {
             commands.entity(e).despawn_recursive();
         }
@@ -1347,10 +1357,205 @@ pub fn sync_local_player_skin_model_system(
     );
 }
 
+pub fn first_person_viewmodel_system(
+    mut commands: Commands,
+    app_state: Res<AppState>,
+    ui_state: Res<rs_utils::UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    render_debug: Res<RenderDebugSettings>,
+    perspective: Res<CameraPerspectiveState>,
+    inventory: Res<rs_utils::InventoryState>,
+    mut item_textures: ResMut<ItemTextureCache>,
+    item_sprite_mesh: Res<ItemSpriteMesh>,
+    texture_debug: Res<PlayerTextureDebugSettings>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    camera: Query<Entity, With<PlayerCamera>>,
+    local_player_skin: Query<
+        (&LocalPlayerSkinMaterial, &LocalPlayerSkinModel),
+        With<LocalPlayerModel>,
+    >,
+    existing: Query<(Entity, &FirstPersonViewModelParts), With<FirstPersonViewModel>>,
+) {
+    let active = matches!(app_state.0, ApplicationState::Connected)
+        && !ui_state.chat_open
+        && !ui_state.paused
+        && !ui_state.inventory_open
+        && !player_status.dead
+        && render_debug.render_held_items
+        && render_debug.render_first_person_arms
+        && matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
+
+    if !active {
+        for (e, _) in &existing {
+            commands.entity(e).despawn_recursive();
+        }
+        return;
+    }
+
+    let Ok(cam_entity) = camera.get_single() else {
+        return;
+    };
+
+    let Ok((skin_mat, skin_model)) = local_player_skin.get_single() else {
+        // Local model is also our "skin/material authority". Keep it present.
+        return;
+    };
+
+    let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
+    if let Some(stack) = held {
+        item_textures.request_stack(stack);
+    }
+
+    let base_pose_translation = Vec3::new(0.62, -0.58, -0.95);
+    let base_pose_rotation =
+        Quat::from_rotation_x(-0.85) * Quat::from_rotation_y(0.32) * Quat::from_rotation_z(-0.12);
+
+    // Recreate if missing or if the skin model changed (classic vs slim affects arm geometry).
+    if let Ok((root, parts)) = existing.get_single() {
+        if parts.skin_model != skin_model.0 {
+            commands.entity(root).despawn_recursive();
+        } else {
+            // Update held item stack without rebuilding.
+            if let Ok(mut item_entity) = commands.get_entity(parts.item) {
+                match held {
+                    Some(stack) => {
+                        item_entity.insert((ItemSpriteStack(stack), Visibility::Visible));
+                    }
+                    None => {
+                        item_entity.remove::<ItemSpriteStack>();
+                        item_entity.insert(Visibility::Hidden);
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+    let root = commands
+        .spawn((
+            Name::new("FirstPersonViewModel"),
+            FirstPersonViewModel,
+            Transform::IDENTITY,
+            GlobalTransform::default(),
+            Visibility::Inherited,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+    commands.entity(cam_entity).add_child(root);
+
+    let arm_child_offset = Vec3::new(
+        player_arm_child_offset_x(skin_model.0, true),
+        limb_child_offset().y,
+        0.0,
+    );
+    let arm_right = spawn_player_part(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &skin_mat.0,
+        player_right_arm_meshes(skin_model.0, &texture_debug),
+        base_pose_translation,
+        arm_child_offset,
+    );
+    commands.entity(root).add_child(arm_right);
+
+    let item_placeholder = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        alpha_mode: AlphaMode::Mask(0.5),
+        cull_mode: None,
+        unlit: true,
+        perceptual_roughness: 1.0,
+        metallic: 0.0,
+        ..Default::default()
+    });
+    let item = commands
+        .spawn((
+            Name::new("FirstPersonHeldItem"),
+            Mesh3d(item_sprite_mesh.0.clone()),
+            MeshMaterial3d(item_placeholder),
+            Transform {
+                translation: Vec3::new(-0.05, -(11.5 / 16.0), -0.12),
+                rotation: Quat::from_rotation_y(std::f32::consts::PI) * Quat::from_rotation_x(0.35),
+                scale: Vec3::splat(0.70),
+            },
+            GlobalTransform::default(),
+            if held.is_some() {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+    if let Some(stack) = held {
+        commands.entity(item).insert(ItemSpriteStack(stack));
+    }
+    commands.entity(arm_right).add_child(item);
+
+    // Set base rotation on the arm pivot; swing animation will layer on top.
+    if let Ok(mut arm_cmd) = commands.get_entity(arm_right) {
+        arm_cmd.insert(Transform {
+            translation: base_pose_translation,
+            rotation: base_pose_rotation,
+            ..Default::default()
+        });
+    }
+
+    commands.entity(root).insert(FirstPersonViewModelParts {
+        arm_right,
+        item,
+        skin_model: skin_model.0,
+    });
+}
+
+pub fn animate_first_person_viewmodel_system(
+    time: Res<Time>,
+    swing_state: Res<LocalArmSwing>,
+    query: Query<&FirstPersonViewModelParts, With<FirstPersonViewModel>>,
+    mut transforms: Query<&mut Transform>,
+) {
+    let Ok(parts) = query.get_single() else {
+        return;
+    };
+
+    let dt = time.delta_secs().clamp(0.0, 0.05);
+    let p = swing_state.progress.clamp(0.0, 1.0);
+    let swing = if p < 1.0 {
+        // Very rough approximation of vanilla first-person swing.
+        let s = (p * std::f32::consts::PI).sin();
+        let s2 = (p * std::f32::consts::PI).sin().powf(2.0);
+        (s, s2)
+    } else {
+        (0.0, 0.0)
+    };
+
+    let (s, s2) = swing;
+    let base_t = Vec3::new(0.62, -0.58, -0.95);
+    let base_r =
+        Quat::from_rotation_x(-0.85) * Quat::from_rotation_y(0.32) * Quat::from_rotation_z(-0.12);
+
+    // Small idle damping so it doesn't snap if the transform was recreated.
+    let alpha = 1.0 - (-18.0 * dt).exp();
+    if let Ok(mut arm) = transforms.get_mut(parts.arm_right) {
+        let target_t = base_t + Vec3::new(0.08 * s2, 0.04 * s, 0.02 * s2);
+        let target_r = base_r
+            * Quat::from_rotation_x(-1.25 * s)
+            * Quat::from_rotation_y(0.55 * s2)
+            * Quat::from_rotation_z(-0.25 * s2);
+        let current_t = arm.translation;
+        arm.translation = current_t + (target_t - current_t) * alpha;
+        arm.rotation = arm.rotation.slerp(target_r, alpha);
+    }
+}
+
 pub fn animate_local_player_model_system(
     time: Res<Time>,
     input: Res<crate::sim::CurrentInput>,
     sim_state: Res<crate::sim::SimState>,
+    swing_state: Res<crate::sim::LocalArmSwing>,
     render_debug: Res<RenderDebugSettings>,
     mut roots: Query<
         (
@@ -1384,30 +1589,37 @@ pub fn animate_local_player_model_system(
     let sneak_amount = if input.0.sneak { 1.0 } else { 0.0 };
     let arm_x = player_arm_pivot_x(skin_model.0);
     let leg_x = player_leg_pivot_x();
+    let sneak_z = sneak_z_offset(sneak_amount);
+    let leg_y = sneak_leg_pivot_y(sneak_amount);
+    let arm_attack = if swing_state.progress < 1.0 {
+        (swing_state.progress * std::f32::consts::PI).sin() * 1.2
+    } else {
+        0.0
+    };
 
     // Head follows camera pitch; yaw comes from the player root rotation.
     if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-        t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, 0.0);
+        t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, sneak_z);
         t.rotation = Quat::from_rotation_x(-look.pitch - 0.2 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-        t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, 0.0);
+        t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, sneak_z);
         t.rotation = Quat::from_rotation_x(0.5 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-        t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
+        t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
         t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-        t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
-        t.rotation = Quat::from_rotation_x(-swing + 0.4 * sneak_amount);
+        t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
+        t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-        t.translation = Vec3::new(-leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
+        t.translation = Vec3::new(-leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
         t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-        t.translation = Vec3::new(leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
+        t.translation = Vec3::new(leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
         t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
     }
 }
@@ -1572,31 +1784,33 @@ pub fn animate_remote_player_models(
         };
         let arm_x = player_arm_pivot_x(skin_model.0);
         let leg_x = player_leg_pivot_x();
+        let sneak_z = sneak_z_offset(sneak_amount);
+        let leg_y = sneak_leg_pivot_y(sneak_amount);
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-            t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, sneak_z);
             t.rotation = Quat::from_rotation_y(head_yaw_delta)
                 * Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-            t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, sneak_z);
             t.rotation =
                 Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-            t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
             t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-            t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, sneak_z);
             t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-            t.translation = Vec3::new(-leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
+            t.translation = Vec3::new(-leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
             t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-            t.translation = Vec3::new(leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
+            t.translation = Vec3::new(leg_x, leg_y - 0.2 * sneak_amount, sneak_z);
             t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
         }
     }
@@ -1990,8 +2204,8 @@ fn player_body_pivot_y() -> f32 {
 }
 
 fn player_arm_pivot_y() -> f32 {
-    // Vanilla arm rotation point is 2px below the top of the torso.
-    22.0 / 16.0
+    // Pivot at the shoulder height; mesh is offset so the arm "hangs" from this point.
+    24.0 / 16.0
 }
 
 fn player_head_pivot_y() -> f32 {
@@ -2012,6 +2226,16 @@ fn torso_child_offset() -> Vec3 {
 fn limb_child_offset() -> Vec3 {
     // Pivot at top; cube extends downward.
     Vec3::new(0.0, -(6.0 / 16.0), 0.0)
+}
+
+fn sneak_z_offset(amount: f32) -> f32 {
+    // Vanilla `ModelBiped` shifts parts forward when sneaking.
+    (4.0 / 16.0) * amount
+}
+
+fn sneak_leg_pivot_y(amount: f32) -> f32 {
+    // Vanilla uses ~9px for leg rotation points when sneaking.
+    player_leg_pivot_y().lerp(9.0 / 16.0, amount)
 }
 
 fn player_right_arm_meshes(
