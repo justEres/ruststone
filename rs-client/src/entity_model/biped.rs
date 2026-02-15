@@ -10,7 +10,7 @@ pub const BIPED_LEFT_ARM: usize = 4;
 pub const BIPED_RIGHT_LEG: usize = 5;
 pub const BIPED_LEFT_LEG: usize = 6;
 
-pub static BIPED_MODEL_WITH_HEADWEAR: ModelDef = ModelDef {
+pub static BIPED_MODEL_WITH_HEADWEAR_TEX32: ModelDef = ModelDef {
     tex_size: [64, 32],
     // Vanilla biped origin is near the shoulders. Lift by 24px so feet sit at Y=0 in world.
     root_offset_px: [0.0, 24.0, 0.0],
@@ -81,7 +81,7 @@ pub static BIPED_MODEL_WITH_HEADWEAR: ModelDef = ModelDef {
     ],
 };
 
-pub static BIPED_MODEL: ModelDef = ModelDef {
+pub static BIPED_MODEL_TEX32: ModelDef = ModelDef {
     tex_size: [64, 32],
     root_offset_px: [0.0, 24.0, 0.0],
     parts: &[
@@ -147,4 +147,11 @@ pub static BIPED_MODEL: ModelDef = ModelDef {
             ],
         },
     ],
+};
+
+// Same geometry, but with 64px texture height. Many vanilla mobs (e.g. zombies) use 64x64 textures in 1.8.9.
+pub static BIPED_MODEL_TEX64: ModelDef = ModelDef {
+    tex_size: [64, 64],
+    root_offset_px: [0.0, 24.0, 0.0],
+    parts: BIPED_MODEL_TEX32.parts,
 };

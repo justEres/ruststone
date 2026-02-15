@@ -19,8 +19,8 @@ use rs_utils::{
 use tracing::{info, warn};
 
 use crate::entity_model::{
-    BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL, BIPED_RIGHT_ARM,
-    BIPED_RIGHT_LEG, EntityTextureCache, EntityTexturePath, spawn_model,
+    BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL_TEX32, BIPED_MODEL_TEX64,
+    BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, EntityTextureCache, EntityTexturePath, spawn_model,
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
@@ -493,7 +493,7 @@ pub fn apply_remote_entity_events(
                             &mut commands,
                             &mut meshes,
                             material,
-                            &BIPED_MODEL,
+                            mob_biped_model(mob),
                             texture_path,
                         );
                         commands.entity(root).add_child(spawned.root);
@@ -2199,4 +2199,14 @@ fn mob_texture_path(mob: MobKind) -> Option<&'static str> {
         MobKind::PigZombie => "entity/zombie_pigman.png",
         _ => return None,
     })
+}
+
+fn mob_biped_model(mob: MobKind) -> &'static crate::entity_model::ModelDef {
+    // Vanilla uses mixed 64x32 and 64x64 biped textures in 1.8.9.
+    // If we normalize using the wrong height, only the top portion (often the head) will sample correctly.
+    match mob {
+        MobKind::Skeleton => &BIPED_MODEL_TEX32,
+        MobKind::Zombie | MobKind::PigZombie => &BIPED_MODEL_TEX64,
+        _ => &BIPED_MODEL_TEX32,
+    }
 }
