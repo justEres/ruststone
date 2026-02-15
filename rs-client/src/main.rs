@@ -203,6 +203,9 @@ fn main() {
                     .after(entities::spawn_local_player_model_system),
                 entities::update_local_player_skin_system
                     .after(entities::spawn_local_player_model_system),
+                entities::sync_local_player_skin_model_system
+                    .after(entities::update_local_player_skin_system)
+                    .before(entities::animate_local_player_model_system),
                 entities::animate_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
                 sim_systems::local_held_item_view_system

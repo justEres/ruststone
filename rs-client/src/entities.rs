@@ -1189,38 +1189,33 @@ pub fn spawn_local_player_model_system(
 pub fn apply_local_player_model_visibility_system(
     render_debug: Res<RenderDebugSettings>,
     perspective: Res<CameraPerspectiveState>,
-    mut query: Query<(&LocalPlayerModelParts, &mut Visibility), With<LocalPlayerModel>>,
-    mut part_vis: Query<&mut Visibility, Without<LocalPlayerModel>>,
+    children_query: Query<&Children>,
+    mut vis_query: Query<&mut Visibility>,
+    model_query: Query<Entity, With<LocalPlayerModel>>,
 ) {
-    let Ok((parts, mut root_vis)) = query.get_single_mut() else {
+    let Ok(model_root) = model_query.get_single() else {
         return;
     };
 
     let should_show = render_debug.render_self_model
         && !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
-    *root_vis = if should_show {
+    let target = if should_show {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
 
-    // Redundantly toggle part pivots so first-person never renders any of the model, even if
-    // some other system later overrides the root visibility.
-    let target_part_vis = if should_show {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    for part in [
-        parts.head,
-        parts.body,
-        parts.arm_left,
-        parts.arm_right,
-        parts.leg_left,
-        parts.leg_right,
-    ] {
-        if let Ok(mut v) = part_vis.get_mut(part) {
-            *v = target_part_vis;
+    // Force visibility for the whole subtree (pivots + meshes). This avoids cases where some
+    // descendants have `Visibility::Visible` and still render when we expect them not to.
+    let mut stack = vec![model_root];
+    while let Some(e) = stack.pop() {
+        if let Ok(mut v) = vis_query.get_mut(e) {
+            *v = target;
+        }
+        if let Ok(children) = children_query.get(e) {
+            for child in children.iter() {
+                stack.push(child);
+            }
         }
     }
 }
@@ -1281,6 +1276,77 @@ pub fn update_local_player_skin_system(
     }
 }
 
+pub fn sync_local_player_skin_model_system(
+    app_state: Res<AppState>,
+    connect_ui: Res<ConnectUiState>,
+    registry: Res<RemoteEntityRegistry>,
+    texture_debug: Res<PlayerTextureDebugSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut query: Query<(
+        &LocalPlayerModelParts,
+        &LocalPlayerSkinMaterial,
+        &mut LocalPlayerSkinModel,
+    )>,
+    children_query: Query<&Children>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected) {
+        return;
+    }
+
+    let Ok((parts, skin_mat, mut skin_model)) = query.get_single_mut() else {
+        return;
+    };
+
+    let mut desired = PlayerSkinModel::Classic;
+    if connect_ui.auth_mode == rs_utils::AuthMode::Authenticated
+        && connect_ui.selected_auth_account < connect_ui.auth_accounts.len()
+        && let Ok(uuid) = connect_ui.auth_accounts[connect_ui.selected_auth_account]
+            .uuid
+            .parse::<rs_protocol::protocol::UUID>()
+    {
+        desired = registry
+            .player_skin_model_by_uuid
+            .get(&uuid)
+            .copied()
+            .unwrap_or(PlayerSkinModel::Classic);
+    }
+
+    if skin_model.0 == desired {
+        return;
+    }
+
+    skin_model.0 = desired;
+
+    // Only arms differ between classic and slim models.
+    rebuild_part_children(
+        &mut commands,
+        &mut meshes,
+        &children_query,
+        parts.arm_left,
+        &skin_mat.0,
+        player_left_arm_meshes(desired, &texture_debug),
+        Vec3::new(
+            player_arm_child_offset_x(desired, false),
+            limb_child_offset().y,
+            0.0,
+        ),
+    );
+    rebuild_part_children(
+        &mut commands,
+        &mut meshes,
+        &children_query,
+        parts.arm_right,
+        &skin_mat.0,
+        player_right_arm_meshes(desired, &texture_debug),
+        Vec3::new(
+            player_arm_child_offset_x(desired, true),
+            limb_child_offset().y,
+            0.0,
+        ),
+    );
+}
+
 pub fn animate_local_player_model_system(
     time: Res<Time>,
     input: Res<crate::sim::CurrentInput>,
@@ -1317,30 +1383,31 @@ pub fn animate_local_player_model_system(
     let swing = anim.walk_phase.sin() * 0.7 * stride;
     let sneak_amount = if input.0.sneak { 1.0 } else { 0.0 };
     let arm_x = player_arm_pivot_x(skin_model.0);
+    let leg_x = player_leg_pivot_x();
 
     // Head follows camera pitch; yaw comes from the player root rotation.
     if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-        t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
+        t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(-look.pitch - 0.2 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-        t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
+        t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(0.5 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-        t.translation = Vec3::new(-arm_x, 1.125, 0.0);
+        t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-        t.translation = Vec3::new(arm_x, 1.125, 0.0);
+        t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(-swing + 0.4 * sneak_amount);
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-        t.translation = Vec3::new(-0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+        t.translation = Vec3::new(-leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
     }
     if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-        t.translation = Vec3::new(0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+        t.translation = Vec3::new(leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
         t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
     }
 }
@@ -1373,6 +1440,7 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.head,
             base_material,
             player_head_meshes(&settings),
+            head_child_offset(),
         );
         rebuild_part_children(
             &mut commands,
@@ -1381,6 +1449,7 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.body,
             base_material,
             player_body_meshes(&settings),
+            torso_child_offset(),
         );
         rebuild_part_children(
             &mut commands,
@@ -1389,6 +1458,11 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.arm_left,
             base_material,
             player_left_arm_meshes(skin_model.0, &settings),
+            Vec3::new(
+                player_arm_child_offset_x(skin_model.0, false),
+                limb_child_offset().y,
+                0.0,
+            ),
         );
         rebuild_part_children(
             &mut commands,
@@ -1397,6 +1471,11 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.arm_right,
             base_material,
             player_right_arm_meshes(skin_model.0, &settings),
+            Vec3::new(
+                player_arm_child_offset_x(skin_model.0, true),
+                limb_child_offset().y,
+                0.0,
+            ),
         );
         rebuild_part_children(
             &mut commands,
@@ -1405,6 +1484,7 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.leg_left,
             base_material,
             player_left_leg_meshes(&settings),
+            limb_child_offset(),
         );
         rebuild_part_children(
             &mut commands,
@@ -1413,6 +1493,7 @@ pub fn rebuild_remote_player_meshes_on_texture_debug_change(
             parts.leg_right,
             base_material,
             player_right_leg_meshes(&settings),
+            limb_child_offset(),
         );
     }
 }
@@ -1424,6 +1505,7 @@ fn rebuild_part_children(
     pivot: Entity,
     base_material: &Handle<StandardMaterial>,
     part_meshes: Vec<Mesh>,
+    child_offset: Vec3,
 ) {
     if let Ok(children) = children_query.get(pivot) {
         for child in children.iter() {
@@ -1435,7 +1517,7 @@ fn rebuild_part_children(
             .spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(base_material.clone()),
-                Transform::IDENTITY,
+                Transform::from_translation(child_offset),
                 GlobalTransform::default(),
                 Visibility::Visible,
                 InheritedVisibility::default(),
@@ -1489,31 +1571,32 @@ pub fn animate_remote_player_models(
             0.0
         };
         let arm_x = player_arm_pivot_x(skin_model.0);
+        let leg_x = player_leg_pivot_x();
 
         if let Ok(mut t) = part_transforms.get_mut(parts.head) {
-            t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(0.0, player_head_pivot_y() - 0.1 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_y(head_yaw_delta)
                 * Quat::from_rotation_x(-head_pitch - 0.2 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.body) {
-            t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
+            t.translation = Vec3::new(0.0, player_body_pivot_y() - 0.1 * sneak_amount, 0.0);
             t.rotation =
                 Quat::from_rotation_x(0.5 * sneak_amount) * Quat::from_rotation_z(hurt_tilt);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
-            t.translation = Vec3::new(-arm_x, 1.125, 0.0);
+            t.translation = Vec3::new(-arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
-            t.translation = Vec3::new(arm_x, 1.125, 0.0);
+            t.translation = Vec3::new(arm_x, player_arm_pivot_y() - 0.1 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_x(-swing - arm_attack + 0.4 * sneak_amount);
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
-            t.translation = Vec3::new(-0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+            t.translation = Vec3::new(-leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
         }
         if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
-            t.translation = Vec3::new(0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+            t.translation = Vec3::new(leg_x, player_leg_pivot_y() - 0.2 * sneak_amount, 0.0);
             t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
         }
     }
@@ -1665,7 +1748,8 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_head_meshes(texture_debug),
-        Vec3::new(0.0, 1.75, 0.0),
+        Vec3::new(0.0, player_head_pivot_y(), 0.0),
+        head_child_offset(),
     );
     let body = spawn_player_part(
         commands,
@@ -1673,7 +1757,8 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_body_meshes(texture_debug),
-        Vec3::new(0.0, 1.125, 0.0),
+        Vec3::new(0.0, player_body_pivot_y(), 0.0),
+        torso_child_offset(),
     );
     let arm_left = spawn_player_part(
         commands,
@@ -1681,7 +1766,12 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_left_arm_meshes(skin_model, texture_debug),
-        Vec3::new(-player_arm_pivot_x(skin_model), 1.125, 0.0),
+        Vec3::new(-player_arm_pivot_x(skin_model), player_arm_pivot_y(), 0.0),
+        Vec3::new(
+            player_arm_child_offset_x(skin_model, false),
+            limb_child_offset().y,
+            0.0,
+        ),
     );
     let arm_right = spawn_player_part(
         commands,
@@ -1689,7 +1779,12 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_right_arm_meshes(skin_model, texture_debug),
-        Vec3::new(player_arm_pivot_x(skin_model), 1.125, 0.0),
+        Vec3::new(player_arm_pivot_x(skin_model), player_arm_pivot_y(), 0.0),
+        Vec3::new(
+            player_arm_child_offset_x(skin_model, true),
+            limb_child_offset().y,
+            0.0,
+        ),
     );
     let leg_left = spawn_player_part(
         commands,
@@ -1697,7 +1792,8 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_left_leg_meshes(texture_debug),
-        Vec3::new(-0.125, 0.375, 0.0),
+        Vec3::new(-player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        limb_child_offset(),
     );
     let leg_right = spawn_player_part(
         commands,
@@ -1705,7 +1801,8 @@ fn spawn_remote_player_model(
         materials,
         &base_mat,
         player_right_leg_meshes(texture_debug),
-        Vec3::new(0.125, 0.375, 0.0),
+        Vec3::new(player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        limb_child_offset(),
     );
 
     (
@@ -1735,7 +1832,8 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_head_meshes(texture_debug),
-        Vec3::new(0.0, 1.75, 0.0),
+        Vec3::new(0.0, player_head_pivot_y(), 0.0),
+        head_child_offset(),
     );
     let body = spawn_player_part(
         commands,
@@ -1743,7 +1841,8 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_body_meshes(texture_debug),
-        Vec3::new(0.0, 1.125, 0.0),
+        Vec3::new(0.0, player_body_pivot_y(), 0.0),
+        torso_child_offset(),
     );
     let arm_left = spawn_player_part(
         commands,
@@ -1751,7 +1850,12 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_left_arm_meshes(skin_model, texture_debug),
-        Vec3::new(-player_arm_pivot_x(skin_model), 1.125, 0.0),
+        Vec3::new(-player_arm_pivot_x(skin_model), player_arm_pivot_y(), 0.0),
+        Vec3::new(
+            player_arm_child_offset_x(skin_model, false),
+            limb_child_offset().y,
+            0.0,
+        ),
     );
     let arm_right = spawn_player_part(
         commands,
@@ -1759,7 +1863,12 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_right_arm_meshes(skin_model, texture_debug),
-        Vec3::new(player_arm_pivot_x(skin_model), 1.125, 0.0),
+        Vec3::new(player_arm_pivot_x(skin_model), player_arm_pivot_y(), 0.0),
+        Vec3::new(
+            player_arm_child_offset_x(skin_model, true),
+            limb_child_offset().y,
+            0.0,
+        ),
     );
     let leg_left = spawn_player_part(
         commands,
@@ -1767,7 +1876,8 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_left_leg_meshes(texture_debug),
-        Vec3::new(-0.125, 0.375, 0.0),
+        Vec3::new(-player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        limb_child_offset(),
     );
     let leg_right = spawn_player_part(
         commands,
@@ -1775,7 +1885,8 @@ fn spawn_player_model_with_material(
         materials,
         base_material,
         player_right_leg_meshes(texture_debug),
-        Vec3::new(0.125, 0.375, 0.0),
+        Vec3::new(player_leg_pivot_x(), player_leg_pivot_y(), 0.0),
+        limb_child_offset(),
     );
 
     LocalPlayerModelParts {
@@ -1795,6 +1906,7 @@ fn spawn_player_part(
     base_material: &Handle<StandardMaterial>,
     part_meshes: Vec<Mesh>,
     translation: Vec3,
+    child_offset: Vec3,
 ) -> Entity {
     let mut children = Vec::new();
     for mesh in part_meshes {
@@ -1802,7 +1914,7 @@ fn spawn_player_part(
             .spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(base_material.clone()),
-                Transform::IDENTITY,
+                Transform::from_translation(child_offset),
                 GlobalTransform::default(),
                 Visibility::Visible,
                 InheritedVisibility::default(),
@@ -1850,11 +1962,56 @@ fn player_body_meshes(texture_debug: &PlayerTextureDebugSettings) -> Vec<Mesh> {
 }
 
 fn player_arm_pivot_x(skin_model: PlayerSkinModel) -> f32 {
-    match skin_model {
-        // Vanilla `ModelPlayer` uses 3px arms and shifts them in by 0.5px.
-        PlayerSkinModel::Slim => 5.5 / 16.0,
-        PlayerSkinModel::Classic => 6.0 / 16.0,
+    // Vanilla uses +/-5px rotation points for both classic and slim arm models.
+    let _ = skin_model;
+    5.0 / 16.0
+}
+
+fn player_arm_child_offset_x(skin_model: PlayerSkinModel, is_right: bool) -> f32 {
+    // Slim (Alex) arms are 3px wide and shifted by 0.5px so they still connect to the body
+    // the same way as classic arms.
+    if skin_model != PlayerSkinModel::Slim {
+        return 0.0;
     }
+    let offset = 0.5 / 16.0;
+    if is_right { offset } else { -offset }
+}
+
+fn player_leg_pivot_x() -> f32 {
+    1.9 / 16.0
+}
+
+fn player_leg_pivot_y() -> f32 {
+    12.0 / 16.0
+}
+
+fn player_body_pivot_y() -> f32 {
+    24.0 / 16.0
+}
+
+fn player_arm_pivot_y() -> f32 {
+    // Vanilla arm rotation point is 2px below the top of the torso.
+    22.0 / 16.0
+}
+
+fn player_head_pivot_y() -> f32 {
+    // Neck (top of torso).
+    24.0 / 16.0
+}
+
+fn head_child_offset() -> Vec3 {
+    // Pivot at neck; head cube extends upward.
+    Vec3::new(0.0, 4.0 / 16.0, 0.0)
+}
+
+fn torso_child_offset() -> Vec3 {
+    // Pivot at shoulders (top of torso); cube extends downward.
+    Vec3::new(0.0, -(6.0 / 16.0), 0.0)
+}
+
+fn limb_child_offset() -> Vec3 {
+    // Pivot at top; cube extends downward.
+    Vec3::new(0.0, -(6.0 / 16.0), 0.0)
 }
 
 fn player_right_arm_meshes(
