@@ -29,6 +29,7 @@ pub struct RenderDebugSettings {
     pub show_look_info: bool,
     pub show_look_ray: bool,
     pub render_held_items: bool,
+    pub render_self_model: bool,
 }
 
 impl Default for RenderDebugSettings {
@@ -48,6 +49,7 @@ impl Default for RenderDebugSettings {
             show_look_info: false,
             show_look_ray: false,
             render_held_items: true,
+            render_self_model: true,
         }
     }
 }

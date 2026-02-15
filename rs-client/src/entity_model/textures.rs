@@ -51,6 +51,10 @@ impl EntityTextureCache {
         }
     }
 
+    pub fn texture(&self, path: &'static str) -> Option<Handle<Image>> {
+        self.loaded.get(path).cloned()
+    }
+
     pub fn material(&self, path: &'static str) -> Option<Handle<StandardMaterial>> {
         self.materials.get(path).cloned()
     }

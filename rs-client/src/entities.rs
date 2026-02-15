@@ -25,6 +25,8 @@ use crate::entity_model::{
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use rs_render::RenderDebugSettings;
+use rs_render::{LookAngles, Player};
+use rs_ui::ConnectUiState;
 
 const PLAYER_SCALE: Vec3 = Vec3::ONE;
 const PLAYER_Y_OFFSET: f32 = 0.0;
@@ -207,6 +209,29 @@ pub struct RemoteHeldItem(pub Entity);
 pub struct RemotePoseState {
     pub sneaking: bool,
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LocalPlayerModel;
+
+#[derive(Component, Debug, Clone)]
+pub struct LocalPlayerModelParts {
+    pub head: Entity,
+    pub body: Entity,
+    pub arm_left: Entity,
+    pub arm_right: Entity,
+    pub leg_left: Entity,
+    pub leg_right: Entity,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LocalPlayerAnimation {
+    pub walk_phase: f32,
+    pub swing_progress: f32,
+    pub hurt_progress: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct LocalPlayerSkinMaterial(pub Handle<StandardMaterial>);
 
 #[derive(Component, Debug, Clone)]
 pub struct RemoteBipedModelParts {
@@ -1044,6 +1069,230 @@ pub fn apply_remote_player_skins(
     }
 }
 
+pub fn spawn_local_player_model_system(
+    mut commands: Commands,
+    app_state: Res<AppState>,
+    render_debug: Res<RenderDebugSettings>,
+    connect_ui: Res<ConnectUiState>,
+    registry: Res<RemoteEntityRegistry>,
+    mut skin_downloader: ResMut<RemoteSkinDownloader>,
+    mut entity_textures: ResMut<EntityTextureCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    texture_debug: Res<PlayerTextureDebugSettings>,
+    player_query: Query<Entity, With<Player>>,
+    existing: Query<Entity, With<LocalPlayerModel>>,
+) {
+    let Ok(player_entity) = player_query.get_single() else {
+        return;
+    };
+
+    let connected = matches!(app_state.0, ApplicationState::Connected);
+    if !connected || !render_debug.render_self_model {
+        for e in &existing {
+            commands.entity(e).despawn_recursive();
+        }
+        return;
+    }
+
+    if !existing.is_empty() {
+        return;
+    }
+
+    // Resolve skin from PlayerInfo (online) or fall back to built-in steve texture from the pack.
+    let mut skin_handle: Option<Handle<Image>> = None;
+    let mut skin_model = PlayerSkinModel::Classic;
+
+    if connect_ui.auth_mode == rs_utils::AuthMode::Authenticated
+        && connect_ui.selected_auth_account < connect_ui.auth_accounts.len()
+    {
+        if let Ok(uuid) = connect_ui.auth_accounts[connect_ui.selected_auth_account]
+            .uuid
+            .parse::<rs_protocol::protocol::UUID>()
+        {
+            skin_model = registry
+                .player_skin_model_by_uuid
+                .get(&uuid)
+                .copied()
+                .unwrap_or(PlayerSkinModel::Classic);
+            if let Some(url) = registry.player_skin_url_by_uuid.get(&uuid) {
+                skin_downloader.request(url.clone());
+                skin_handle = skin_downloader.skin_handle(url);
+            }
+        }
+    }
+
+    if skin_handle.is_none() {
+        const STEVE: &str = "entity/steve.png";
+        entity_textures.request(STEVE);
+        skin_handle = entity_textures.texture(STEVE);
+    }
+
+    let base_mat = materials.add(StandardMaterial {
+        base_color: if skin_handle.is_some() {
+            Color::WHITE
+        } else {
+            Color::srgb(0.85, 0.78, 0.72)
+        },
+        base_color_texture: skin_handle,
+        alpha_mode: AlphaMode::Mask(0.5),
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        ..Default::default()
+    });
+
+    let model_root = commands
+        .spawn((
+            Name::new("LocalPlayerModel"),
+            LocalPlayerModel,
+            // Match the remote player model facing (player root doesn't include the +PI).
+            Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+            GlobalTransform::default(),
+            Visibility::Inherited,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            LocalPlayerSkinMaterial(base_mat.clone()),
+        ))
+        .id();
+    commands.entity(player_entity).add_child(model_root);
+
+    let parts = spawn_player_model_with_material(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &base_mat,
+        skin_model,
+        &texture_debug,
+    );
+    commands.entity(model_root).add_child(parts.head);
+    commands.entity(model_root).add_child(parts.body);
+    commands.entity(model_root).add_child(parts.arm_left);
+    commands.entity(model_root).add_child(parts.arm_right);
+    commands.entity(model_root).add_child(parts.leg_left);
+    commands.entity(model_root).add_child(parts.leg_right);
+
+    // First-person: hide head so we don't stare at the inside of our skull.
+    commands.entity(parts.head).insert(Visibility::Hidden);
+
+    commands.entity(model_root).insert((
+        parts,
+        LocalPlayerAnimation {
+            walk_phase: 0.0,
+            swing_progress: 1.0,
+            hurt_progress: 1.0,
+        },
+    ));
+}
+
+pub fn update_local_player_skin_system(
+    app_state: Res<AppState>,
+    connect_ui: Res<ConnectUiState>,
+    registry: Res<RemoteEntityRegistry>,
+    mut downloader: ResMut<RemoteSkinDownloader>,
+    mut entity_textures: ResMut<EntityTextureCache>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<&LocalPlayerSkinMaterial, With<LocalPlayerModel>>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected) {
+        return;
+    }
+    let Ok(local_mat) = query.get_single() else {
+        return;
+    };
+    let Some(material) = materials.get_mut(&local_mat.0) else {
+        return;
+    };
+    if material.base_color_texture.is_some() {
+        return;
+    }
+
+    // Try online skin first.
+    if connect_ui.auth_mode == rs_utils::AuthMode::Authenticated
+        && connect_ui.selected_auth_account < connect_ui.auth_accounts.len()
+    {
+        if let Ok(uuid) = connect_ui.auth_accounts[connect_ui.selected_auth_account]
+            .uuid
+            .parse::<rs_protocol::protocol::UUID>()
+        {
+            if let Some(url) = registry.player_skin_url_by_uuid.get(&uuid)
+                && {
+                    downloader.request(url.clone());
+                    true
+                }
+                && let Some(tex) = downloader.skin_handle(url)
+            {
+                material.base_color_texture = Some(tex);
+                material.base_color = Color::WHITE;
+                return;
+            }
+        }
+    }
+
+    // Fall back to steve from the pack when available.
+    const STEVE: &str = "entity/steve.png";
+    entity_textures.request(STEVE);
+    if let Some(tex) = entity_textures.texture(STEVE) {
+        material.base_color_texture = Some(tex);
+        material.base_color = Color::WHITE;
+    }
+}
+
+pub fn animate_local_player_model_system(
+    time: Res<Time>,
+    input: Res<crate::sim::CurrentInput>,
+    sim_state: Res<crate::sim::SimState>,
+    render_debug: Res<RenderDebugSettings>,
+    mut roots: Query<(&LocalPlayerModelParts, &mut LocalPlayerAnimation), With<LocalPlayerModel>>,
+    mut part_transforms: Query<&mut Transform, Without<LocalPlayerModel>>,
+    player_query: Query<&LookAngles, With<Player>>,
+) {
+    if !render_debug.render_self_model {
+        return;
+    }
+
+    let Ok(look) = player_query.get_single() else {
+        return;
+    };
+    let Ok((parts, mut anim)) = roots.get_single_mut() else {
+        return;
+    };
+
+    let dt = time.delta_secs().max(1e-4);
+    let vel = sim_state.current.vel;
+    let speed = (Vec2::new(vel.x, vel.z).length() * 20.0).min(8.0);
+    let stride = (speed / 4.0).clamp(0.0, 1.0);
+    anim.walk_phase += speed * dt * 2.5;
+
+    let swing = anim.walk_phase.sin() * 0.7 * stride;
+    let sneak_amount = if input.0.sneak { 1.0 } else { 0.0 };
+
+    // Head follows camera pitch; yaw comes from the player root rotation.
+    if let Ok(mut t) = part_transforms.get_mut(parts.head) {
+        t.translation = Vec3::new(0.0, 1.75 - 0.1 * sneak_amount, 0.0);
+        t.rotation = Quat::from_rotation_x(-look.pitch - 0.2 * sneak_amount);
+    }
+    if let Ok(mut t) = part_transforms.get_mut(parts.body) {
+        t.translation = Vec3::new(0.0, 1.125 - 0.1 * sneak_amount, 0.0);
+        t.rotation = Quat::from_rotation_x(0.5 * sneak_amount);
+    }
+    if let Ok(mut t) = part_transforms.get_mut(parts.arm_left) {
+        t.translation = Vec3::new(-0.375, 1.125, 0.0);
+        t.rotation = Quat::from_rotation_x(swing + 0.4 * sneak_amount);
+    }
+    if let Ok(mut t) = part_transforms.get_mut(parts.arm_right) {
+        t.translation = Vec3::new(0.375, 1.125, 0.0);
+        t.rotation = Quat::from_rotation_x(-swing + 0.4 * sneak_amount);
+    }
+    if let Ok(mut t) = part_transforms.get_mut(parts.leg_left) {
+        t.translation = Vec3::new(-0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+        t.rotation = Quat::from_rotation_x(-swing * (1.0 - 0.6 * sneak_amount));
+    }
+    if let Ok(mut t) = part_transforms.get_mut(parts.leg_right) {
+        t.translation = Vec3::new(0.125, 0.375 - 0.2 * sneak_amount, 0.0);
+        t.rotation = Quat::from_rotation_x(swing * (1.0 - 0.6 * sneak_amount));
+    }
+}
+
 pub fn rebuild_remote_player_meshes_on_texture_debug_change(
     settings: Res<PlayerTextureDebugSettings>,
     mut commands: Commands,
@@ -1416,6 +1665,73 @@ fn spawn_remote_player_model(
         },
         vec![base_mat],
     )
+}
+
+fn spawn_player_model_with_material(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    base_material: &Handle<StandardMaterial>,
+    skin_model: PlayerSkinModel,
+    texture_debug: &PlayerTextureDebugSettings,
+) -> LocalPlayerModelParts {
+    let head = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_head_meshes(texture_debug),
+        Vec3::new(0.0, 1.75, 0.0),
+    );
+    let body = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_body_meshes(texture_debug),
+        Vec3::new(0.0, 1.125, 0.0),
+    );
+    let arm_left = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_left_arm_meshes(skin_model, texture_debug),
+        Vec3::new(-0.375, 1.125, 0.0),
+    );
+    let arm_right = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_right_arm_meshes(skin_model, texture_debug),
+        Vec3::new(0.375, 1.125, 0.0),
+    );
+    let leg_left = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_left_leg_meshes(texture_debug),
+        Vec3::new(-0.125, 0.375, 0.0),
+    );
+    let leg_right = spawn_player_part(
+        commands,
+        meshes,
+        materials,
+        base_material,
+        player_right_leg_meshes(texture_debug),
+        Vec3::new(0.125, 0.375, 0.0),
+    );
+
+    LocalPlayerModelParts {
+        head,
+        body,
+        arm_left,
+        arm_right,
+        leg_left,
+        leg_right,
+    }
 }
 
 fn spawn_player_part(

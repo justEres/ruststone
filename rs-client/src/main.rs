@@ -188,6 +188,12 @@ fn main() {
                     .after(entity_model::entity_texture_cache_tick),
                 sim_systems::visual_smoothing_system,
                 sim_systems::apply_visual_transform_system,
+                entities::spawn_local_player_model_system
+                    .after(sim_systems::apply_visual_transform_system),
+                entities::update_local_player_skin_system
+                    .after(entities::spawn_local_player_model_system),
+                entities::animate_local_player_model_system
+                    .after(sim_systems::apply_visual_transform_system),
                 sim_systems::local_held_item_view_system
                     .after(sim_systems::apply_visual_transform_system),
                 sim_systems::draw_entity_hitboxes_system
