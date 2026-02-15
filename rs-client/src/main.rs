@@ -141,6 +141,7 @@ fn main() {
         .insert_resource(sim::ZoomState::default())
         .insert_resource(sim::CameraPerspectiveState::default())
         .insert_resource(sim::CameraPerspectiveAltHold::default())
+        .insert_resource(sim::LocalArmSwing::default())
         .insert_resource(sim::collision::WorldCollisionMap::default())
         .insert_resource(sim_systems::PredictionHistory::default())
         .insert_resource(sim_systems::LatencyEstimate::default())
@@ -197,6 +198,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                sim_systems::local_arm_swing_tick_system,
                 entities::spawn_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
                 entities::apply_local_player_model_visibility_system
@@ -206,6 +208,10 @@ fn main() {
                 entities::sync_local_player_skin_model_system
                     .after(entities::update_local_player_skin_system)
                     .before(entities::animate_local_player_model_system),
+                entities::first_person_viewmodel_system
+                    .after(entities::sync_local_player_skin_model_system),
+                entities::animate_first_person_viewmodel_system
+                    .after(entities::first_person_viewmodel_system),
                 entities::animate_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
                 sim_systems::local_held_item_view_system

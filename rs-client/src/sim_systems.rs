@@ -16,7 +16,7 @@ use crate::sim::predict::PredictionBuffer;
 use crate::sim::reconcile::reconcile;
 use crate::sim::{
     CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CurrentInput,
-    DebugStats, DebugUiState, PredictedFrame, SimClock, SimRenderState, SimState,
+    DebugStats, DebugUiState, LocalArmSwing, PredictedFrame, SimClock, SimRenderState, SimState,
     VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
@@ -229,6 +229,7 @@ pub fn local_held_item_view_system(
         || ui_state.inventory_open
         || player_status.dead
         || !render_debug.render_held_items
+        || render_debug.render_first_person_arms
         || !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson)
     {
         for e in existing.iter() {
@@ -462,6 +463,15 @@ pub fn fixed_sim_tick_system(
     timings.fixed_tick_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
+pub fn local_arm_swing_tick_system(time: Res<Time>, mut swing: ResMut<LocalArmSwing>) {
+    if swing.progress >= 1.0 {
+        swing.progress = 1.0;
+        return;
+    }
+    let dt = time.delta_secs().clamp(0.0, 0.05);
+    swing.progress = (swing.progress + dt * 3.6).min(1.0);
+}
+
 pub fn net_event_apply_system(
     mut net_events: ResMut<NetEventQueue>,
     mut sim_render: ResMut<SimRenderState>,
@@ -675,6 +685,7 @@ pub fn world_interaction_system(
     to_net: Res<ToNet>,
     inventory_state: Res<InventoryState>,
     sim_state: Res<SimState>,
+    mut swing: ResMut<LocalArmSwing>,
     mut break_indicator: ResMut<BreakIndicator>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -728,6 +739,7 @@ pub fn world_interaction_system(
 
     if left_just_pressed {
         let _ = to_net.0.send(ToNetMessage::SwingArm);
+        swing.progress = 0.0;
     }
 
     if left_held {
@@ -1265,6 +1277,10 @@ pub fn debug_overlay_system(
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
                 ui.checkbox(&mut render_debug.render_held_items, "Render held items");
+                ui.checkbox(
+                    &mut render_debug.render_first_person_arms,
+                    "First-person arms",
+                );
                 ui.checkbox(&mut render_debug.render_self_model, "Render self model");
                 ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
                 ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");

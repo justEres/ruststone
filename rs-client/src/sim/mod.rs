@@ -41,6 +41,18 @@ pub struct CameraPerspectiveAltHold {
     pub saved_mode: Option<CameraPerspectiveMode>,
 }
 
+#[derive(Debug, Resource, Clone, Copy)]
+pub struct LocalArmSwing {
+    /// 0.0 = just started, 1.0 = finished
+    pub progress: f32,
+}
+
+impl Default for LocalArmSwing {
+    fn default() -> Self {
+        Self { progress: 1.0 }
+    }
+}
+
 #[derive(Debug, Default, Resource)]
 pub struct SimClock {
     pub tick: u32,
