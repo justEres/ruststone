@@ -19,3 +19,7 @@ rs-ui = { version = "0.1.0", path = "../rs-ui" }
 rs-utils = { version = "0.1.0", path = "../rs-utils" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+default = []
+perf_timing = []

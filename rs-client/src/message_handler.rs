@@ -13,6 +13,7 @@ use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::{SimClock, SimReady, SimRenderState, SimState};
 use crate::sim_systems::PredictionHistory;
+use crate::timing::Timing;
 
 const FLAG_REL_X: u8 = 0x01;
 const FLAG_REL_Y: u8 = 0x02;
@@ -38,7 +39,7 @@ pub fn handle_messages(
     mut history: ResMut<PredictionHistory>,
     mut inventory_state: ResMut<InventoryState>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     while let Ok(msg) = from_net.0.try_recv() {
         match msg {
             FromNetMessage::Connected => {
@@ -165,7 +166,7 @@ pub fn handle_messages(
             _ => { /* Ignore other messages for now */ }
         }
     }
-    timings.handle_messages_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.handle_messages_ms = timer.ms();
 }
 
 fn apply_inventory_message(inventory_state: &mut InventoryState, event: InventoryMessage) {

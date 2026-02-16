@@ -23,6 +23,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
+use crate::timing::Timing;
 use crate::entities::RemoteEntity;
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
@@ -80,7 +81,7 @@ pub fn input_collect_system(
     player_status: Res<rs_utils::PlayerStatus>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
         || ui_state.paused
@@ -93,7 +94,7 @@ pub fn input_collect_system(
         input.0.sprint = false;
         input.0.sneak = false;
         input.0.jump = false;
-        timings.input_collect_ms = start.elapsed().as_secs_f32() * 1000.0;
+        timings.input_collect_ms = timer.ms();
         return;
     }
 
@@ -128,7 +129,7 @@ pub fn input_collect_system(
 
     input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    timings.input_collect_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.input_collect_ms = timer.ms();
 }
 
 pub fn camera_zoom_system(
@@ -411,9 +412,9 @@ pub fn fixed_sim_tick_system(
     sim_ready: Res<crate::sim::SimReady>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     if !matches!(app_state.0, ApplicationState::Connected) || !sim_ready.0 {
-        timings.fixed_tick_ms = start.elapsed().as_secs_f32() * 1000.0;
+        timings.fixed_tick_ms = timer.ms();
         return;
     }
     let world = WorldCollision::with_map(&collision_map);
@@ -460,7 +461,7 @@ pub fn fixed_sim_tick_system(
         });
         latency.last_sent = Some(Instant::now());
     }
-    timings.fixed_tick_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.fixed_tick_ms = timer.ms();
 }
 
 pub fn local_arm_swing_tick_system(time: Res<Time>, mut swing: ResMut<LocalArmSwing>) {
@@ -485,7 +486,7 @@ pub fn net_event_apply_system(
     mut sim_ready: ResMut<crate::sim::SimReady>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     let world = WorldCollision::with_map(&collision_map);
     const FORCE_TELEPORT_DISTANCE: f32 = 8.0;
     for event in net_events.drain() {
@@ -558,7 +559,7 @@ pub fn net_event_apply_system(
             }
         }
     }
-    timings.net_apply_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.net_apply_ms = timer.ms();
 }
 
 pub fn visual_smoothing_system(
@@ -567,12 +568,12 @@ pub fn visual_smoothing_system(
     mut debug: ResMut<DebugStats>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     let decay = 0.15f32;
     let factor = (1.0 - decay).powf(time.delta_secs() * 20.0);
     offset.0 *= factor;
     debug.smoothing_offset_len = offset.0.length();
-    timings.smoothing_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.smoothing_ms = timer.ms();
 }
 
 pub fn apply_visual_transform_system(
@@ -588,7 +589,7 @@ pub fn apply_visual_transform_system(
     mut eye_height: Local<f32>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     const EYE_HEIGHT_STAND: f32 = 1.62;
     const EYE_HEIGHT_SNEAK: f32 = 1.54;
     let alpha = fixed_time.overstep_fraction().clamp(0.0, 1.0);
@@ -645,7 +646,7 @@ pub fn apply_visual_transform_system(
             camera_transform.rotation = cam_local_rot;
         }
     }
-    timings.apply_transform_ms = start.elapsed().as_secs_f32() * 1000.0;
+    timings.apply_transform_ms = timer.ms();
 }
 
 fn clip_camera_to_world(world: &WorldCollisionMap, anchor: Vec3, desired: Vec3) -> Vec3 {
@@ -1229,7 +1230,7 @@ pub fn debug_overlay_system(
     input: Res<CurrentInput>,
     mut timings: ResMut<PerfTimings>,
 ) {
-    let start = std::time::Instant::now();
+    let timer = Timing::start();
     if !debug_ui.open {
         timings.debug_ui_ms = 0.0;
         return;
@@ -1459,6 +1460,6 @@ pub fn debug_overlay_system(
                 ));
             }
         });
-    let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+    let elapsed_ms = timer.ms();
     timings.debug_ui_ms = elapsed_ms;
 }
