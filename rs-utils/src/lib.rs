@@ -16,7 +16,7 @@ pub use registry::{
 #[derive(Resource)]
 pub struct AppState(pub ApplicationState);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ApplicationState {
     Disconnected,
     Connecting,

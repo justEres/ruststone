@@ -1089,6 +1089,7 @@ pub fn draw_chunk_debug_system(
     mut gizmos: Gizmos,
     render_debug: Res<RenderDebugSettings>,
     app_state: Res<AppState>,
+    collision_map: Res<WorldCollisionMap>,
     chunks: Query<(&ChunkRoot, &Visibility)>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
 ) {
@@ -1117,6 +1118,21 @@ pub fn draw_chunk_debug_system(
         let dir = *cam.forward();
         let end = origin + dir * 3.0;
         gizmos.line(origin, end, Color::srgba(1.0, 0.2, 0.2, 1.0));
+    }
+
+    if render_debug.show_target_block_outline {
+        let Ok(cam) = camera.get_single() else {
+            return;
+        };
+        let origin = cam.translation();
+        let dir = *cam.forward();
+        if let Some(hit) = raycast_block(&collision_map, origin, dir, 6.0) {
+            let inflate = 0.0025;
+            let min = Vec3::new(hit.block.x as f32, hit.block.y as f32, hit.block.z as f32)
+                - Vec3::splat(inflate);
+            let max = min + Vec3::splat(1.0 + inflate * 2.0);
+            draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.02, 0.02, 0.02, 1.0));
+        }
     }
 }
 
@@ -1287,6 +1303,10 @@ pub fn debug_overlay_system(
                 ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
                 ui.checkbox(&mut render_debug.show_look_info, "Look info");
                 ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
+                ui.checkbox(
+                    &mut render_debug.show_target_block_outline,
+                    "Target block outline",
+                );
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
