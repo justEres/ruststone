@@ -34,6 +34,8 @@ pub struct UiState {
 pub struct ChunkSection {
     pub y: u8,
     pub blocks: Vec<u16>,
+    pub block_light: Vec<u8>,
+    pub sky_light: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
