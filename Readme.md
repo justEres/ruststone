@@ -11,6 +11,8 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - World/chunk decoding and meshing with async mesh generation.
 - Chunk metadata/state decode kept end-to-end (`id + meta`) and used in render/collision paths.
 - Block texture atlas rendering, water transparency improvements, biome tint support.
+- Dedicated water reflection pass (toggleable) with mirrored world sampling, wave distortion, and skybox-aware reflections.
+- Water reflection tuning controls (strength, near-boost, optional blue tint, wave strength/speed).
 - State-aware texture selection for metadata variants (e.g. acacia/dark-oak logs & leaves, flower variants).
 - Non-cube rendering for slabs and stairs (metadata-driven orientation/half) instead of full-cube fallback.
 - Manual/engine culling toggles, render distance controls, wireframe and performance overlays.

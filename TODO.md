@@ -4,6 +4,20 @@
 - proper options menu which saves in toml format
 - metadata stuff -> hovering over items in inventory and showing tooltips
 
+- Bugfixes:
+    - block outline for water -> should not be there
+
+- Inventory, UI:
+    - armor slots
+    - armor bar over hotbar
+    - chests
+    - later:
+        - crafting
+        - smelting
+        - enchanting
+        - anvil
+
+
 - creative mode
     - no inventory but flying -> for testing world rendering and mesh building performance
 

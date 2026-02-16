@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::pbr::CascadeShadowConfigBuilder;
+use bevy::render::view::RenderLayers;
 
 use crate::components::{ShadowCasterLight, WorldRoot};
+use crate::reflection::{MAIN_RENDER_LAYER, REFLECTION_RENDER_LAYER};
 
 #[derive(Resource)]
 pub struct WorldSettings {
@@ -32,6 +34,7 @@ pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
         CascadeShadowConfigBuilder::default().build(),
         ShadowCasterLight,
         Transform::from_xyz(8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+        RenderLayers::layer(MAIN_RENDER_LAYER).with(REFLECTION_RENDER_LAYER),
     ));
 
     commands.spawn((
@@ -41,6 +44,7 @@ pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
             ..default()
         },
         Transform::from_xyz(-6.0, 10.0, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
+        RenderLayers::layer(MAIN_RENDER_LAYER).with(REFLECTION_RENDER_LAYER),
     ));
 
     commands.insert_resource(AmbientLight {
