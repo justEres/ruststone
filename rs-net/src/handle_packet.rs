@@ -2,9 +2,9 @@ use base64::Engine;
 use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
-    BlockUpdate, FromNetMessage, InventoryItemStack, InventoryMessage, InventoryWindowInfo,
-    MobKind, NetEntityAnimation, NetEntityKind, NetEntityMessage, ObjectKind, PlayerPosition,
-    PlayerSkinModel, item_name,
+    BlockUpdate, FromNetMessage, InventoryEnchantment, InventoryItemMeta, InventoryItemStack,
+    InventoryMessage, InventoryWindowInfo, MobKind, NetEntityAnimation, NetEntityKind,
+    NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, item_name,
 };
 
 use crate::chunk_decode;
@@ -774,14 +774,46 @@ fn block_state_to_id_meta(block_state: i32) -> u16 {
 fn protocol_stack_to_inventory_item(
     stack: Option<rs_protocol::item::Stack>,
 ) -> Option<InventoryItemStack> {
-    stack.map(|s| InventoryItemStack {
-        item_id: s.id as i32,
-        count: s.count.clamp(0, u8::MAX as isize) as u8,
-        damage: s
-            .damage
-            .unwrap_or(0)
-            .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
+    stack.map(|s| {
+        let meta = protocol_stack_meta_to_inventory_meta(&s);
+        InventoryItemStack {
+            item_id: s.id as i32,
+            count: s.count.clamp(0, u8::MAX as isize) as u8,
+            damage: s
+                .damage
+                .unwrap_or(0)
+                .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
+            meta,
+        }
     })
+}
+
+fn protocol_stack_meta_to_inventory_meta(stack: &rs_protocol::item::Stack) -> InventoryItemMeta {
+    let display_name = stack
+        .meta
+        .display_name()
+        .map(|name| name.to_string())
+        .filter(|name| !name.is_empty());
+    let lore = stack
+        .meta
+        .lore()
+        .into_iter()
+        .map(|line| line.to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let enchantments = stack
+        .meta
+        .raw_enchantments()
+        .into_iter()
+        .map(|(id, level)| InventoryEnchantment { id, level })
+        .collect();
+    InventoryItemMeta {
+        display_name,
+        lore,
+        enchantments,
+        repair_cost: stack.meta.repair_cost(),
+        unbreakable: stack.meta.unbreakable(),
+    }
 }
 
 fn handle_entity_metadata(
@@ -798,14 +830,7 @@ fn handle_entity_metadata(
     }
 
     if let Some(MetadataValue::OptionalItemStack(stack_opt)) = metadata.get_raw(10) {
-        let stack_converted = stack_opt.as_ref().map(|stack| InventoryItemStack {
-            item_id: stack.id as i32,
-            count: stack.count.clamp(0, u8::MAX as isize) as u8,
-            damage: stack
-                .damage
-                .unwrap_or(0)
-                .clamp(i16::MIN as isize, i16::MAX as isize) as i16,
-        });
+        let stack_converted = protocol_stack_to_inventory_item(stack_opt.clone());
 
         let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetItemStack {
             entity_id,

@@ -198,6 +198,44 @@ impl ItemMeta {
             None => vec![],
         }
     }
+
+    pub fn raw_enchantments(&self) -> Vec<(i16, i16)> {
+        let mut out = Vec::new();
+        let Some(tag) = self.0.as_ref() else {
+            return out;
+        };
+        let Some(comp) = tag.1.as_compound() else {
+            return out;
+        };
+        for list_key in ["ench", "StoredEnchantments"] {
+            let Some(entries) = comp.get(list_key).and_then(|v| v.as_list()) else {
+                continue;
+            };
+            for ench in entries {
+                let Some(ench_comp) = ench.as_compound() else {
+                    continue;
+                };
+                let Some(id) = ench_comp.get("id").and_then(|v| v.as_short()) else {
+                    continue;
+                };
+                let Some(level) = ench_comp.get("lvl").and_then(|v| v.as_short()) else {
+                    continue;
+                };
+                out.push((id, level));
+            }
+        }
+        out
+    }
+
+    pub fn unbreakable(&self) -> bool {
+        self.0
+            .as_ref()
+            .and_then(|tag| tag.1.as_compound())
+            .and_then(|comp| comp.get("Unbreakable"))
+            .and_then(|val| val.as_byte())
+            .unwrap_or(0)
+            != 0
+    }
 }
 
 pub struct Enchantment {
