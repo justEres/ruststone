@@ -648,13 +648,14 @@ fn apply_options(
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
     render.render_distance_chunks = options.render_distance_chunks.clamp(2, 32);
-    render.shadows_enabled = options.shadows_enabled;
-    render.fxaa_enabled = options.fxaa_enabled;
-    render.manual_frustum_cull = options.manual_frustum_cull;
     if let Some(preset) = LightingQualityPreset::from_options_value(&options.lighting_quality) {
         render.lighting_quality = preset;
         apply_lighting_preset_defaults(preset, render);
     }
+    // Explicit toggles in options file override preset defaults.
+    render.shadows_enabled = options.shadows_enabled;
+    render.fxaa_enabled = options.fxaa_enabled;
+    render.manual_frustum_cull = options.manual_frustum_cull;
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync

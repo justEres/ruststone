@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::pbr::CascadeShadowConfigBuilder;
 
 use crate::components::{ShadowCasterLight, WorldRoot};
 
@@ -28,6 +29,7 @@ pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
             shadow_normal_bias: 0.6,
             ..default()
         },
+        CascadeShadowConfigBuilder::default().build(),
         ShadowCasterLight,
         Transform::from_xyz(8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
