@@ -2,6 +2,7 @@
 
 - Block borders
 - proper options menu which saves in toml format
+- metadata stuff -> hovering over items in inventory and showing tooltips
 
 - creative mode
     - no inventory but flying -> for testing world rendering and mesh building performance
