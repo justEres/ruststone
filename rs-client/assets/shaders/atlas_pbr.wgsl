@@ -51,9 +51,17 @@ fn atlas_uv_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> vec2<
     return tile_origin + inset + fract(local_uv) * (tile_size - inset * 2.0);
 }
 
+fn safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+    let len2 = dot(v, v);
+    if len2 > 0.000001 {
+        return v * inverseSqrt(len2);
+    }
+    return fallback;
+}
+
 fn apply_voxel_lighting(base: vec4<f32>, normal: vec3<f32>, view_z: f32, view_dir: vec3<f32>) -> vec4<f32> {
     let quality_mode = lighting_uniform.quality_and_water.x;
-    let sun_dir = normalize(lighting_uniform.sun_dir_and_strength.xyz);
+    let sun_dir = safe_normalize(lighting_uniform.sun_dir_and_strength.xyz, vec3(0.0, 1.0, 0.0));
     let sun_strength = lighting_uniform.sun_dir_and_strength.w;
     let ambient_strength = lighting_uniform.ambient_and_fog.x;
 
@@ -159,9 +167,9 @@ fn fragment(
     var out: FragmentOutput;
     let voxel_lit = apply_voxel_lighting(
         pbr_input.material.base_color,
-        normalize(pbr_input.N),
+        safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0)),
         abs(in.position.w),
-        normalize(pbr_input.V),
+        safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0)),
     );
     out.color = voxel_lit;
 

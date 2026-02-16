@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::pbr::{CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 
 use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
@@ -61,6 +62,10 @@ struct LightingPresetParams {
     fog_end: f32,
     water_absorption: f32,
     water_fresnel: f32,
+    shadow_map_size: usize,
+    shadow_cascades: usize,
+    shadow_max_distance: f32,
+    shadow_first_cascade_far_bound: f32,
 }
 
 fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
@@ -74,6 +79,10 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 0.0,
             water_absorption: 0.0,
             water_fresnel: 0.0,
+            shadow_map_size: 1024,
+            shadow_cascades: 1,
+            shadow_max_distance: 40.0,
+            shadow_first_cascade_far_bound: 12.0,
         },
         LightingQualityPreset::Standard => LightingPresetParams {
             sun_dir: Vec3::new(0.30, 0.86, 0.42).normalize(),
@@ -84,6 +93,10 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 0.0,
             water_absorption: 0.0,
             water_fresnel: 0.0,
+            shadow_map_size: 1024,
+            shadow_cascades: 1,
+            shadow_max_distance: 40.0,
+            shadow_first_cascade_far_bound: 12.0,
         },
         LightingQualityPreset::FancyLow => LightingPresetParams {
             sun_dir: Vec3::new(0.22, 0.88, 0.41).normalize(),
@@ -94,6 +107,10 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 220.0,
             water_absorption: 0.18,
             water_fresnel: 0.12,
+            shadow_map_size: 1024,
+            shadow_cascades: 2,
+            shadow_max_distance: 96.0,
+            shadow_first_cascade_far_bound: 28.0,
         },
         LightingQualityPreset::FancyHigh => LightingPresetParams {
             sun_dir: Vec3::new(0.19, 0.90, 0.39).normalize(),
@@ -104,6 +121,10 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 170.0,
             water_absorption: 0.26,
             water_fresnel: 0.18,
+            shadow_map_size: 2048,
+            shadow_cascades: 3,
+            shadow_max_distance: 140.0,
+            shadow_first_cascade_far_bound: 34.0,
         },
     }
 }
@@ -139,7 +160,12 @@ pub fn apply_lighting_quality(
     settings: Res<RenderDebugSettings>,
     assets: Res<ChunkRenderAssets>,
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
-    mut lights: Query<(&mut DirectionalLight, Option<&ShadowCasterLight>)>,
+    mut lights: Query<(
+        &mut DirectionalLight,
+        Option<&ShadowCasterLight>,
+        Option<&mut CascadeShadowConfig>,
+    )>,
+    mut shadow_map: ResMut<DirectionalLightShadowMap>,
 ) {
     if !settings.is_changed() {
         return;
@@ -158,6 +184,9 @@ pub fn apply_lighting_quality(
         mat.extension.lighting = lighting_uniform_for(settings.lighting_quality, true);
     }
 
+    let params = preset_params(settings.lighting_quality);
+    shadow_map.size = params.shadow_map_size;
+
     let allow_shadows = settings.shadows_enabled
         && matches!(
             settings.lighting_quality,
@@ -168,10 +197,20 @@ pub fn apply_lighting_quality(
         LightingQualityPreset::FancyLow | LightingQualityPreset::FancyHigh
     );
 
-    for (mut light, shadow_light) in &mut lights {
+    for (mut light, shadow_light, cascade_cfg) in &mut lights {
         if shadow_light.is_some() {
             light.shadows_enabled = allow_shadows;
             light.illuminance = if is_fancy { 9_000.0 } else { 7_000.0 };
+            if let Some(mut cascade_cfg) = cascade_cfg {
+                *cascade_cfg = CascadeShadowConfigBuilder {
+                    num_cascades: params.shadow_cascades,
+                    maximum_distance: params.shadow_max_distance,
+                    first_cascade_far_bound: params.shadow_first_cascade_far_bound,
+                    minimum_distance: 0.1,
+                    ..default()
+                }
+                .into();
+            }
         } else {
             light.illuminance = if is_fancy { 2_300.0 } else { 2_000.0 };
         }
