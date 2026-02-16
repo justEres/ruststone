@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, ShaderRef, ShaderType, TextureDimension, TextureFormat,
+    AsBindGroup, Extent3d, ShaderRef, ShaderType, TextureDimension, TextureFormat, TextureUsages,
 };
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
 use rs_utils::{
@@ -37,6 +37,9 @@ pub struct AtlasLightingUniform {
     pub ambient_and_fog: Vec4,
     pub quality_and_water: Vec4,
     pub color_grading: Vec4,
+    pub water_effects: Vec4,
+    pub water_controls: Vec4,
+    pub reflection_view_proj: Mat4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -44,6 +47,9 @@ pub struct AtlasTextureExtension {
     #[texture(100)]
     #[sampler(101)]
     pub atlas: Handle<Image>,
+    #[texture(103)]
+    #[sampler(104)]
+    pub reflection: Handle<Image>,
     #[uniform(102)]
     pub lighting: AtlasLightingUniform,
 }
@@ -280,6 +286,7 @@ pub struct ChunkRenderAssets {
     pub cutout_culled_material: Handle<ChunkAtlasMaterial>,
     pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
+    pub reflection_texture: Handle<Image>,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
 }
@@ -300,6 +307,10 @@ impl FromWorld for ChunkRenderAssets {
             let mut images = world.resource_mut::<Assets<Image>>();
             images.add(atlas_image)
         };
+        let reflection_texture = {
+            let mut images = world.resource_mut::<Assets<Image>>();
+            images.add(create_reflection_target_image(1024, 1024))
+        };
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
         let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
 
@@ -315,6 +326,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
+                reflection: reflection_texture.clone(),
                 lighting: lighting_uniform_for(&settings, false),
             },
         });
@@ -327,11 +339,13 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
+                depth_bias: 1.0,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
+                reflection: reflection_texture.clone(),
                 lighting: lighting_uniform_for(&settings, true),
             },
         });
@@ -349,6 +363,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
+                reflection: reflection_texture.clone(),
                 lighting: lighting_uniform_for(&settings, false),
             },
         });
@@ -366,6 +381,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
+                reflection: reflection_texture.clone(),
                 lighting: lighting_uniform_for(&settings, false),
             },
         });
@@ -376,6 +392,7 @@ impl FromWorld for ChunkRenderAssets {
             cutout_culled_material,
             transparent_material,
             atlas: atlas_handle,
+            reflection_texture,
             texture_mapping,
             biome_tints,
         }
@@ -444,7 +461,10 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         let row = (idx as u32) / ATLAS_COLUMNS;
         let x = col * tile_w;
         let y = row * tile_h;
-        imageops::overlay(atlas_buf, &rgba, x.into(), y.into());
+        // Copy texels verbatim into the atlas.
+        // `overlay` alpha-composites against the destination and can darken
+        // partially transparent texels, which breaks cutout-style block textures.
+        imageops::replace(atlas_buf, &rgba, x.into(), y.into());
     }
 
     let atlas = atlas.unwrap_or_else(|| {
@@ -503,6 +523,23 @@ fn bevy_image_from_rgba(img: DynamicImage) -> Image {
         RenderAssetUsages::default(),
     );
     image.data = Some(data);
+    image
+}
+
+pub fn create_reflection_target_image(width: u32, height: u32) -> Image {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Bgra8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
     image
 }
 
@@ -2042,10 +2079,16 @@ fn is_liquid(block_id: u16) -> bool {
 }
 
 fn render_group_for_block(block_id: u16) -> MaterialGroup {
-    if is_transparent_block(block_type(block_id)) {
+    let id = block_type(block_id);
+    if is_transparent_block(id) {
         return MaterialGroup::Transparent;
     }
-    if is_leaves_block(block_type(block_id)) {
+    if is_leaves_block(id) {
+        return MaterialGroup::CutoutCulled;
+    }
+    // Full glass / stained glass blocks should use per-pixel alpha cutout
+    // (opaque texels remain opaque; alpha texels are fully discarded).
+    if matches!(id, 20 | 95 | 160) {
         return MaterialGroup::CutoutCulled;
     }
     if matches!(
@@ -2058,16 +2101,21 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
 }
 
 fn is_occluding_block(block_id: u16) -> bool {
-    if block_type(block_id) == 0 {
+    let id = block_type(block_id);
+    if id == 0 {
         return false;
     }
     if is_liquid(block_id) {
         return true;
     }
-    if is_leaves_block(block_type(block_id)) {
+    if is_alpha_cutout_cube(id) {
         return false;
     }
     !is_custom_block(block_id)
+}
+
+fn is_alpha_cutout_cube(id: u16) -> bool {
+    is_leaves_block(id) || matches!(id, 20 | 95 | 160)
 }
 
 fn fence_connects_to(neighbor_state: u16) -> bool {
@@ -2107,10 +2155,12 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
     if is_liquid(neighbor_id) {
         return is_liquid(block_id);
     }
-    // Leaves should not hide adjacent solid faces (so holes show what's behind),
-    // but we still want to cull internal faces between leaves for performance.
-    if is_leaves_block(block_type(neighbor_id)) {
-        return is_leaves_block(block_type(block_id));
+    // Alpha-cutout cubes (leaves/glass variants) must not hide solid neighbor faces,
+    // otherwise transparent texels show the sky instead of geometry behind.
+    // We only cull internal faces between identical cutout cubes.
+    let neighbor_type = block_type(neighbor_id);
+    if is_alpha_cutout_cube(neighbor_type) {
+        return block_type(block_id) == neighbor_type && block_id == neighbor_id;
     }
     is_occluding_block(neighbor_id)
 }

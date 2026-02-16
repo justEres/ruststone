@@ -1,3 +1,7 @@
+use bevy::core_pipeline::{
+    fxaa::{Fxaa, Sensitivity},
+    smaa::{Smaa, SmaaPreset},
+};
 use bevy::pbr::{
     CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap,
     ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
@@ -7,7 +11,8 @@ use bevy::render::view::Msaa;
 
 use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
-use crate::debug::RenderDebugSettings;
+use crate::debug::{AntiAliasingMode, RenderDebugSettings};
+use crate::reflection::{DEFAULT_WATER_PLANE_Y, ReflectionPassState};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -261,6 +266,29 @@ pub fn lighting_uniform_for(
             settings.color_brightness,
             settings.color_gamma,
         ),
+        water_effects: Vec4::new(
+            if settings.water_reflections_enabled && settings.water_terrain_ssr {
+                2.0
+            } else if settings.water_reflections_enabled {
+                1.0
+            } else {
+                0.0
+            },
+            settings.water_wave_strength,
+            settings.water_wave_speed,
+            0.0,
+        ),
+        water_controls: Vec4::new(
+            settings.water_reflection_strength,
+            DEFAULT_WATER_PLANE_Y,
+            settings.water_reflection_near_boost,
+            if settings.water_reflection_blue_tint {
+                settings.water_reflection_tint_strength
+            } else {
+                0.0
+            },
+        ),
+        reflection_view_proj: Mat4::IDENTITY,
     }
 }
 
@@ -296,6 +324,13 @@ pub fn apply_lighting_quality(
     if let Some(mat) = materials.get_mut(&assets.transparent_material) {
         mat.extension.lighting = lighting_uniform_for(&settings, true);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        if settings.water_reflections_enabled {
+            mat.base.perceptual_roughness = 0.08;
+            mat.base.reflectance = 0.9;
+        } else {
+            mat.base.perceptual_roughness = 1.0;
+            mat.base.reflectance = 0.0;
+        }
     }
 
     let params = preset_params(settings.lighting_quality);
@@ -339,6 +374,162 @@ pub fn apply_lighting_quality(
     }
 }
 
+pub fn update_water_animation(
+    time: Res<Time>,
+    settings: Res<RenderDebugSettings>,
+    assets: Res<ChunkRenderAssets>,
+    reflection_state: Option<Res<ReflectionPassState>>,
+    mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
+) {
+    let t = time.elapsed_secs_wrapped();
+    let reflection_mode = if settings.water_reflections_enabled && settings.water_terrain_ssr {
+        2.0
+    } else if settings.water_reflections_enabled {
+        1.0
+    } else {
+        0.0
+    };
+
+    let (reflection_view_proj, plane_y) = if let Some(reflection_state) = reflection_state {
+        (reflection_state.view_proj, reflection_state.plane_y)
+    } else {
+        (Mat4::IDENTITY, DEFAULT_WATER_PLANE_Y)
+    };
+
+    for handle in [
+        &assets.opaque_material,
+        &assets.cutout_material,
+        &assets.cutout_culled_material,
+        &assets.transparent_material,
+    ] {
+        if let Some(mat) = materials.get_mut(handle) {
+            mat.extension.lighting.water_effects = Vec4::new(
+                reflection_mode,
+                settings.water_wave_strength,
+                settings.water_wave_speed,
+                t,
+            );
+            mat.extension.lighting.water_controls =
+                Vec4::new(
+                    settings.water_reflection_strength,
+                    plane_y,
+                    settings.water_reflection_near_boost,
+                    if settings.water_reflection_blue_tint {
+                        settings.water_reflection_tint_strength
+                    } else {
+                        0.0
+                    },
+                );
+            mat.extension.lighting.reflection_view_proj = reflection_view_proj;
+        }
+    }
+}
+
+pub fn apply_antialiasing(
+    settings: Res<RenderDebugSettings>,
+    mut camera_query: Query<
+        (Entity, Option<&mut Fxaa>, Option<&mut Smaa>, &mut Msaa),
+        With<crate::components::PlayerCamera>,
+    >,
+    mut commands: Commands,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    let Ok((camera_entity, fxaa_opt, smaa_opt, mut msaa)) = camera_query.single_mut() else {
+        return;
+    };
+
+    match settings.aa_mode {
+        AntiAliasingMode::Off => {
+            *msaa = Msaa::Off;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = false;
+            }
+            if smaa_opt.is_some() {
+                commands.entity(camera_entity).remove::<Smaa>();
+            }
+        }
+        AntiAliasingMode::Fxaa => {
+            *msaa = Msaa::Off;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = true;
+                fxaa.edge_threshold = Sensitivity::Ultra;
+                fxaa.edge_threshold_min = Sensitivity::High;
+            } else {
+                commands.entity(camera_entity).insert(Fxaa {
+                    enabled: true,
+                    edge_threshold: Sensitivity::Ultra,
+                    edge_threshold_min: Sensitivity::High,
+                });
+            }
+            if smaa_opt.is_some() {
+                commands.entity(camera_entity).remove::<Smaa>();
+            }
+        }
+        AntiAliasingMode::SmaaHigh => {
+            *msaa = Msaa::Off;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = false;
+            }
+            if let Some(mut smaa) = smaa_opt {
+                smaa.preset = SmaaPreset::High;
+            } else {
+                commands.entity(camera_entity).insert(Smaa {
+                    preset: SmaaPreset::High,
+                });
+            }
+        }
+        AntiAliasingMode::SmaaUltra => {
+            *msaa = Msaa::Off;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = false;
+            }
+            if let Some(mut smaa) = smaa_opt {
+                smaa.preset = SmaaPreset::Ultra;
+            } else {
+                commands.entity(camera_entity).insert(Smaa {
+                    preset: SmaaPreset::Ultra,
+                });
+            }
+        }
+        AntiAliasingMode::Msaa4 => {
+            *msaa = Msaa::Sample4;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = true;
+                fxaa.edge_threshold = Sensitivity::High;
+                fxaa.edge_threshold_min = Sensitivity::Medium;
+            } else {
+                commands.entity(camera_entity).insert(Fxaa {
+                    enabled: true,
+                    edge_threshold: Sensitivity::High,
+                    edge_threshold_min: Sensitivity::Medium,
+                });
+            }
+            if smaa_opt.is_some() {
+                commands.entity(camera_entity).remove::<Smaa>();
+            }
+        }
+        AntiAliasingMode::Msaa8 => {
+            *msaa = Msaa::Sample8;
+            if let Some(mut fxaa) = fxaa_opt {
+                fxaa.enabled = true;
+                fxaa.edge_threshold = Sensitivity::High;
+                fxaa.edge_threshold_min = Sensitivity::Medium;
+            } else {
+                commands.entity(camera_entity).insert(Fxaa {
+                    enabled: true,
+                    edge_threshold: Sensitivity::High,
+                    edge_threshold_min: Sensitivity::Medium,
+                });
+            }
+            if smaa_opt.is_some() {
+                commands.entity(camera_entity).remove::<Smaa>();
+            }
+        }
+    }
+}
+
 pub fn apply_ssao_quality(
     settings: Res<RenderDebugSettings>,
     camera_query: Query<Entity, With<crate::components::PlayerCamera>>,
@@ -350,17 +541,25 @@ pub fn apply_ssao_quality(
     let Ok(camera_entity) = camera_query.single() else {
         return;
     };
+    let aa_uses_msaa = matches!(
+        settings.aa_mode,
+        AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
+    );
+    if aa_uses_msaa {
+        commands
+            .entity(camera_entity)
+            .remove::<ScreenSpaceAmbientOcclusion>();
+        return;
+    }
     match settings.lighting_quality {
         LightingQualityPreset::Fast | LightingQualityPreset::Standard => {
             commands
                 .entity(camera_entity)
-                .insert(Msaa::Sample4)
                 .remove::<ScreenSpaceAmbientOcclusion>();
         }
         LightingQualityPreset::FancyLow => {
             commands
                 .entity(camera_entity)
-                .insert(Msaa::Off)
                 .insert(ScreenSpaceAmbientOcclusion {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Low,
                     constant_object_thickness: 0.25,
@@ -369,7 +568,6 @@ pub fn apply_ssao_quality(
         LightingQualityPreset::FancyHigh => {
             commands
                 .entity(camera_entity)
-                .insert(Msaa::Off)
                 .insert(ScreenSpaceAmbientOcclusion {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
                     constant_object_thickness: 0.25,

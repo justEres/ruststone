@@ -23,10 +23,10 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
 
-use crate::timing::Timing;
 use crate::entities::RemoteEntity;
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
+use crate::timing::Timing;
 
 #[derive(Resource, Default)]
 pub struct EntityHitboxDebug {
@@ -1286,13 +1286,64 @@ pub fn debug_overlay_system(
             if debug_ui.show_render {
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
-                ui.checkbox(&mut render_debug.fxaa_enabled, "FXAA");
+                let mut aa_mode = render_debug.aa_mode;
+                egui::ComboBox::from_label("AA")
+                    .selected_text(aa_mode.label())
+                    .show_ui(ui, |ui| {
+                        for mode in rs_render::AntiAliasingMode::ALL {
+                            ui.selectable_value(&mut aa_mode, mode, mode.label());
+                        }
+                    });
+                if aa_mode != render_debug.aa_mode {
+                    render_debug.aa_mode = aa_mode;
+                    render_debug.fxaa_enabled = matches!(
+                        render_debug.aa_mode,
+                        rs_render::AntiAliasingMode::Fxaa
+                            | rs_render::AntiAliasingMode::Msaa4
+                            | rs_render::AntiAliasingMode::Msaa8
+                    );
+                }
                 ui.checkbox(
                     &mut render_debug.use_greedy_meshing,
                     "Binary greedy meshing",
                 );
                 ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                 ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
+                ui.checkbox(
+                    &mut render_debug.water_reflections_enabled,
+                    "Water reflections",
+                );
+                ui.checkbox(
+                    &mut render_debug.water_terrain_ssr,
+                    "Dedicated terrain reflection pass",
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_reflection_strength, 0.0..=3.0)
+                        .text("Water reflection strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_reflection_near_boost, 0.0..=1.0)
+                        .text("Near reflection boost"),
+                );
+                ui.checkbox(
+                    &mut render_debug.water_reflection_blue_tint,
+                    "Blue reflection tint",
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut render_debug.water_reflection_tint_strength,
+                        0.0..=1.0,
+                    )
+                    .text("Blue tint strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
+                        .text("Water wave strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
+                        .text("Water wave speed"),
+                );
                 ui.checkbox(&mut render_debug.render_held_items, "Render held items");
                 ui.checkbox(
                     &mut render_debug.render_first_person_arms,

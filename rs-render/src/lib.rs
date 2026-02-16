@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::view::VisibilitySystems;
+use bevy::render::view::RenderLayers;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
@@ -14,13 +15,14 @@ mod components;
 pub mod debug;
 mod input;
 mod lighting;
+mod reflection;
 mod world;
 
 pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
-pub use debug::RenderDebugSettings;
+pub use debug::{AntiAliasingMode, RenderDebugSettings};
 pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 pub struct RenderPlugin;
@@ -39,6 +41,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<chunk::ChunkRenderState>()
         .init_resource::<chunk::ChunkStore>()
         .init_resource::<chunk::ChunkRenderAssets>()
+        .init_resource::<reflection::ReflectionPassState>()
         .init_resource::<async_mesh::MeshAsyncResources>()
         .init_resource::<async_mesh::MeshInFlight>()
         .add_systems(Startup, (world::setup_world, camera::spawn_player))
@@ -48,7 +51,12 @@ impl Plugin for RenderPlugin {
                 input::apply_cursor_lock,
                 debug::apply_render_debug_settings,
                 lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),
+                lighting::update_water_animation.after(lighting::apply_lighting_quality),
+                lighting::apply_antialiasing.after(debug::apply_render_debug_settings),
                 lighting::apply_ssao_quality.after(lighting::apply_lighting_quality),
+                reflection::spawn_reflection_camera,
+                reflection::sync_reflection_camera.after(reflection::spawn_reflection_camera),
+                reflection::resize_reflection_target,
                 debug::remesh_on_meshing_toggle,
                 enqueue_chunk_meshes,
             ),
@@ -208,6 +216,11 @@ fn apply_mesh_results(
             if data.positions.is_empty() {
                 continue;
             }
+            let mesh_layers = if matches!(group, chunk::MaterialGroup::Transparent) {
+                RenderLayers::layer(reflection::MAIN_RENDER_LAYER)
+            } else {
+                RenderLayers::layer(reflection::MAIN_RENDER_LAYER).with(reflection::REFLECTION_RENDER_LAYER)
+            };
             active_keys.insert(group);
             let (mesh, bounds) = chunk::build_mesh_from_data(data);
 
@@ -218,9 +231,10 @@ fn apply_mesh_results(
                     let handle = meshes.add(mesh);
                     commands
                         .entity(submesh.entity)
-                        .insert(Mesh3d(handle.clone()));
+                        .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
                     submesh.mesh = handle;
                 }
+                commands.entity(submesh.entity).insert(mesh_layers.clone());
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
                     let half = (max - min) * 0.5;
@@ -237,6 +251,7 @@ fn apply_mesh_results(
                     .spawn((
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material),
+                        mesh_layers,
                         Transform::default(),
                         GlobalTransform::default(),
                         Visibility::Inherited,

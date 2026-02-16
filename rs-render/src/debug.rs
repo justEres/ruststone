@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
 use crate::chunk::{ChunkRenderAssets, ChunkStore, snapshot_for_chunk};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
-use bevy::core_pipeline::fxaa::Fxaa;
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
@@ -14,6 +13,69 @@ use bevy::render::view::ViewVisibility;
 use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
+const MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.30;
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+pub enum AntiAliasingMode {
+    Off,
+    Fxaa,
+    SmaaHigh,
+    SmaaUltra,
+    Msaa4,
+    Msaa8,
+}
+
+impl Default for AntiAliasingMode {
+    fn default() -> Self {
+        Self::SmaaUltra
+    }
+}
+
+impl AntiAliasingMode {
+    pub const ALL: [Self; 6] = [
+        Self::Off,
+        Self::Fxaa,
+        Self::SmaaHigh,
+        Self::SmaaUltra,
+        Self::Msaa4,
+        Self::Msaa8,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Fxaa => "FXAA",
+            Self::SmaaHigh => "SMAA High",
+            Self::SmaaUltra => "SMAA Ultra",
+            Self::Msaa4 => "MSAA 4x",
+            Self::Msaa8 => "MSAA 8x",
+        }
+    }
+
+    pub const fn as_options_value(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Fxaa => "fxaa",
+            Self::SmaaHigh => "smaa_high",
+            Self::SmaaUltra => "smaa_ultra",
+            Self::Msaa4 => "msaa4",
+            Self::Msaa8 => "msaa8",
+        }
+    }
+
+    pub fn from_options_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "fxaa" => Some(Self::Fxaa),
+            "smaa_high" | "smaahigh" => Some(Self::SmaaHigh),
+            "smaa_ultra" | "smaaultra" => Some(Self::SmaaUltra),
+            "msaa4" | "msaa_4" => Some(Self::Msaa4),
+            "msaa8" | "msaa_8" => Some(Self::Msaa8),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Resource, Debug, Clone)]
 pub struct RenderDebugSettings {
@@ -22,6 +84,7 @@ pub struct RenderDebugSettings {
     pub fov_deg: f32,
     pub use_greedy_meshing: bool,
     pub wireframe_enabled: bool,
+    pub aa_mode: AntiAliasingMode,
     pub fxaa_enabled: bool,
     pub manual_frustum_cull: bool,
     pub frustum_fov_debug: bool,
@@ -41,6 +104,14 @@ pub struct RenderDebugSettings {
     pub color_contrast: f32,
     pub color_brightness: f32,
     pub color_gamma: f32,
+    pub water_reflections_enabled: bool,
+    pub water_terrain_ssr: bool,
+    pub water_reflection_strength: f32,
+    pub water_reflection_near_boost: f32,
+    pub water_reflection_blue_tint: bool,
+    pub water_reflection_tint_strength: f32,
+    pub water_wave_strength: f32,
+    pub water_wave_speed: f32,
 }
 
 impl Default for RenderDebugSettings {
@@ -51,6 +122,7 @@ impl Default for RenderDebugSettings {
             fov_deg: 110.0,
             use_greedy_meshing: true,
             wireframe_enabled: false,
+            aa_mode: AntiAliasingMode::default(),
             fxaa_enabled: true,
             manual_frustum_cull: true,
             frustum_fov_debug: false,
@@ -70,6 +142,14 @@ impl Default for RenderDebugSettings {
             color_contrast: 1.06,
             color_brightness: 0.0,
             color_gamma: 1.0,
+            water_reflections_enabled: true,
+            water_terrain_ssr: false,
+            water_reflection_strength: 0.85,
+            water_reflection_near_boost: 0.18,
+            water_reflection_blue_tint: false,
+            water_reflection_tint_strength: 0.20,
+            water_wave_strength: 0.42,
+            water_wave_speed: 1.0,
         }
     }
 }
@@ -118,7 +198,6 @@ pub fn apply_render_debug_settings(
         Query<(&ChildOf, &mut Visibility), With<Mesh3d>>,
     )>,
     mut cameras: Query<&mut Projection, With<PlayerCamera>>,
-    mut fxaa_query: Query<&mut Fxaa, With<PlayerCamera>>,
     mut wireframe: ResMut<WireframeConfig>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
@@ -135,9 +214,6 @@ pub fn apply_render_debug_settings(
             }
         }
         wireframe.global = settings.wireframe_enabled;
-        for mut fxaa in &mut fxaa_query {
-            fxaa.enabled = settings.fxaa_enabled;
-        }
     }
 
     let Ok(player_transform) = player.get_single() else {
@@ -261,7 +337,7 @@ pub fn manual_frustum_cull(
         cam_transform.translation(),
     );
     let tan_y = (fov_y * 0.5).tan();
-    let tan_x = tan_y * aspect;
+    let tan_x = tan_y * aspect * MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER;
     let chunk_visibility: HashMap<Entity, Visibility> = {
         let chunks = params.p0();
         let mut map = HashMap::new();

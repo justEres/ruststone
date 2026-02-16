@@ -10,7 +10,9 @@ use bevy_egui::{
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
     egui::{self},
 };
-use rs_render::{LightingQualityPreset, RenderDebugSettings, ShadowQualityPreset};
+use rs_render::{
+    AntiAliasingMode, LightingQualityPreset, RenderDebugSettings, ShadowQualityPreset,
+};
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_max_durability, item_name,
@@ -378,9 +380,22 @@ fn connect_ui(
                     render_debug.shadow_quality = selected_shadow_quality;
                     options_changed = true;
                 }
-                options_changed |= ui
-                    .checkbox(&mut render_debug.fxaa_enabled, "FXAA")
-                    .changed();
+                let mut selected_aa_mode = render_debug.aa_mode;
+                egui::ComboBox::from_label("Anti-aliasing")
+                    .selected_text(selected_aa_mode.label())
+                    .show_ui(ui, |ui| {
+                        for mode in AntiAliasingMode::ALL {
+                            ui.selectable_value(&mut selected_aa_mode, mode, mode.label());
+                        }
+                    });
+                if selected_aa_mode != render_debug.aa_mode {
+                    render_debug.aa_mode = selected_aa_mode;
+                    render_debug.fxaa_enabled = matches!(
+                        render_debug.aa_mode,
+                        AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
+                    );
+                    options_changed = true;
+                }
                 options_changed |= ui
                     .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
                     .changed();
@@ -388,6 +403,63 @@ fn connect_ui(
                     .checkbox(
                         &mut render_debug.enable_pbr_terrain_lighting,
                         "PBR terrain shadows (experimental)",
+                    )
+                    .changed();
+                options_changed |= ui
+                    .checkbox(
+                        &mut render_debug.water_reflections_enabled,
+                        "Water reflections",
+                    )
+                    .changed();
+                options_changed |= ui
+                    .checkbox(
+                        &mut render_debug.water_terrain_ssr,
+                        "Dedicated terrain reflection pass",
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_strength,
+                            0.0..=3.0,
+                        )
+                        .text("Water reflection strength"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_near_boost,
+                            0.0..=1.0,
+                        )
+                        .text("Near reflection boost"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .checkbox(
+                        &mut render_debug.water_reflection_blue_tint,
+                        "Blue reflection tint",
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_tint_strength,
+                            0.0..=1.0,
+                        )
+                        .text("Blue tint strength"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
+                            .text("Water wave strength"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
+                            .text("Water wave speed"),
                     )
                     .changed();
                 if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
@@ -681,6 +753,7 @@ struct ClientOptionsFile {
     pub render_distance_chunks: i32,
     pub shadows_enabled: bool,
     pub fxaa_enabled: bool,
+    pub aa_mode: String,
     pub manual_frustum_cull: bool,
     pub vsync_enabled: bool,
     pub lighting_quality: String,
@@ -690,6 +763,14 @@ struct ClientOptionsFile {
     pub color_contrast: f32,
     pub color_brightness: f32,
     pub color_gamma: f32,
+    pub water_reflections_enabled: bool,
+    pub water_terrain_ssr: bool,
+    pub water_reflection_strength: f32,
+    pub water_reflection_near_boost: f32,
+    pub water_reflection_blue_tint: bool,
+    pub water_reflection_tint_strength: f32,
+    pub water_wave_strength: f32,
+    pub water_wave_speed: f32,
 }
 
 impl Default for ClientOptionsFile {
@@ -700,6 +781,7 @@ impl Default for ClientOptionsFile {
             render_distance_chunks: render.render_distance_chunks,
             shadows_enabled: render.shadows_enabled,
             fxaa_enabled: render.fxaa_enabled,
+            aa_mode: render.aa_mode.as_options_value().to_string(),
             manual_frustum_cull: render.manual_frustum_cull,
             vsync_enabled: false,
             lighting_quality: render.lighting_quality.as_options_value().to_string(),
@@ -709,6 +791,14 @@ impl Default for ClientOptionsFile {
             color_contrast: render.color_contrast,
             color_brightness: render.color_brightness,
             color_gamma: render.color_gamma,
+            water_reflections_enabled: render.water_reflections_enabled,
+            water_terrain_ssr: render.water_terrain_ssr,
+            water_reflection_strength: render.water_reflection_strength,
+            water_reflection_near_boost: render.water_reflection_near_boost,
+            water_reflection_blue_tint: render.water_reflection_blue_tint,
+            water_reflection_tint_strength: render.water_reflection_tint_strength,
+            water_wave_strength: render.water_wave_strength,
+            water_wave_speed: render.water_wave_speed,
         }
     }
 }
@@ -719,6 +809,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         render_distance_chunks: render.render_distance_chunks,
         shadows_enabled: render.shadows_enabled,
         fxaa_enabled: render.fxaa_enabled,
+        aa_mode: render.aa_mode.as_options_value().to_string(),
         manual_frustum_cull: render.manual_frustum_cull,
         vsync_enabled: state.vsync_enabled,
         lighting_quality: render.lighting_quality.as_options_value().to_string(),
@@ -728,6 +819,14 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         color_contrast: render.color_contrast,
         color_brightness: render.color_brightness,
         color_gamma: render.color_gamma,
+        water_reflections_enabled: render.water_reflections_enabled,
+        water_terrain_ssr: render.water_terrain_ssr,
+        water_reflection_strength: render.water_reflection_strength,
+        water_reflection_near_boost: render.water_reflection_near_boost,
+        water_reflection_blue_tint: render.water_reflection_blue_tint,
+        water_reflection_tint_strength: render.water_reflection_tint_strength,
+        water_wave_strength: render.water_wave_strength,
+        water_wave_speed: render.water_wave_speed,
     }
 }
 
@@ -746,15 +845,37 @@ fn apply_options(
     if let Some(preset) = ShadowQualityPreset::from_options_value(&options.shadow_quality) {
         render.shadow_quality = preset;
     }
+    if let Some(mode) = AntiAliasingMode::from_options_value(&options.aa_mode) {
+        render.aa_mode = mode;
+    } else {
+        // Backward compatibility for older options files without aa_mode.
+        render.aa_mode = if options.fxaa_enabled {
+            AntiAliasingMode::Fxaa
+        } else {
+            AntiAliasingMode::Off
+        };
+    }
     // Explicit toggles in options file override preset defaults.
     render.shadows_enabled = options.shadows_enabled;
-    render.fxaa_enabled = options.fxaa_enabled;
+    render.fxaa_enabled = matches!(
+        render.aa_mode,
+        AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
+    );
     render.manual_frustum_cull = options.manual_frustum_cull;
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
     render.color_saturation = options.color_saturation.clamp(0.0, 2.0);
     render.color_contrast = options.color_contrast.clamp(0.0, 2.0);
     render.color_brightness = options.color_brightness.clamp(-0.5, 0.5);
     render.color_gamma = options.color_gamma.clamp(0.2, 2.5);
+    render.water_reflections_enabled = options.water_reflections_enabled;
+    render.water_terrain_ssr = options.water_terrain_ssr;
+    render.water_reflection_strength = options.water_reflection_strength.clamp(0.0, 3.0);
+    render.water_reflection_near_boost = options.water_reflection_near_boost.clamp(0.0, 1.0);
+    render.water_reflection_blue_tint = options.water_reflection_blue_tint;
+    render.water_reflection_tint_strength =
+        options.water_reflection_tint_strength.clamp(0.0, 1.0);
+    render.water_wave_strength = options.water_wave_strength.clamp(0.0, 1.2);
+    render.water_wave_speed = options.water_wave_speed.clamp(0.0, 4.0);
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync
@@ -771,21 +892,25 @@ fn apply_lighting_preset_defaults(
         LightingQualityPreset::Fast => {
             render_debug.shadows_enabled = false;
             render_debug.fxaa_enabled = false;
+            render_debug.aa_mode = AntiAliasingMode::Off;
             render_debug.shadow_quality = ShadowQualityPreset::Low;
         }
         LightingQualityPreset::Standard => {
             render_debug.shadows_enabled = false;
             render_debug.fxaa_enabled = true;
+            render_debug.aa_mode = AntiAliasingMode::SmaaHigh;
             render_debug.shadow_quality = ShadowQualityPreset::Low;
         }
         LightingQualityPreset::FancyLow => {
             render_debug.shadows_enabled = true;
             render_debug.fxaa_enabled = true;
+            render_debug.aa_mode = AntiAliasingMode::SmaaHigh;
             render_debug.shadow_quality = ShadowQualityPreset::Medium;
         }
         LightingQualityPreset::FancyHigh => {
             render_debug.shadows_enabled = true;
             render_debug.fxaa_enabled = true;
+            render_debug.aa_mode = AntiAliasingMode::SmaaUltra;
             render_debug.shadow_quality = ShadowQualityPreset::High;
         }
     }
