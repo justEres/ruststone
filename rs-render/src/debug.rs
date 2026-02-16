@@ -11,7 +11,7 @@ use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
-use crate::lighting::LightingQualityPreset;
+use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
 
@@ -35,6 +35,12 @@ pub struct RenderDebugSettings {
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
     pub lighting_quality: LightingQualityPreset,
+    pub shadow_quality: ShadowQualityPreset,
+    pub enable_pbr_terrain_lighting: bool,
+    pub color_saturation: f32,
+    pub color_contrast: f32,
+    pub color_brightness: f32,
+    pub color_gamma: f32,
 }
 
 impl Default for RenderDebugSettings {
@@ -58,6 +64,12 @@ impl Default for RenderDebugSettings {
             render_first_person_arms: true,
             render_self_model: true,
             lighting_quality: LightingQualityPreset::Standard,
+            shadow_quality: ShadowQualityPreset::Medium,
+            enable_pbr_terrain_lighting: false,
+            color_saturation: 1.08,
+            color_contrast: 1.06,
+            color_brightness: 0.0,
+            color_gamma: 1.0,
         }
     }
 }

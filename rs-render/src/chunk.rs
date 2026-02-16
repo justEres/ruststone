@@ -21,7 +21,7 @@ use crate::block_textures::{
     BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
     classify_tint, is_leaves_block, is_transparent_block, uv_for_texture,
 };
-use crate::lighting::{LightingQualityPreset, lighting_uniform_for, uses_shadowed_pbr_path};
+use crate::lighting::{lighting_uniform_for, uses_shadowed_pbr_path};
 
 const CHUNK_SIZE: i32 = 16;
 const SECTION_HEIGHT: i32 = 16;
@@ -36,6 +36,7 @@ pub struct AtlasLightingUniform {
     pub sun_dir_and_strength: Vec4,
     pub ambient_and_fog: Vec4,
     pub quality_and_water: Vec4,
+    pub color_grading: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -285,10 +286,10 @@ pub struct ChunkRenderAssets {
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
-        let preset = world
+        let settings = world
             .get_resource::<crate::debug::RenderDebugSettings>()
-            .map(|settings| settings.lighting_quality)
-            .unwrap_or(LightingQualityPreset::default());
+            .cloned()
+            .unwrap_or_default();
         let (mut atlas_image, texture_mapping, biome_tints) = load_or_build_atlas();
         let mut sampler = ImageSamplerDescriptor::nearest();
         sampler.address_mode_u = ImageAddressMode::ClampToEdge;
@@ -300,25 +301,29 @@ impl FromWorld for ChunkRenderAssets {
             images.add(atlas_image)
         };
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
-        let use_shadowed_pbr = uses_shadowed_pbr_path(preset);
+        let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
 
         let opaque_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
                 base_color: Color::WHITE,
                 base_color_texture: None,
+                metallic: 0.0,
+                reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                lighting: lighting_uniform_for(preset, false),
+                lighting: lighting_uniform_for(&settings, false),
             },
         });
         let transparent_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
                 base_color: Color::srgba(1.0, 1.0, 1.0, 0.8),
                 base_color_texture: None,
+                metallic: 0.0,
+                reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
@@ -327,13 +332,15 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                lighting: lighting_uniform_for(preset, true),
+                lighting: lighting_uniform_for(&settings, true),
             },
         });
         let cutout_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
                 base_color: Color::WHITE,
                 base_color_texture: None,
+                metallic: 0.0,
+                reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: None,
@@ -342,13 +349,15 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                lighting: lighting_uniform_for(preset, false),
+                lighting: lighting_uniform_for(&settings, false),
             },
         });
         let cutout_culled_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
                 base_color: Color::WHITE,
                 base_color_texture: None,
+                metallic: 0.0,
+                reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
@@ -357,7 +366,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                lighting: lighting_uniform_for(preset, false),
+                lighting: lighting_uniform_for(&settings, false),
             },
         });
 

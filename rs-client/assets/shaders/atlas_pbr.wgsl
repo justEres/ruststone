@@ -42,6 +42,7 @@ struct AtlasLightingUniform {
     sun_dir_and_strength: vec4<f32>,
     ambient_and_fog: vec4<f32>,
     quality_and_water: vec4<f32>,
+    color_grading: vec4<f32>,
 }
 
 @group(2) @binding(102) var<uniform> lighting_uniform: AtlasLightingUniform;
@@ -142,6 +143,20 @@ fn apply_fancy_post_lighting(base: vec4<f32>, normal: vec3<f32>, view_z: f32, vi
     return vec4(rgb, base.a);
 }
 
+fn apply_color_grading(rgb_in: vec3<f32>) -> vec3<f32> {
+    let saturation = max(lighting_uniform.color_grading.x, 0.0);
+    let contrast = max(lighting_uniform.color_grading.y, 0.0);
+    let brightness = lighting_uniform.color_grading.z;
+    let gamma = max(lighting_uniform.color_grading.w, 0.001);
+
+    let luma = dot(rgb_in, vec3(0.2126, 0.7152, 0.0722));
+    var rgb = mix(vec3(luma), rgb_in, saturation);
+    rgb = (rgb - vec3(0.5)) * contrast + vec3(0.5);
+    rgb = rgb + vec3(brightness);
+    rgb = pow(max(rgb, vec3(0.0)), vec3(1.0 / gamma));
+    return clamp(rgb, vec3(0.0), vec3(1.0));
+}
+
 @fragment
 fn fragment(
 #ifdef MESHLET_MESH_MATERIAL_PASS
@@ -203,12 +218,8 @@ fn fragment(
     let normal = safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0));
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
     let quality_mode = lighting_uniform.quality_and_water.x;
-    if quality_mode >= 2.0 {
-        if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
-            out.color = apply_pbr_lighting(pbr_input);
-        } else {
-            out.color = pbr_input.material.base_color;
-        }
+    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+        out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(out.color, normal, abs(in.position.w), view_dir);
     } else {
         out.color = apply_voxel_lighting(
@@ -218,6 +229,7 @@ fn fragment(
             view_dir,
         );
     }
+    out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
 
     // Apply in-shader post processing (fog, alpha-premultiply, and optional tonemapping/debanding).
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
