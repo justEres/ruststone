@@ -90,6 +90,8 @@ pub struct ChunkStore {
 pub struct ChunkColumn {
     pub full: bool,
     pub sections: Vec<Option<Vec<u16>>>,
+    pub block_light_sections: Vec<Option<Vec<u8>>>,
+    pub sky_light_sections: Vec<Option<Vec<u8>>>,
     pub biomes: Option<Vec<u8>>,
 }
 
@@ -98,25 +100,41 @@ impl ChunkColumn {
         Self {
             full: false,
             sections: vec![None; 16],
+            block_light_sections: vec![None; 16],
+            sky_light_sections: vec![None; 16],
             biomes: None,
         }
     }
 
     fn set_full(&mut self) {
         self.full = true;
-        for section in &mut self.sections {
-            if section.is_none() {
-                *section = Some(vec![0u16; 4096]);
+        for idx in 0..self.sections.len() {
+            if self.sections[idx].is_none() {
+                self.sections[idx] = Some(vec![0u16; 4096]);
+            }
+            if self.block_light_sections[idx].is_none() {
+                self.block_light_sections[idx] = Some(vec![0u8; 4096]);
+            }
+            if self.sky_light_sections[idx].is_none() {
+                self.sky_light_sections[idx] = Some(vec![15u8; 4096]);
             }
         }
     }
 
-    fn set_section(&mut self, y: u8, blocks: Vec<u16>) {
+    fn set_section(
+        &mut self,
+        y: u8,
+        blocks: Vec<u16>,
+        block_light: Vec<u8>,
+        sky_light: Option<Vec<u8>>,
+    ) {
         let idx = y as usize;
         if idx >= self.sections.len() {
             return;
         }
         self.sections[idx] = Some(blocks);
+        self.block_light_sections[idx] = Some(block_light);
+        self.sky_light_sections[idx] = sky_light;
     }
 
     fn set_block(&mut self, local_x: usize, y: i32, local_z: usize, block_id: u16) {
@@ -520,7 +538,12 @@ pub fn update_store(store: &mut ChunkStore, chunk: ChunkData) {
     }
 
     for section in chunk.sections {
-        column.set_section(section.y, section.blocks);
+        column.set_section(
+            section.y,
+            section.blocks,
+            section.block_light,
+            section.sky_light,
+        );
     }
 }
 
@@ -770,6 +793,9 @@ fn build_chunk_mesh_greedy(
                         let tint = biome_tints.tint_for_biome(key.tint_key);
                         add_greedy_quad(
                             &mut batch,
+                            snapshot,
+                            chunk_x,
+                            chunk_z,
                             face,
                             axis as i32,
                             base_y,
@@ -789,6 +815,9 @@ fn build_chunk_mesh_greedy(
 
 fn add_greedy_quad(
     batch: &mut MeshBatch,
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
     face: Face,
     axis: i32,
     base_y: i32,
@@ -870,7 +899,19 @@ fn add_greedy_quad(
             .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
         data.uvs_b.push(tile_origin);
     }
-    let color = tint_color_untargeted(block_id, tint);
+    let base_color = tint_color_untargeted(block_id, tint);
+    let (bx, by, bz) = match face {
+        Face::PosY | Face::NegY => (quad.x as i32, base_y + axis, quad.y as i32),
+        Face::PosX | Face::NegX => (axis, base_y + quad.y as i32, quad.x as i32),
+        Face::PosZ | Face::NegZ => (quad.x as i32, base_y + quad.y as i32, axis),
+    };
+    let shade = face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face);
+    let color = [
+        base_color[0] * shade,
+        base_color[1] * shade,
+        base_color[2] * shade,
+        base_color[3],
+    ];
     data.colors.extend_from_slice(&[color, color, color, color]);
     data.indices.extend_from_slice(&[
         base_index,
@@ -1028,7 +1069,7 @@ fn add_block_faces(
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let color = tint_color(
+        let base_color = tint_color(
             block_id,
             tint,
             snapshot,
@@ -1039,7 +1080,15 @@ fn add_block_faces(
             z,
             biome_tints,
         );
-        data.colors.extend_from_slice(&[color, color, color, color]);
+        for vert in verts {
+            let shade = face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert);
+            data.colors.push([
+                base_color[0] * shade,
+                base_color[1] * shade,
+                base_color[2] * shade,
+                base_color[3],
+            ]);
+        }
         data.indices.extend_from_slice(&[
             base_index,
             base_index + 2,
@@ -1116,7 +1165,7 @@ fn add_cross_plant(
     let texture_index = texture_mapping.texture_index_for_state(block_id, Face::PosZ);
     let tile_origin = atlas_tile_origin(texture_index);
     let uvs = uv_for_texture();
-    let color = tint_color(
+    let mut color = tint_color(
         block_id,
         tint,
         snapshot,
@@ -1127,6 +1176,10 @@ fn add_cross_plant(
         z,
         biome_tints,
     );
+    let shade = block_light_factor(snapshot, chunk_x, chunk_z, x, y, z);
+    color[0] *= shade;
+    color[1] *= shade;
+    color[2] *= shade;
     let data = batch.data_for(block_id);
 
     let x0 = x as f32;
@@ -1675,7 +1728,7 @@ fn add_box(
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let color = if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
+        let mut color = if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
             tint_color(
                 block_id,
                 tint,
@@ -1690,6 +1743,12 @@ fn add_box(
         } else {
             tint_color_untargeted(block_id, tint)
         };
+        if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
+            let shade = face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face);
+            color[0] *= shade;
+            color[1] *= shade;
+            color[2] *= shade;
+        }
         data.colors.extend_from_slice(&[color, color, color, color]);
         data.indices.extend_from_slice(&[
             base_index,
@@ -1786,18 +1845,12 @@ fn biome_tint_at(
     }
 }
 
-fn block_at(
-    snapshot: &ChunkColumnSnapshot,
+fn resolve_chunk_coords(
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
-    y: i32,
     z: i32,
-) -> u16 {
-    if y < 0 || y >= WORLD_HEIGHT {
-        return 0;
-    }
-
+) -> (i32, i32, i32, i32) {
     let mut target_chunk_x = chunk_x;
     let mut target_chunk_z = chunk_z;
     let mut local_x = x;
@@ -1819,6 +1872,24 @@ fn block_at(
         local_z -= CHUNK_SIZE;
     }
 
+    (target_chunk_x, target_chunk_z, local_x, local_z)
+}
+
+fn block_at(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> u16 {
+    if y < 0 || y >= WORLD_HEIGHT {
+        return 0;
+    }
+
+    let (target_chunk_x, target_chunk_z, local_x, local_z) =
+        resolve_chunk_coords(chunk_x, chunk_z, x, z);
+
     let Some(column) = snapshot.columns.get(&(target_chunk_x, target_chunk_z)) else {
         // Neighbor chunk not loaded: treat as air so border faces get generated.
         return 0;
@@ -1834,6 +1905,173 @@ fn block_at(
 
     let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
     section[idx]
+}
+
+#[derive(Clone, Copy, Default)]
+struct VoxelLight {
+    block: u8,
+    sky: u8,
+}
+
+fn light_at(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> VoxelLight {
+    if y < 0 || y >= WORLD_HEIGHT {
+        return VoxelLight::default();
+    }
+
+    let (target_chunk_x, target_chunk_z, local_x, local_z) =
+        resolve_chunk_coords(chunk_x, chunk_z, x, z);
+    let Some(column) = snapshot.columns.get(&(target_chunk_x, target_chunk_z)) else {
+        return VoxelLight::default();
+    };
+    let section_index = (y / SECTION_HEIGHT) as usize;
+    let local_y = (y % SECTION_HEIGHT) as usize;
+    let idx = local_y * 16 * 16 + local_z as usize * 16 + local_x as usize;
+
+    let block = column
+        .block_light_sections
+        .get(section_index)
+        .and_then(|v| v.as_ref())
+        .and_then(|s| s.get(idx))
+        .copied()
+        .unwrap_or(0);
+    let sky = column
+        .sky_light_sections
+        .get(section_index)
+        .and_then(|v| v.as_ref())
+        .and_then(|s| s.get(idx))
+        .copied()
+        .unwrap_or(0);
+    VoxelLight { block, sky }
+}
+
+fn is_ao_occluder(block_state: u16) -> bool {
+    let id = block_type(block_state);
+    if id == 0 {
+        return false;
+    }
+    if is_transparent_block(id) {
+        return false;
+    }
+    !matches!(
+        block_model_kind(id),
+        BlockModelKind::Cross | BlockModelKind::Pane | BlockModelKind::TorchLike
+    )
+}
+
+fn ao_factor(side1: bool, side2: bool, corner: bool) -> f32 {
+    let level = if side1 && side2 {
+        0
+    } else {
+        3 - (side1 as u8 + side2 as u8 + corner as u8)
+    };
+    match level {
+        0 => 0.56,
+        1 => 0.70,
+        2 => 0.84,
+        _ => 1.0,
+    }
+}
+
+fn light_factor_from_level(level: f32) -> f32 {
+    // Keep a minimum floor so caves are dark but not pure black.
+    (0.18 + (level / 15.0) * 0.82).clamp(0.0, 1.0)
+}
+
+fn face_vertex_shade(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    vertex: [f32; 3],
+) -> f32 {
+    let (nx, ny, nz, axis_a, axis_b) = match face {
+        Face::PosX => (1, 0, 0, 1usize, 2usize), // y,z
+        Face::NegX => (-1, 0, 0, 1usize, 2usize),
+        Face::PosY => (0, 1, 0, 0usize, 2usize), // x,z
+        Face::NegY => (0, -1, 0, 0usize, 2usize),
+        Face::PosZ => (0, 0, 1, 0usize, 1usize), // x,y
+        Face::NegZ => (0, 0, -1, 0usize, 1usize),
+    };
+
+    let signs = |coord: f32| if coord <= 0.0 { -1 } else { 1 };
+    let mut delta = [0i32; 3];
+    delta[axis_a] = signs(vertex[axis_a]);
+    delta[axis_b] = signs(vertex[axis_b]);
+
+    let base = (x + nx, y + ny, z + nz);
+    let s1 = (base.0 + delta[0], base.1 + delta[1], base.2 + delta[2]);
+    let mut side1 = [base.0, base.1, base.2];
+    side1[axis_a] += delta[axis_a];
+    let mut side2 = [base.0, base.1, base.2];
+    side2[axis_b] += delta[axis_b];
+
+    let occ_side1 = is_ao_occluder(block_at(
+        snapshot, chunk_x, chunk_z, side1[0], side1[1], side1[2],
+    ));
+    let occ_side2 = is_ao_occluder(block_at(
+        snapshot, chunk_x, chunk_z, side2[0], side2[1], side2[2],
+    ));
+    let occ_corner = is_ao_occluder(block_at(snapshot, chunk_x, chunk_z, s1.0, s1.1, s1.2));
+    let ao = ao_factor(occ_side1, occ_side2, occ_corner);
+
+    let l0 = light_at(snapshot, chunk_x, chunk_z, base.0, base.1, base.2);
+    let l1 = light_at(snapshot, chunk_x, chunk_z, side1[0], side1[1], side1[2]);
+    let l2 = light_at(snapshot, chunk_x, chunk_z, side2[0], side2[1], side2[2]);
+    let l3 = light_at(snapshot, chunk_x, chunk_z, s1.0, s1.1, s1.2);
+    let level = (f32::from(l0.block.max(l0.sky))
+        + f32::from(l1.block.max(l1.sky))
+        + f32::from(l2.block.max(l2.sky))
+        + f32::from(l3.block.max(l3.sky)))
+        * 0.25;
+    let light = light_factor_from_level(level);
+    ao * light
+}
+
+fn face_light_factor(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+) -> f32 {
+    let (dx, dy, dz) = match face {
+        Face::PosX => (1, 0, 0),
+        Face::NegX => (-1, 0, 0),
+        Face::PosY => (0, 1, 0),
+        Face::NegY => (0, -1, 0),
+        Face::PosZ => (0, 0, 1),
+        Face::NegZ => (0, 0, -1),
+    };
+    let a = light_at(snapshot, chunk_x, chunk_z, x, y, z);
+    let b = light_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz);
+    let level = (f32::from(a.block.max(a.sky)) + f32::from(b.block.max(b.sky))) * 0.5;
+    light_factor_from_level(level)
+}
+
+fn block_light_factor(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> f32 {
+    let l0 = light_at(snapshot, chunk_x, chunk_z, x, y, z);
+    let l1 = light_at(snapshot, chunk_x, chunk_z, x, y + 1, z);
+    let level = (f32::from(l0.block.max(l0.sky)) + f32::from(l1.block.max(l1.sky))) * 0.5;
+    light_factor_from_level(level)
 }
 
 fn block_type(block_state: u16) -> u16 {

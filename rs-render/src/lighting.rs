@@ -1,5 +1,8 @@
+use bevy::pbr::{
+    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap,
+    ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
+};
 use bevy::prelude::*;
-use bevy::pbr::{CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 
 use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
@@ -213,6 +216,42 @@ pub fn apply_lighting_quality(
             }
         } else {
             light.illuminance = if is_fancy { 2_300.0 } else { 2_000.0 };
+        }
+    }
+}
+
+pub fn apply_ssao_quality(
+    settings: Res<RenderDebugSettings>,
+    camera_query: Query<Entity, With<crate::components::PlayerCamera>>,
+    mut commands: Commands,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    let Ok(camera_entity) = camera_query.single() else {
+        return;
+    };
+    match settings.lighting_quality {
+        LightingQualityPreset::Fast | LightingQualityPreset::Standard => {
+            commands
+                .entity(camera_entity)
+                .remove::<ScreenSpaceAmbientOcclusion>();
+        }
+        LightingQualityPreset::FancyLow => {
+            commands
+                .entity(camera_entity)
+                .insert(ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Low,
+                    constant_object_thickness: 0.25,
+                });
+        }
+        LightingQualityPreset::FancyHigh => {
+            commands
+                .entity(camera_entity)
+                .insert(ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+                    constant_object_thickness: 0.25,
+                });
         }
     }
 }

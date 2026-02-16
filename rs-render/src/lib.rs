@@ -48,6 +48,7 @@ impl Plugin for RenderPlugin {
                 input::apply_cursor_lock,
                 debug::apply_render_debug_settings,
                 lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),
+                lighting::apply_ssao_quality.after(lighting::apply_lighting_quality),
                 debug::remesh_on_meshing_toggle,
                 enqueue_chunk_meshes,
             ),

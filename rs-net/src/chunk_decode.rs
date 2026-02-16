@@ -56,9 +56,20 @@ fn decode_sections(
     }
 
     let blocks_slice = &data[..blocks_total];
+    let block_light_slice = &data[blocks_total..blocks_total + block_light_total];
+    let sky_light_slice = if skylight {
+        Some(
+            &data[blocks_total + block_light_total
+                ..blocks_total + block_light_total + sky_light_total],
+        )
+    } else {
+        None
+    };
 
     let mut sections = Vec::new();
     let mut blocks_offset = 0usize;
+    let mut block_light_offset = 0usize;
+    let mut sky_light_offset = 0usize;
 
     for y in 0..16u8 {
         if (bitmask & (1 << y)) == 0 {
@@ -68,9 +79,27 @@ fn decode_sections(
         let block_end = blocks_offset + SECTION_BLOCK_BYTES;
         let section_bytes = &blocks_slice[blocks_offset..block_end];
         blocks_offset = block_end;
+        let block_light_end = block_light_offset + SECTION_LIGHT_BYTES;
+        let section_block_light = &block_light_slice[block_light_offset..block_light_end];
+        block_light_offset = block_light_end;
+
+        let section_sky_light = if let Some(sky_slice) = sky_light_slice {
+            let sky_end = sky_light_offset + SECTION_LIGHT_BYTES;
+            let section = &sky_slice[sky_light_offset..sky_end];
+            sky_light_offset = sky_end;
+            Some(decode_light_nibbles(section)?)
+        } else {
+            None
+        };
 
         let blocks = decode_block_ids(section_bytes)?;
-        sections.push(ChunkSection { y, blocks });
+        let block_light = decode_light_nibbles(section_block_light)?;
+        sections.push(ChunkSection {
+            y,
+            blocks,
+            block_light,
+            sky_light: section_sky_light,
+        });
     }
 
     Ok((sections, expected_min))
@@ -92,4 +121,16 @@ fn decode_block_ids(bytes: &[u8]) -> Result<Vec<u16>, String> {
     }
 
     Ok(blocks)
+}
+
+fn decode_light_nibbles(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.len() != SECTION_LIGHT_BYTES {
+        return Err("Unexpected light data size".to_string());
+    }
+    let mut out = Vec::with_capacity(SECTION_BLOCK_COUNT);
+    for &b in bytes {
+        out.push(b & 0x0F);
+        out.push((b >> 4) & 0x0F);
+    }
+    Ok(out)
 }
