@@ -1,5 +1,6 @@
 #import bevy_pbr::{
     pbr_types,
+    pbr_functions,
     pbr_functions::alpha_discard,
     pbr_fragment::pbr_input_from_standard_material,
     decal::clustered::apply_decal_base_color,
