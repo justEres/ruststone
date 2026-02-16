@@ -14,7 +14,8 @@
 #else
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions::main_pass_post_lighting_processing,
+    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 }
 #endif
 
@@ -108,6 +109,39 @@ fn apply_voxel_lighting(base: vec4<f32>, normal: vec3<f32>, view_z: f32, view_di
     return vec4(rgb, base.a);
 }
 
+fn apply_fancy_post_lighting(base: vec4<f32>, normal: vec3<f32>, view_z: f32, view_dir: vec3<f32>) -> vec4<f32> {
+    let quality_mode = lighting_uniform.quality_and_water.x;
+    var rgb = base.rgb;
+
+    if quality_mode >= 3.0 {
+        // Slightly soften hard contrasts after PBR shading in highest quality.
+        rgb = pow(max(rgb, vec3(0.0)), vec3(0.96));
+    }
+
+    let transparent_pass = lighting_uniform.quality_and_water.w > 0.5;
+    if transparent_pass && quality_mode >= 2.0 {
+        let absorption = lighting_uniform.quality_and_water.y;
+        let fresnel_boost = lighting_uniform.quality_and_water.z;
+        let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
+        let water_tint = vec3(0.50, 0.66, 0.93);
+        rgb = mix(rgb * (1.0 - absorption), water_tint, fresnel * (0.22 + fresnel_boost));
+    }
+
+    if quality_mode >= 2.0 {
+        let fog_density = lighting_uniform.ambient_and_fog.y;
+        let fog_start = lighting_uniform.ambient_and_fog.z;
+        let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
+        let fog_color = vec3(0.66, 0.73, 0.87);
+        let dist = max(view_z, 0.0);
+        let fog_range = clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+        let fog_exp = 1.0 - exp(-dist * fog_density);
+        let fog = max(fog_range, fog_exp);
+        rgb = mix(rgb, fog_color, fog);
+    }
+
+    return vec4(rgb, base.a);
+}
+
 @fragment
 fn fragment(
 #ifdef MESHLET_MESH_MATERIAL_PASS
@@ -162,16 +196,28 @@ fn fragment(
     // Write the gbuffer, lighting pass id, and optionally normal and motion_vector textures.
     let out = deferred_output(in, pbr_input);
 #else
-    // Custom voxel lighting path (fast/fancy quality presets). This avoids per-pixel
-    // clustered light evaluation for chunk materials.
+    // Hybrid path:
+    // - Fast/Standard: cheap custom voxel lighting (no dynamic shadow sampling).
+    // - Fancy presets: Bevy PBR lighting + CSM shadows + lightweight post stylization.
     var out: FragmentOutput;
-    let voxel_lit = apply_voxel_lighting(
-        pbr_input.material.base_color,
-        safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0)),
-        abs(in.position.w),
-        safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0)),
-    );
-    out.color = voxel_lit;
+    let normal = safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0));
+    let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
+    let quality_mode = lighting_uniform.quality_and_water.x;
+    if quality_mode >= 2.0 {
+        if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+            out.color = apply_pbr_lighting(pbr_input);
+        } else {
+            out.color = pbr_input.material.base_color;
+        }
+        out.color = apply_fancy_post_lighting(out.color, normal, abs(in.position.w), view_dir);
+    } else {
+        out.color = apply_voxel_lighting(
+            pbr_input.material.base_color,
+            normal,
+            abs(in.position.w),
+            view_dir,
+        );
+    }
 
     // Apply in-shader post processing (fog, alpha-premultiply, and optional tonemapping/debanding).
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);

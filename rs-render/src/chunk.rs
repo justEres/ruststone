@@ -21,7 +21,7 @@ use crate::block_textures::{
     BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
     classify_tint, is_leaves_block, is_transparent_block, uv_for_texture,
 };
-use crate::lighting::{LightingQualityPreset, lighting_uniform_for};
+use crate::lighting::{LightingQualityPreset, lighting_uniform_for, uses_shadowed_pbr_path};
 
 const CHUNK_SIZE: i32 = 16;
 const SECTION_HEIGHT: i32 = 16;
@@ -300,13 +300,14 @@ impl FromWorld for ChunkRenderAssets {
             images.add(atlas_image)
         };
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
+        let use_shadowed_pbr = uses_shadowed_pbr_path(preset);
 
         let opaque_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
                 base_color: Color::WHITE,
                 base_color_texture: None,
                 perceptual_roughness: 1.0,
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -321,7 +322,7 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -336,7 +337,7 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: None,
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -351,7 +352,7 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -1377,38 +1378,12 @@ fn add_custom_block(
             );
         }
         BlockModelKind::Fence => {
-            let connect_east = fence_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x + 1,
-                y,
-                z,
-            ));
-            let connect_west = fence_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x - 1,
-                y,
-                z,
-            ));
-            let connect_south = fence_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x,
-                y,
-                z + 1,
-            ));
-            let connect_north = fence_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x,
-                y,
-                z - 1,
-            ));
+            let connect_east = fence_connects_to(block_at(snapshot, chunk_x, chunk_z, x + 1, y, z));
+            let connect_west = fence_connects_to(block_at(snapshot, chunk_x, chunk_z, x - 1, y, z));
+            let connect_south =
+                fence_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z + 1));
+            let connect_north =
+                fence_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z - 1));
             add_box(
                 batch,
                 None,
@@ -1484,38 +1459,10 @@ fn add_custom_block(
             }
         }
         BlockModelKind::Pane => {
-            let connect_east = pane_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x + 1,
-                y,
-                z,
-            ));
-            let connect_west = pane_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x - 1,
-                y,
-                z,
-            ));
-            let connect_south = pane_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x,
-                y,
-                z + 1,
-            ));
-            let connect_north = pane_connects_to(block_at(
-                snapshot,
-                chunk_x,
-                chunk_z,
-                x,
-                y,
-                z - 1,
-            ));
+            let connect_east = pane_connects_to(block_at(snapshot, chunk_x, chunk_z, x + 1, y, z));
+            let connect_west = pane_connects_to(block_at(snapshot, chunk_x, chunk_z, x - 1, y, z));
+            let connect_south = pane_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z + 1));
+            let connect_north = pane_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z - 1));
             let has_x = connect_east || connect_west;
             let has_z = connect_north || connect_south;
             let add_center = !has_x || !has_z;
@@ -1845,12 +1792,7 @@ fn biome_tint_at(
     }
 }
 
-fn resolve_chunk_coords(
-    chunk_x: i32,
-    chunk_z: i32,
-    x: i32,
-    z: i32,
-) -> (i32, i32, i32, i32) {
+fn resolve_chunk_coords(chunk_x: i32, chunk_z: i32, x: i32, z: i32) -> (i32, i32, i32, i32) {
     let mut target_chunk_x = chunk_x;
     let mut target_chunk_z = chunk_z;
     let mut local_x = x;
