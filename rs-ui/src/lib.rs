@@ -13,7 +13,8 @@ use bevy_egui::{
 use rs_render::RenderDebugSettings;
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
-    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_name, item_texture_candidates,
+    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_max_durability, item_name,
+    item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -473,7 +474,7 @@ fn connect_ui(
             ui_state.inventory_open = false;
         }
 
-        draw_inventory_cursor_item(ctx, inventory_state.cursor_item, &mut item_icons);
+        draw_inventory_cursor_item(ctx, inventory_state.cursor_item.clone(), &mut item_icons);
     }
 
     if matches!(app_state.0, ApplicationState::Connected)
@@ -865,7 +866,7 @@ fn draw_inventory_grid(
             for row in 0..3usize {
                 for col in 0..9usize {
                     let slot = 9 + row * 9 + col;
-                    let item = inventory_state.player_slots.get(slot).copied().flatten();
+                    let item = inventory_state.player_slots.get(slot).cloned().flatten();
                     let response =
                         draw_slot(ctx, item_icons, ui, item, false, INVENTORY_SLOT_SIZE, true);
                     if response.hovered() {
@@ -938,7 +939,7 @@ fn draw_slot(
     } else {
         egui::Sense::hover()
     };
-    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), sense);
+    let (rect, mut response) = ui.allocate_exact_size(egui::Vec2::splat(size), sense);
     let bg = if selected {
         egui::Color32::from_gray(84)
     } else {
@@ -955,7 +956,7 @@ fn draw_slot(
 
     if let Some(stack) = item {
         let mut icon_drawn = false;
-        if let Some(texture_id) = item_icons.texture_for_stack(ctx, stack) {
+        if let Some(texture_id) = item_icons.texture_for_stack(ctx, &stack) {
             let icon_rect = rect.shrink(4.0);
             ui.painter().image(
                 texture_id,
@@ -984,8 +985,98 @@ fn draw_slot(
                 egui::Color32::WHITE,
             );
         }
+        response = response.on_hover_ui(|ui| draw_item_tooltip(ui, &stack));
     }
     response
+}
+
+fn draw_item_tooltip(ui: &mut egui::Ui, stack: &InventoryItemStack) {
+    let display_name = stack
+        .meta
+        .display_name
+        .as_deref()
+        .unwrap_or_else(|| item_name(stack.item_id));
+    ui.label(egui::RichText::new(display_name).strong());
+    ui.label(egui::RichText::new(format!("Count: {}", stack.count)).small());
+    ui.label(egui::RichText::new(format!("ID: {}  Meta: {}", stack.item_id, stack.damage)).small());
+
+    if let Some(max) = item_max_durability(stack.item_id) {
+        let remaining = (max as i32 - stack.damage.max(0) as i32).max(0);
+        ui.label(egui::RichText::new(format!("Durability: {remaining}/{max}")).small());
+    }
+
+    if stack.meta.unbreakable {
+        ui.label(egui::RichText::new("Unbreakable").small());
+    }
+
+    if let Some(repair_cost) = stack.meta.repair_cost {
+        ui.label(egui::RichText::new(format!("Repair Cost: {repair_cost}")).small());
+    }
+
+    for ench in &stack.meta.enchantments {
+        let ench_name = enchantment_name(ench.id);
+        ui.label(
+            egui::RichText::new(format!("{ench_name} {}", format_enchantment_level(ench.level)))
+                .small()
+                .color(egui::Color32::from_rgb(120, 80, 220)),
+        );
+    }
+
+    for lore_line in &stack.meta.lore {
+        ui.label(
+            egui::RichText::new(lore_line.as_str())
+                .small()
+                .italics()
+                .color(egui::Color32::from_gray(180)),
+        );
+    }
+}
+
+fn enchantment_name(id: i16) -> &'static str {
+    match id {
+        0 => "Protection",
+        1 => "Fire Protection",
+        2 => "Feather Falling",
+        3 => "Blast Protection",
+        4 => "Projectile Protection",
+        5 => "Respiration",
+        6 => "Aqua Affinity",
+        7 => "Thorns",
+        8 => "Depth Strider",
+        16 => "Sharpness",
+        17 => "Smite",
+        18 => "Bane of Arthropods",
+        19 => "Knockback",
+        20 => "Fire Aspect",
+        21 => "Looting",
+        32 => "Efficiency",
+        33 => "Silk Touch",
+        34 => "Unbreaking",
+        35 => "Fortune",
+        48 => "Power",
+        49 => "Punch",
+        50 => "Flame",
+        51 => "Infinity",
+        61 => "Luck of the Sea",
+        62 => "Lure",
+        _ => "Enchantment",
+    }
+}
+
+fn format_enchantment_level(level: i16) -> String {
+    match level {
+        1 => "I".to_string(),
+        2 => "II".to_string(),
+        3 => "III".to_string(),
+        4 => "IV".to_string(),
+        5 => "V".to_string(),
+        6 => "VI".to_string(),
+        7 => "VII".to_string(),
+        8 => "VIII".to_string(),
+        9 => "IX".to_string(),
+        10 => "X".to_string(),
+        _ => level.to_string(),
+    }
 }
 
 fn item_short_label(item_id: i32) -> &'static str {
@@ -1044,7 +1135,7 @@ fn draw_inventory_cursor_item(
         egui::Stroke::new(1.0, egui::Color32::from_gray(120)),
         egui::StrokeKind::Outside,
     );
-    if let Some(texture_id) = item_icons.texture_for_stack(ctx, stack) {
+    if let Some(texture_id) = item_icons.texture_for_stack(ctx, &stack) {
         let icon_rect = egui::Rect::from_min_size(
             rect.left_top() + egui::vec2(2.0, 2.0),
             egui::vec2(16.0, 16.0),
@@ -1194,7 +1285,7 @@ impl ItemIconCache {
     fn texture_for_stack(
         &mut self,
         ctx: &egui::Context,
-        stack: InventoryItemStack,
+        stack: &InventoryItemStack,
     ) -> Option<egui::TextureId> {
         let key = (stack.item_id, stack.damage);
         if let Some(handle) = self.loaded.get(&key) {

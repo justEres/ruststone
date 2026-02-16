@@ -297,11 +297,27 @@ pub struct PerfTimings {
     pub ui_ms: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryEnchantment {
+    pub id: i16,
+    pub level: i16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InventoryItemMeta {
+    pub display_name: Option<String>,
+    pub lore: Vec<String>,
+    pub enchantments: Vec<InventoryEnchantment>,
+    pub repair_cost: Option<i32>,
+    pub unbreakable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryItemStack {
     pub item_id: i32,
     pub count: u8,
     pub damage: i16,
+    pub meta: InventoryItemMeta,
 }
 
 #[derive(Debug, Clone)]
@@ -410,7 +426,7 @@ impl InventoryState {
 
     pub fn hotbar_item(&self, hotbar_index: u8) -> Option<InventoryItemStack> {
         let idx = self.hotbar_slot_index(hotbar_index)?;
-        self.player_slots.get(idx).copied().flatten()
+        self.player_slots.get(idx).cloned().flatten()
     }
 
     pub fn apply_local_click_player_window(
@@ -425,12 +441,12 @@ impl InventoryState {
             2 => self.apply_mode_number_key(slot, button),
             4 => self.apply_mode_drop(slot, button),
             6 => self.apply_mode_double_click(slot, button),
-            _ => self.cursor_item,
+            _ => self.cursor_item.clone(),
         }
     }
 
     fn apply_outside_click(&mut self, button: u8) {
-        match self.cursor_item {
+        match self.cursor_item.clone() {
             Some(_) if button == 0 => {
                 self.cursor_item = None;
             }
@@ -449,7 +465,7 @@ impl InventoryState {
     fn apply_mode_normal_click(&mut self, slot: i16, button: u8) -> Option<InventoryItemStack> {
         if slot < 0 {
             self.apply_outside_click(button);
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
 
         let slot_index = slot as usize;
@@ -457,11 +473,11 @@ impl InventoryState {
             self.player_slots.resize(slot_index + 1, None);
         }
 
-        let mut slot_item = self.player_slots[slot_index];
-        let mut cursor = self.cursor_item;
+        let mut slot_item = self.player_slots[slot_index].clone();
+        let mut cursor = self.cursor_item.clone();
 
         if button == 0 {
-            match (cursor, slot_item) {
+            match (cursor.clone(), slot_item.clone()) {
                 (None, Some(_)) => {
                     cursor = slot_item;
                     slot_item = None;
@@ -471,7 +487,8 @@ impl InventoryState {
                     cursor = None;
                 }
                 (Some(cur), Some(mut sl)) => {
-                    if can_stack(cur, sl) && sl.count < max_stack_for_item(sl.item_id) {
+                    if can_stack(&cur, &sl) && sl.count < max_stack_for_item(sl.item_id)
+                    {
                         let max = max_stack_for_item(sl.item_id);
                         let space = max.saturating_sub(sl.count);
                         let moved = space.min(cur.count);
@@ -494,11 +511,14 @@ impl InventoryState {
                 _ => {}
             }
         } else if button == 1 {
-            match (cursor, slot_item) {
+            match (cursor.clone(), slot_item.clone()) {
                 (None, Some(mut sl)) => {
                     let take = (sl.count.saturating_add(1)) / 2;
                     let remain = sl.count.saturating_sub(take);
-                    cursor = Some(InventoryItemStack { count: take, ..sl });
+                    cursor = Some(InventoryItemStack {
+                        count: take,
+                        ..sl.clone()
+                    });
                     slot_item = if remain == 0 {
                         None
                     } else {
@@ -507,12 +527,17 @@ impl InventoryState {
                     };
                 }
                 (Some(mut cur), None) => {
-                    slot_item = Some(InventoryItemStack { count: 1, ..cur });
+                    slot_item = Some(InventoryItemStack {
+                        count: 1,
+                        ..cur.clone()
+                    });
                     cur.count = cur.count.saturating_sub(1);
                     cursor = if cur.count == 0 { None } else { Some(cur) };
                 }
                 (Some(mut cur), Some(mut sl)) => {
-                    if can_stack(cur, sl) && sl.count < max_stack_for_item(sl.item_id) {
+                    if can_stack(&cur, &sl)
+                        && sl.count < max_stack_for_item(sl.item_id)
+                    {
                         sl.count = sl.count.saturating_add(1);
                         cur.count = cur.count.saturating_sub(1);
                         slot_item = Some(sl);
@@ -528,19 +553,19 @@ impl InventoryState {
 
         self.player_slots[slot_index] = slot_item;
         self.cursor_item = cursor;
-        self.cursor_item
+        self.cursor_item.clone()
     }
 
     fn apply_mode_shift_click(&mut self, slot: i16) -> Option<InventoryItemStack> {
         if slot < 0 {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
         let slot_index = slot as usize;
         if slot_index >= self.player_slots.len() {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
         let Some(mut moving) = self.player_slots[slot_index].take() else {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         };
 
         let target_range = if (9..=35).contains(&slot_index) {
@@ -549,7 +574,7 @@ impl InventoryState {
             9..36
         } else {
             self.player_slots[slot_index] = Some(moving);
-            return self.cursor_item;
+            return self.cursor_item.clone();
         };
 
         for idx in target_range.clone() {
@@ -560,7 +585,9 @@ impl InventoryState {
                 continue;
             };
             if let Some(stack) = existing.as_mut() {
-                if can_stack(*stack, moving) && stack.count < max_stack_for_item(stack.item_id) {
+                if can_stack(stack, &moving)
+                    && stack.count < max_stack_for_item(stack.item_id)
+                {
                     let max = max_stack_for_item(stack.item_id);
                     let space = max.saturating_sub(stack.count);
                     let moved = space.min(moving.count);
@@ -578,7 +605,7 @@ impl InventoryState {
                 continue;
             };
             if existing.is_none() {
-                *existing = Some(moving);
+                *existing = Some(moving.clone());
                 moving.count = 0;
             }
         }
@@ -586,31 +613,31 @@ impl InventoryState {
         if moving.count > 0 {
             self.player_slots[slot_index] = Some(moving);
         }
-        self.cursor_item
+        self.cursor_item.clone()
     }
 
     fn apply_mode_number_key(&mut self, slot: i16, button: u8) -> Option<InventoryItemStack> {
         if slot < 0 || button > 8 {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
         let slot_index = slot as usize;
         let hotbar_index = 36 + button as usize;
         if slot_index >= self.player_slots.len() || hotbar_index >= self.player_slots.len() {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
         self.player_slots.swap(slot_index, hotbar_index);
-        self.cursor_item
+        self.cursor_item.clone()
     }
 
     fn apply_mode_drop(&mut self, slot: i16, button: u8) -> Option<InventoryItemStack> {
         if slot < 0 {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
         let slot_index = slot as usize;
         if slot_index >= self.player_slots.len() {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
-        if let Some(mut stack) = self.player_slots[slot_index] {
+        if let Some(mut stack) = self.player_slots[slot_index].clone() {
             if button == 0 {
                 stack.count = stack.count.saturating_sub(1);
                 self.player_slots[slot_index] = if stack.count == 0 { None } else { Some(stack) };
@@ -618,20 +645,20 @@ impl InventoryState {
                 self.player_slots[slot_index] = None;
             }
         }
-        self.cursor_item
+        self.cursor_item.clone()
     }
 
     fn apply_mode_double_click(&mut self, slot: i16, button: u8) -> Option<InventoryItemStack> {
         if button != 0 {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
-        let mut cursor = match self.cursor_item {
+        let mut cursor = match self.cursor_item.clone() {
             Some(c) => c,
             None => return None,
         };
         let max = max_stack_for_item(cursor.item_id);
         if cursor.count >= max {
-            return self.cursor_item;
+            return self.cursor_item.clone();
         }
 
         let skip_slot = if slot >= 0 { Some(slot as usize) } else { None };
@@ -639,10 +666,10 @@ impl InventoryState {
             if Some(idx) == skip_slot {
                 continue;
             }
-            let Some(mut stack) = self.player_slots[idx] else {
+            let Some(mut stack) = self.player_slots[idx].clone() else {
                 continue;
             };
-            if !can_stack(stack, cursor) {
+            if !can_stack(&stack, &cursor) {
                 continue;
             }
             let need = max.saturating_sub(cursor.count);
@@ -658,16 +685,53 @@ impl InventoryState {
             }
         }
         self.cursor_item = Some(cursor);
-        self.cursor_item
+        self.cursor_item.clone()
     }
 }
 
-fn can_stack(a: InventoryItemStack, b: InventoryItemStack) -> bool {
-    a.item_id == b.item_id && a.damage == b.damage
+fn can_stack(a: &InventoryItemStack, b: &InventoryItemStack) -> bool {
+    a.item_id == b.item_id && a.damage == b.damage && a.meta == b.meta
 }
 
 fn max_stack_for_item(item_id: i32) -> u8 {
     if is_single_stack_item(item_id) { 1 } else { 64 }
+}
+
+pub fn item_max_durability(item_id: i32) -> Option<i16> {
+    Some(match item_id {
+        256 | 269 | 273 | 277 | 284 => 59,
+        257 | 270 | 274 | 278 | 285 => 131,
+        258 | 271 | 275 | 279 | 286 => 250,
+        259 => 64,
+        261 => 384,
+        267 | 272 | 276 | 283 => 32,
+        268 => 59,
+        290 | 291 | 292 | 294 => 59,
+        293 => 131,
+        298 => 55,
+        299 => 80,
+        300 => 75,
+        301 => 65,
+        302 => 165,
+        303 => 240,
+        304 => 225,
+        305 => 195,
+        306 => 363,
+        307 => 528,
+        308 => 495,
+        309 => 429,
+        310 => 363,
+        311 => 528,
+        312 => 495,
+        313 => 429,
+        314 => 77,
+        315 => 112,
+        316 => 105,
+        317 => 91,
+        346 => 64,
+        359 => 238,
+        _ => return None,
+    })
 }
 
 fn is_single_stack_item(item_id: i32) -> bool {

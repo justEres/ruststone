@@ -57,7 +57,7 @@ impl Default for ItemTextureCache {
 }
 
 impl ItemTextureCache {
-    pub fn request_stack(&mut self, stack: InventoryItemStack) {
+    pub fn request_stack(&mut self, stack: &InventoryItemStack) {
         let key = ItemTexKey {
             item_id: stack.item_id,
             damage: stack.damage,
@@ -77,7 +77,7 @@ impl ItemTextureCache {
         }
     }
 
-    pub fn texture_for_stack(&self, stack: InventoryItemStack) -> Option<Handle<Image>> {
+    pub fn texture_for_stack(&self, stack: &InventoryItemStack) -> Option<Handle<Image>> {
         let key = ItemTexKey {
             item_id: stack.item_id,
             damage: stack.damage,
@@ -99,7 +99,7 @@ impl ItemTextureCache {
 
     pub fn material_for_stack(
         &self,
-        stack: InventoryItemStack,
+        stack: &InventoryItemStack,
     ) -> Option<Handle<StandardMaterial>> {
         let key = ItemTexKey {
             item_id: stack.item_id,

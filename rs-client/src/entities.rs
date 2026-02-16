@@ -52,10 +52,10 @@ const OBJECT_NAME_Y_OFFSET: f32 = 0.65;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteItemSprite;
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone)]
 pub struct RemoteItemStackState(pub InventoryItemStack);
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone)]
 pub struct ItemSpriteStack(pub InventoryItemStack);
 
 #[derive(Component, Debug, Clone, Copy, Default)]
@@ -595,10 +595,12 @@ pub fn apply_remote_entity_events(
                 }
                 match stack {
                     Some(stack) => {
-                        item_textures.request_stack(stack);
+                        item_textures.request_stack(&stack);
                         if let Ok(mut commands_entity) = commands.get_entity(entity) {
-                            commands_entity
-                                .insert((RemoteItemStackState(stack), ItemSpriteStack(stack)));
+                            commands_entity.insert((
+                                RemoteItemStackState(stack.clone()),
+                                ItemSpriteStack(stack),
+                            ));
                         }
                     }
                     None => {
@@ -744,8 +746,8 @@ pub fn apply_remote_entity_events(
                     continue;
                 };
 
-                item_textures.request_stack(stack);
-                let material = item_textures.material_for_stack(stack).unwrap_or_else(|| {
+                item_textures.request_stack(&stack);
+                let material = item_textures.material_for_stack(&stack).unwrap_or_else(|| {
                     materials.add(StandardMaterial {
                         base_color: Color::WHITE,
                         alpha_mode: AlphaMode::Mask(0.5),
@@ -919,8 +921,8 @@ pub fn apply_item_sprite_textures_system(
     mut query: Query<(&ItemSpriteStack, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     for (stack, mut material) in &mut query {
-        cache.request_stack(stack.0);
-        if let Some(handle) = cache.material_for_stack(stack.0) {
+        cache.request_stack(&stack.0);
+        if let Some(handle) = cache.material_for_stack(&stack.0) {
             if material.0 != handle {
                 material.0 = handle;
             }
@@ -1403,8 +1405,8 @@ pub fn first_person_viewmodel_system(
     };
 
     let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
-    if let Some(stack) = held {
-        item_textures.request_stack(stack);
+    if let Some(stack) = held.as_ref() {
+        item_textures.request_stack(&stack);
     }
 
     let base_pose_rotation = Quat::from_rotation_y(std::f32::consts::PI)
@@ -1423,7 +1425,7 @@ pub fn first_person_viewmodel_system(
         } else {
             // Update held item stack without rebuilding.
             if let Ok(mut item_entity) = commands.get_entity(parts.item) {
-                match held {
+                match held.clone() {
                     Some(stack) => {
                         item_entity.insert((ItemSpriteStack(stack), Visibility::Visible));
                     }

@@ -251,7 +251,7 @@ pub fn local_held_item_view_system(
         return;
     };
 
-    item_textures.request_stack(stack);
+    item_textures.request_stack(&stack);
     let sprite_entity = existing.iter().next();
     if let Some(e) = sprite_entity {
         commands.entity(e).insert(ItemSpriteStack(stack));
