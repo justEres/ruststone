@@ -56,6 +56,90 @@ impl LightingQualityPreset {
     }
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+pub enum ShadowQualityPreset {
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for ShadowQualityPreset {
+    fn default() -> Self {
+        Self::Medium
+    }
+}
+
+impl ShadowQualityPreset {
+    pub const ALL: [Self; 4] = [Self::Off, Self::Low, Self::Medium, Self::High];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+        }
+    }
+
+    pub const fn as_options_value(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    pub fn from_options_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ShadowQualityParams {
+    map_size: usize,
+    cascades: usize,
+    max_distance: f32,
+    first_cascade_far_bound: f32,
+}
+
+fn shadow_quality_params(preset: ShadowQualityPreset) -> ShadowQualityParams {
+    match preset {
+        ShadowQualityPreset::Off => ShadowQualityParams {
+            map_size: 512,
+            cascades: 1,
+            max_distance: 24.0,
+            first_cascade_far_bound: 8.0,
+        },
+        ShadowQualityPreset::Low => ShadowQualityParams {
+            map_size: 1024,
+            cascades: 1,
+            max_distance: 56.0,
+            first_cascade_far_bound: 16.0,
+        },
+        ShadowQualityPreset::Medium => ShadowQualityParams {
+            map_size: 1536,
+            cascades: 2,
+            max_distance: 96.0,
+            first_cascade_far_bound: 28.0,
+        },
+        ShadowQualityPreset::High => ShadowQualityParams {
+            map_size: 2048,
+            cascades: 3,
+            max_distance: 144.0,
+            first_cascade_far_bound: 36.0,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LightingPresetParams {
     sun_dir: Vec3,
@@ -69,10 +153,6 @@ struct LightingPresetParams {
     fog_end: f32,
     water_absorption: f32,
     water_fresnel: f32,
-    shadow_map_size: usize,
-    shadow_cascades: usize,
-    shadow_max_distance: f32,
-    shadow_first_cascade_far_bound: f32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
 }
@@ -91,10 +171,6 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 0.0,
             water_absorption: 0.0,
             water_fresnel: 0.0,
-            shadow_map_size: 1024,
-            shadow_cascades: 1,
-            shadow_max_distance: 40.0,
-            shadow_first_cascade_far_bound: 12.0,
             shadow_depth_bias: 0.03,
             shadow_normal_bias: 0.8,
         },
@@ -110,10 +186,6 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 0.0,
             water_absorption: 0.0,
             water_fresnel: 0.0,
-            shadow_map_size: 1024,
-            shadow_cascades: 1,
-            shadow_max_distance: 40.0,
-            shadow_first_cascade_far_bound: 12.0,
             shadow_depth_bias: 0.025,
             shadow_normal_bias: 0.7,
         },
@@ -129,10 +201,6 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 220.0,
             water_absorption: 0.18,
             water_fresnel: 0.12,
-            shadow_map_size: 1024,
-            shadow_cascades: 2,
-            shadow_max_distance: 96.0,
-            shadow_first_cascade_far_bound: 28.0,
             shadow_depth_bias: 0.022,
             shadow_normal_bias: 0.55,
         },
@@ -148,27 +216,25 @@ fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
             fog_end: 170.0,
             water_absorption: 0.26,
             water_fresnel: 0.18,
-            shadow_map_size: 2048,
-            shadow_cascades: 3,
-            shadow_max_distance: 140.0,
-            shadow_first_cascade_far_bound: 34.0,
             shadow_depth_bias: 0.018,
             shadow_normal_bias: 0.46,
         },
     }
 }
 
-pub const fn uses_shadowed_pbr_path(preset: LightingQualityPreset) -> bool {
-    matches!(
-        preset,
-        LightingQualityPreset::FancyLow | LightingQualityPreset::FancyHigh
-    )
+pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
+    settings.enable_pbr_terrain_lighting
+        && matches!(
+            settings.lighting_quality,
+            LightingQualityPreset::FancyLow | LightingQualityPreset::FancyHigh
+        )
 }
 
 pub fn lighting_uniform_for(
-    preset: LightingQualityPreset,
+    settings: &RenderDebugSettings,
     transparent_pass: bool,
 ) -> AtlasLightingUniform {
+    let preset = settings.lighting_quality;
     let params = preset_params(preset);
     AtlasLightingUniform {
         sun_dir_and_strength: Vec4::new(
@@ -188,6 +254,12 @@ pub fn lighting_uniform_for(
             params.water_absorption,
             params.water_fresnel,
             if transparent_pass { 1.0 } else { 0.0 },
+        ),
+        color_grading: Vec4::new(
+            settings.color_saturation,
+            settings.color_contrast,
+            settings.color_brightness,
+            settings.color_gamma,
         ),
     }
 }
@@ -210,28 +282,29 @@ pub fn apply_lighting_quality(
     }
 
     if let Some(mat) = materials.get_mut(&assets.opaque_material) {
-        mat.extension.lighting = lighting_uniform_for(settings.lighting_quality, false);
-        mat.base.unlit = !uses_shadowed_pbr_path(settings.lighting_quality);
+        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
-        mat.extension.lighting = lighting_uniform_for(settings.lighting_quality, false);
-        mat.base.unlit = !uses_shadowed_pbr_path(settings.lighting_quality);
+        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
-        mat.extension.lighting = lighting_uniform_for(settings.lighting_quality, false);
-        mat.base.unlit = !uses_shadowed_pbr_path(settings.lighting_quality);
+        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
     }
     if let Some(mat) = materials.get_mut(&assets.transparent_material) {
-        mat.extension.lighting = lighting_uniform_for(settings.lighting_quality, true);
-        mat.base.unlit = !uses_shadowed_pbr_path(settings.lighting_quality);
+        mat.extension.lighting = lighting_uniform_for(&settings, true);
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
     }
 
     let params = preset_params(settings.lighting_quality);
-    shadow_map.size = params.shadow_map_size;
+    let shadow_params = shadow_quality_params(settings.shadow_quality);
+    shadow_map.size = shadow_params.map_size;
 
     let allow_shadows =
-        settings.shadows_enabled && uses_shadowed_pbr_path(settings.lighting_quality);
-    let is_fancy = uses_shadowed_pbr_path(settings.lighting_quality);
+        settings.shadows_enabled && settings.shadow_quality != ShadowQualityPreset::Off;
+    let is_fancy = uses_shadowed_pbr_path(&settings);
     let sun_travel_dir = -params.sun_dir;
     ambient.brightness = params.ambient_brightness;
 
@@ -244,9 +317,9 @@ pub fn apply_lighting_quality(
             light_transform.look_to(sun_travel_dir, Vec3::Y);
             if let Some(mut cascade_cfg) = cascade_cfg {
                 *cascade_cfg = CascadeShadowConfigBuilder {
-                    num_cascades: params.shadow_cascades,
-                    maximum_distance: params.shadow_max_distance,
-                    first_cascade_far_bound: params.shadow_first_cascade_far_bound,
+                    num_cascades: shadow_params.cascades,
+                    maximum_distance: shadow_params.max_distance,
+                    first_cascade_far_bound: shadow_params.first_cascade_far_bound,
                     minimum_distance: 0.1,
                     ..default()
                 }

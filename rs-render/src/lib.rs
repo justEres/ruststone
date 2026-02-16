@@ -21,7 +21,7 @@ pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
 pub use debug::RenderDebugSettings;
-pub use lighting::LightingQualityPreset;
+pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 pub struct RenderPlugin;
 

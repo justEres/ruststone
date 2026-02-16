@@ -10,7 +10,7 @@ use bevy_egui::{
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
     egui::{self},
 };
-use rs_render::{LightingQualityPreset, RenderDebugSettings};
+use rs_render::{LightingQualityPreset, RenderDebugSettings, ShadowQualityPreset};
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_max_durability, item_name,
@@ -66,12 +66,8 @@ fn connect_ui(
         let options_path = state.options_path.clone();
         match window_query.get_single_mut() {
             Ok(mut window) => {
-                match load_client_options(
-                    &options_path,
-                    &mut state,
-                    &mut render_debug,
-                    &mut window,
-                ) {
+                match load_client_options(&options_path, &mut state, &mut render_debug, &mut window)
+                {
                     Ok(()) => {
                         state.options_status = format!("Loaded {}", options_path);
                     }
@@ -360,17 +356,39 @@ fn connect_ui(
                     .changed();
                 let mut render_distance = render_debug.render_distance_chunks;
                 options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_distance, 2..=32).text("Render Distance"),
-                    )
+                    .add(egui::Slider::new(&mut render_distance, 2..=32).text("Render Distance"))
                     .changed();
                 render_debug.render_distance_chunks = render_distance;
                 options_changed |= ui
                     .checkbox(&mut render_debug.shadows_enabled, "Shadows")
                     .changed();
-                options_changed |= ui.checkbox(&mut render_debug.fxaa_enabled, "FXAA").changed();
+                let mut selected_shadow_quality = render_debug.shadow_quality;
+                egui::ComboBox::from_label("Shadow Quality")
+                    .selected_text(selected_shadow_quality.label())
+                    .show_ui(ui, |ui| {
+                        for preset in ShadowQualityPreset::ALL {
+                            ui.selectable_value(
+                                &mut selected_shadow_quality,
+                                preset,
+                                preset.label(),
+                            );
+                        }
+                    });
+                if selected_shadow_quality != render_debug.shadow_quality {
+                    render_debug.shadow_quality = selected_shadow_quality;
+                    options_changed = true;
+                }
+                options_changed |= ui
+                    .checkbox(&mut render_debug.fxaa_enabled, "FXAA")
+                    .changed();
                 options_changed |= ui
                     .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
+                    .changed();
+                options_changed |= ui
+                    .checkbox(
+                        &mut render_debug.enable_pbr_terrain_lighting,
+                        "PBR terrain shadows (experimental)",
+                    )
                     .changed();
                 if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
                     options_changed = true;
@@ -381,6 +399,9 @@ fn connect_ui(
                             PresentMode::AutoNoVsync
                         };
                     }
+                }
+                if ui.button("Visual Settings...").clicked() {
+                    state.visual_settings_open = !state.visual_settings_open;
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -410,8 +431,7 @@ fn connect_ui(
                     if ui.button("Save").clicked() {
                         match save_client_options(&state.options_path, &state, &render_debug) {
                             Ok(()) => {
-                                state.options_status =
-                                    format!("Saved {}", state.options_path);
+                                state.options_status = format!("Saved {}", state.options_path);
                                 state.options_dirty = false;
                             }
                             Err(err) => state.options_status = err,
@@ -450,9 +470,60 @@ fn connect_ui(
                         let _ = save_client_options(&state.options_path, &state, &render_debug);
                         state.options_dirty = false;
                     }
+                    state.visual_settings_open = false;
                     ui_state.paused = false;
                 }
             });
+
+        if state.visual_settings_open {
+            egui::Window::new("Visual Settings")
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    let mut options_changed = false;
+                    options_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut render_debug.color_saturation, 0.5..=1.8)
+                                .text("Saturation"),
+                        )
+                        .changed();
+                    options_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut render_debug.color_contrast, 0.6..=1.6)
+                                .text("Contrast"),
+                        )
+                        .changed();
+                    options_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut render_debug.color_brightness, -0.2..=0.2)
+                                .text("Brightness"),
+                        )
+                        .changed();
+                    options_changed |= ui
+                        .add(
+                            egui::Slider::new(&mut render_debug.color_gamma, 0.6..=1.8)
+                                .text("Gamma"),
+                        )
+                        .changed();
+                    if ui.button("Reset Color Grading").clicked() {
+                        render_debug.color_saturation = 1.08;
+                        render_debug.color_contrast = 1.06;
+                        render_debug.color_brightness = 0.0;
+                        render_debug.color_gamma = 1.0;
+                        options_changed = true;
+                    }
+                    if options_changed {
+                        state.options_dirty = true;
+                        match save_client_options(&state.options_path, &state, &render_debug) {
+                            Ok(()) => {
+                                state.options_status = format!("Saved {}", state.options_path);
+                                state.options_dirty = false;
+                            }
+                            Err(err) => state.options_status = err,
+                        }
+                    }
+                });
+        }
     }
 
     if matches!(app_state.0, ApplicationState::Connected) && !player_status.dead {
@@ -580,6 +651,7 @@ pub struct ConnectUiState {
     pub options_dirty: bool,
     pub options_path: String,
     pub options_status: String,
+    pub visual_settings_open: bool,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
@@ -597,6 +669,7 @@ impl Default for ConnectUiState {
             options_dirty: false,
             options_path: DEFAULT_OPTIONS_PATH.to_string(),
             options_status: String::new(),
+            visual_settings_open: false,
         }
     }
 }
@@ -611,6 +684,12 @@ struct ClientOptionsFile {
     pub manual_frustum_cull: bool,
     pub vsync_enabled: bool,
     pub lighting_quality: String,
+    pub shadow_quality: String,
+    pub enable_pbr_terrain_lighting: bool,
+    pub color_saturation: f32,
+    pub color_contrast: f32,
+    pub color_brightness: f32,
+    pub color_gamma: f32,
 }
 
 impl Default for ClientOptionsFile {
@@ -624,6 +703,12 @@ impl Default for ClientOptionsFile {
             manual_frustum_cull: render.manual_frustum_cull,
             vsync_enabled: false,
             lighting_quality: render.lighting_quality.as_options_value().to_string(),
+            shadow_quality: render.shadow_quality.as_options_value().to_string(),
+            enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+            color_saturation: render.color_saturation,
+            color_contrast: render.color_contrast,
+            color_brightness: render.color_brightness,
+            color_gamma: render.color_gamma,
         }
     }
 }
@@ -637,6 +722,12 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         manual_frustum_cull: render.manual_frustum_cull,
         vsync_enabled: state.vsync_enabled,
         lighting_quality: render.lighting_quality.as_options_value().to_string(),
+        shadow_quality: render.shadow_quality.as_options_value().to_string(),
+        enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+        color_saturation: render.color_saturation,
+        color_contrast: render.color_contrast,
+        color_brightness: render.color_brightness,
+        color_gamma: render.color_gamma,
     }
 }
 
@@ -652,10 +743,18 @@ fn apply_options(
         render.lighting_quality = preset;
         apply_lighting_preset_defaults(preset, render);
     }
+    if let Some(preset) = ShadowQualityPreset::from_options_value(&options.shadow_quality) {
+        render.shadow_quality = preset;
+    }
     // Explicit toggles in options file override preset defaults.
     render.shadows_enabled = options.shadows_enabled;
     render.fxaa_enabled = options.fxaa_enabled;
     render.manual_frustum_cull = options.manual_frustum_cull;
+    render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
+    render.color_saturation = options.color_saturation.clamp(0.0, 2.0);
+    render.color_contrast = options.color_contrast.clamp(0.0, 2.0);
+    render.color_brightness = options.color_brightness.clamp(-0.5, 0.5);
+    render.color_gamma = options.color_gamma.clamp(0.2, 2.5);
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync
@@ -672,18 +771,22 @@ fn apply_lighting_preset_defaults(
         LightingQualityPreset::Fast => {
             render_debug.shadows_enabled = false;
             render_debug.fxaa_enabled = false;
+            render_debug.shadow_quality = ShadowQualityPreset::Low;
         }
         LightingQualityPreset::Standard => {
             render_debug.shadows_enabled = false;
             render_debug.fxaa_enabled = true;
+            render_debug.shadow_quality = ShadowQualityPreset::Low;
         }
         LightingQualityPreset::FancyLow => {
             render_debug.shadows_enabled = true;
             render_debug.fxaa_enabled = true;
+            render_debug.shadow_quality = ShadowQualityPreset::Medium;
         }
         LightingQualityPreset::FancyHigh => {
             render_debug.shadows_enabled = true;
             render_debug.fxaa_enabled = true;
+            render_debug.shadow_quality = ShadowQualityPreset::High;
         }
     }
 }
@@ -918,16 +1021,15 @@ fn draw_inventory_grid(
                 for col in 0..9usize {
                     let slot = 9 + row * 9 + col;
                     let item = inventory_state.player_slots.get(slot).cloned().flatten();
-                    let response =
-                        draw_slot(
-                            ctx,
-                            item_icons,
-                            ui,
-                            item.as_ref(),
-                            false,
-                            INVENTORY_SLOT_SIZE,
-                            true,
-                        );
+                    let response = draw_slot(
+                        ctx,
+                        item_icons,
+                        ui,
+                        item.as_ref(),
+                        false,
+                        INVENTORY_SLOT_SIZE,
+                        true,
+                    );
                     if response.hovered() {
                         hovered_any_slot = true;
                         hovered_item = item;
@@ -1095,9 +1197,12 @@ fn draw_item_tooltip(ui: &mut egui::Ui, stack: &InventoryItemStack) {
     for ench in &stack.meta.enchantments {
         let ench_name = enchantment_name(ench.id);
         ui.label(
-            egui::RichText::new(format!("{ench_name} {}", format_enchantment_level(ench.level)))
-                .small()
-                .color(egui::Color32::from_rgb(120, 80, 220)),
+            egui::RichText::new(format!(
+                "{ench_name} {}",
+                format_enchantment_level(ench.level)
+            ))
+            .small()
+            .color(egui::Color32::from_rgb(120, 80, 220)),
         );
     }
 
