@@ -1302,6 +1302,38 @@ fn add_custom_block(
             );
         }
         BlockModelKind::Fence => {
+            let connect_east = fence_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x + 1,
+                y,
+                z,
+            ));
+            let connect_west = fence_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x - 1,
+                y,
+                z,
+            ));
+            let connect_south = fence_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z + 1,
+            ));
+            let connect_north = fence_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z - 1,
+            ));
             add_box(
                 batch,
                 None,
@@ -1315,60 +1347,185 @@ fn add_custom_block(
                 block_id,
                 tint,
             );
-            add_box(
-                batch,
-                None,
-                texture_mapping,
-                biome_tints,
-                x,
-                y,
-                z,
-                [0.4375, 0.375, 0.0],
-                [0.5625, 0.8125, 1.0],
-                block_id,
-                tint,
-            );
-            add_box(
-                batch,
-                None,
-                texture_mapping,
-                biome_tints,
-                x,
-                y,
-                z,
-                [0.0, 0.375, 0.4375],
-                [1.0, 0.8125, 0.5625],
-                block_id,
-                tint,
-            );
+            if connect_north {
+                add_box(
+                    batch,
+                    None,
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.4375, 0.375, 0.0],
+                    [0.5625, 0.8125, 0.5],
+                    block_id,
+                    tint,
+                );
+            }
+            if connect_south {
+                add_box(
+                    batch,
+                    None,
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.4375, 0.375, 0.5],
+                    [0.5625, 0.8125, 1.0],
+                    block_id,
+                    tint,
+                );
+            }
+            if connect_west {
+                add_box(
+                    batch,
+                    None,
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.375, 0.4375],
+                    [0.5, 0.8125, 0.5625],
+                    block_id,
+                    tint,
+                );
+            }
+            if connect_east {
+                add_box(
+                    batch,
+                    None,
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.5, 0.375, 0.4375],
+                    [1.0, 0.8125, 0.5625],
+                    block_id,
+                    tint,
+                );
+            }
         }
         BlockModelKind::Pane => {
-            add_box(
-                batch,
-                None,
-                texture_mapping,
-                biome_tints,
-                x,
+            let connect_east = pane_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x + 1,
                 y,
                 z,
-                [0.4375, 0.0, 0.0],
-                [0.5625, 1.0, 1.0],
-                block_id,
-                tint,
-            );
-            add_box(
-                batch,
-                None,
-                texture_mapping,
-                biome_tints,
-                x,
+            ));
+            let connect_west = pane_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x - 1,
                 y,
                 z,
-                [0.0, 0.0, 0.4375],
-                [1.0, 1.0, 0.5625],
-                block_id,
-                tint,
-            );
+            ));
+            let connect_south = pane_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z + 1,
+            ));
+            let connect_north = pane_connects_to(block_at(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z - 1,
+            ));
+            let has_x = connect_east || connect_west;
+            let has_z = connect_north || connect_south;
+            let add_center = !has_x || !has_z;
+
+            if add_center {
+                add_box(
+                    batch,
+                    None,
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.4375, 0.0, 0.4375],
+                    [0.5625, 1.0, 0.5625],
+                    block_id,
+                    tint,
+                );
+            }
+
+            if has_z {
+                if connect_north {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.4375, 0.0, 0.0],
+                        [0.5625, 1.0, 0.5],
+                        block_id,
+                        tint,
+                    );
+                }
+                if connect_south {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.4375, 0.0, 0.5],
+                        [0.5625, 1.0, 1.0],
+                        block_id,
+                        tint,
+                    );
+                }
+            }
+
+            if has_x {
+                if connect_west {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.0, 0.0, 0.4375],
+                        [0.5, 1.0, 0.5625],
+                        block_id,
+                        tint,
+                    );
+                }
+                if connect_east {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.5, 0.0, 0.4375],
+                        [1.0, 1.0, 0.5625],
+                        block_id,
+                        tint,
+                    );
+                }
+            }
         }
         _ => {}
     }
@@ -1700,6 +1857,36 @@ fn is_occluding_block(block_id: u16) -> bool {
         return false;
     }
     !is_custom_block(block_id)
+}
+
+fn fence_connects_to(neighbor_state: u16) -> bool {
+    let neighbor_id = block_type(neighbor_state);
+    if neighbor_id == 0 || is_liquid(neighbor_state) {
+        return false;
+    }
+    if matches!(block_model_kind(neighbor_id), BlockModelKind::Fence) {
+        return true;
+    }
+    // Fence gates connect visually to fences.
+    if matches!(neighbor_id, 107 | 183 | 184 | 185 | 186 | 187) {
+        return true;
+    }
+    is_occluding_block(neighbor_state)
+}
+
+fn pane_connects_to(neighbor_state: u16) -> bool {
+    let neighbor_id = block_type(neighbor_state);
+    if neighbor_id == 0 || is_liquid(neighbor_state) {
+        return false;
+    }
+    if matches!(block_model_kind(neighbor_id), BlockModelKind::Pane) {
+        return true;
+    }
+    // Panes connect to glass-family blocks and iron bars.
+    if matches!(neighbor_id, 20 | 95 | 101 | 102 | 160) {
+        return true;
+    }
+    is_occluding_block(neighbor_state)
 }
 
 fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {

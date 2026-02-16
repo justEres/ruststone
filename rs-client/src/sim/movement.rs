@@ -11,9 +11,14 @@ const COLLISION_EPS: f32 = 1e-5;
 
 const GRAVITY: f32 = -0.08;
 const AIR_DRAG: f32 = 0.98;
+const WATER_GRAVITY: f32 = -0.02;
+const WATER_DRAG: f32 = 0.8;
+const WATER_SURFACE_STEP: f32 = 0.3;
 const JUMP_VEL: f32 = 0.42;
 const BASE_MOVE_SPEED: f32 = 0.1;
 const SPEED_IN_AIR: f32 = 0.02;
+const WATER_MOVE_SPEED: f32 = 0.02;
+const SWIM_UP_ACCEL: f32 = 0.04;
 const SLIPPERINESS_DEFAULT: f32 = 0.6;
 const SNEAK_EDGE_STEP: f32 = 0.05;
 const MOVE_INPUT_DAMPING: f32 = 0.98;
@@ -37,6 +42,17 @@ impl<'a> WorldCollision<'a> {
         self.map.map_or(0, |map| map.block_at(x, y, z))
     }
 
+    fn is_player_in_water(&self, pos: Vec3) -> bool {
+        let x = pos.x.floor() as i32;
+        let z = pos.z.floor() as i32;
+        let y0 = (pos.y + 0.2).floor() as i32;
+        let y1 = (pos.y + 0.9).floor() as i32;
+        let y2 = (pos.y + 1.4).floor() as i32;
+        is_water_state(self.block_at(x, y0, z))
+            || is_water_state(self.block_at(x, y1, z))
+            || is_water_state(self.block_at(x, y2, z))
+    }
+
     fn collect_collision_boxes(&self, min: Vec3, max: Vec3) -> Vec<Aabb> {
         let (min_x, max_x) = block_range(min.x, max.x);
         let (min_y, max_y) = block_range(min.y, max.y);
@@ -46,7 +62,7 @@ impl<'a> WorldCollision<'a> {
             for z in min_z..=max_z {
                 for x in min_x..=max_x {
                     let block_state = self.block_at(x, y, z);
-                    append_block_collision_boxes(block_state, x, y, z, &mut out);
+                    append_block_collision_boxes(self, block_state, x, y, z, &mut out);
                 }
             }
         }
@@ -61,6 +77,36 @@ impl<'a> WorldCollision<'a> {
             }
         }
         false
+    }
+
+    fn aabb_has_liquid(&self, bb: &Aabb) -> bool {
+        let (min_x, max_x) = block_range(bb.min.x, bb.max.x);
+        let (min_y, max_y) = block_range(bb.min.y, bb.max.y);
+        let (min_z, max_z) = block_range(bb.min.z, bb.max.z);
+        for y in min_y..=max_y {
+            for z in min_z..=max_z {
+                for x in min_x..=max_x {
+                    let block_state = self.block_at(x, y, z);
+                    if !is_water_state(block_state) {
+                        continue;
+                    }
+                    let liquid_bb = Aabb::new(
+                        Vec3::new(x as f32, y as f32, z as f32),
+                        Vec3::new(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0),
+                    );
+                    if bb.intersects(&liquid_bb) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    // Vanilla parity helper for Entity::isOffsetPositionInLiquid.
+    fn is_offset_position_in_liquid(&self, pos: Vec3, offset: Vec3) -> bool {
+        let bb = player_aabb(pos).offset(offset);
+        !self.aabb_collides(bb.min, bb.max) && !self.aabb_has_liquid(&bb)
     }
 
     fn has_support_one_block_down(&self, pos: Vec3) -> bool {
@@ -108,7 +154,12 @@ impl<'a> WorldCollision<'a> {
         Vec3::new(dx, vel.y, dz)
     }
 
-    pub fn resolve(&self, mut pos: Vec3, mut vel: Vec3, was_on_ground: bool) -> (Vec3, Vec3, bool) {
+    pub fn resolve(
+        &self,
+        mut pos: Vec3,
+        mut vel: Vec3,
+        was_on_ground: bool,
+    ) -> (Vec3, Vec3, bool, bool) {
         let original = vel;
         let mut bb = player_aabb(pos);
 
@@ -214,7 +265,8 @@ impl<'a> WorldCollision<'a> {
             }
         }
 
-        (pos, vel, on_ground)
+        let collided_horizontally = original.x != x || original.z != z;
+        (pos, vel, on_ground, collided_horizontally)
     }
 }
 
@@ -408,6 +460,7 @@ fn append_stair_boxes(
 }
 
 fn append_block_collision_boxes(
+    world: &WorldCollision,
     block_state: u16,
     block_x: i32,
     block_y: i32,
@@ -442,6 +495,119 @@ fn append_block_collision_boxes(
             }
         }
         BlockModelKind::Stairs => append_stair_boxes(block_state, block_x, block_y, block_z, out),
+        BlockModelKind::Fence => {
+            let connect_east = fence_connects_to(world.block_at(block_x + 1, block_y, block_z));
+            let connect_west = fence_connects_to(world.block_at(block_x - 1, block_y, block_z));
+            let connect_south = fence_connects_to(world.block_at(block_x, block_y, block_z + 1));
+            let connect_north = fence_connects_to(world.block_at(block_x, block_y, block_z - 1));
+
+            append_box(
+                block_x,
+                block_y,
+                block_z,
+                [0.375, 0.0, 0.375],
+                [0.625, 1.5, 0.625],
+                out,
+            );
+            if connect_north {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.4375, 0.0, 0.0],
+                    [0.5625, 1.5, 0.5],
+                    out,
+                );
+            }
+            if connect_south {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.4375, 0.0, 0.5],
+                    [0.5625, 1.5, 1.0],
+                    out,
+                );
+            }
+            if connect_west {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.0, 0.0, 0.4375],
+                    [0.5, 1.5, 0.5625],
+                    out,
+                );
+            }
+            if connect_east {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.5, 0.0, 0.4375],
+                    [1.0, 1.5, 0.5625],
+                    out,
+                );
+            }
+        }
+        BlockModelKind::Pane => {
+            let connect_east = pane_connects_to(world.block_at(block_x + 1, block_y, block_z));
+            let connect_west = pane_connects_to(world.block_at(block_x - 1, block_y, block_z));
+            let connect_south = pane_connects_to(world.block_at(block_x, block_y, block_z + 1));
+            let connect_north = pane_connects_to(world.block_at(block_x, block_y, block_z - 1));
+            let has_x = connect_east || connect_west;
+            let has_z = connect_north || connect_south;
+            if !has_x || !has_z {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.4375, 0.0, 0.4375],
+                    [0.5625, 1.0, 0.5625],
+                    out,
+                );
+            }
+            if connect_north {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.4375, 0.0, 0.0],
+                    [0.5625, 1.0, 0.5],
+                    out,
+                );
+            }
+            if connect_south {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.4375, 0.0, 0.5],
+                    [0.5625, 1.0, 1.0],
+                    out,
+                );
+            }
+            if connect_west {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.0, 0.0, 0.4375],
+                    [0.5, 1.0, 0.5625],
+                    out,
+                );
+            }
+            if connect_east {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.5, 0.0, 0.4375],
+                    [1.0, 1.0, 0.5625],
+                    out,
+                );
+            }
+        }
         _ => append_box(
             block_x,
             block_y,
@@ -451,6 +617,38 @@ fn append_block_collision_boxes(
             out,
         ),
     }
+}
+
+fn fence_connects_to(neighbor_state: u16) -> bool {
+    let neighbor_id = block_state_id(neighbor_state);
+    if neighbor_id == 0 || matches!(neighbor_id, 8 | 9 | 10 | 11) {
+        return false;
+    }
+    if matches!(block_model_kind(neighbor_id), BlockModelKind::Fence) {
+        return true;
+    }
+    if matches!(neighbor_id, 107 | 183 | 184 | 185 | 186 | 187) {
+        return true;
+    }
+    is_solid(neighbor_state)
+}
+
+fn pane_connects_to(neighbor_state: u16) -> bool {
+    let neighbor_id = block_state_id(neighbor_state);
+    if neighbor_id == 0 || matches!(neighbor_id, 8 | 9 | 10 | 11) {
+        return false;
+    }
+    if matches!(block_model_kind(neighbor_id), BlockModelKind::Pane) {
+        return true;
+    }
+    if matches!(neighbor_id, 20 | 95 | 101 | 102 | 160) {
+        return true;
+    }
+    is_solid(neighbor_state)
+}
+
+fn is_water_state(block_state: u16) -> bool {
+    matches!(block_state_id(block_state), 8 | 9)
 }
 
 fn block_range(min: f32, max: f32) -> (i32, i32) {
@@ -472,8 +670,9 @@ pub fn simulate_tick(
     state.yaw = input.yaw;
     state.pitch = input.pitch;
     let sprinting = effective_sprint(input);
+    let in_water = world.is_player_in_water(state.pos);
 
-    if state.on_ground && input.jump {
+    if !in_water && state.on_ground && input.jump {
         state.vel.y = JUMP_VEL;
         state.on_ground = false;
         if sprinting {
@@ -505,7 +704,9 @@ pub fn simulate_tick(
     }
 
     let f = 0.16277136 / (f4 * f4 * f4);
-    let f5 = if state.on_ground {
+    let f5 = if in_water {
+        WATER_MOVE_SPEED
+    } else if state.on_ground {
         move_speed * f
     } else {
         SPEED_IN_AIR * if sprinting { 1.3 } else { 1.0 }
@@ -519,15 +720,39 @@ pub fn simulate_tick(
         state.vel.z = clamped.z;
     }
 
-    let (pos, vel, on_ground) = world.resolve(state.pos, state.vel, state.on_ground);
+    let pre_move_y = state.pos.y;
+    let (pos, vel, on_ground, collided_horizontally) =
+        world.resolve(state.pos, state.vel, state.on_ground);
     state.pos = pos;
     state.vel = vel;
     state.on_ground = on_ground;
 
-    state.vel.y += GRAVITY;
-    state.vel.y *= AIR_DRAG;
-    state.vel.x *= f4;
-    state.vel.z *= f4;
+    if in_water {
+        if input.jump {
+            state.vel.y += SWIM_UP_ACCEL;
+        }
+        state.vel.x *= WATER_DRAG;
+        state.vel.y *= WATER_DRAG;
+        state.vel.z *= WATER_DRAG;
+        state.vel.y += WATER_GRAVITY;
+        if collided_horizontally
+            && world.is_offset_position_in_liquid(
+                state.pos,
+                Vec3::new(
+                    state.vel.x,
+                    state.vel.y + 0.6 - state.pos.y + pre_move_y,
+                    state.vel.z,
+                ),
+            )
+        {
+            state.vel.y = WATER_SURFACE_STEP;
+        }
+    } else {
+        state.vel.y += GRAVITY;
+        state.vel.y *= AIR_DRAG;
+        state.vel.x *= f4;
+        state.vel.z *= f4;
+    }
     state
 }
 

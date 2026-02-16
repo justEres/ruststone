@@ -65,7 +65,7 @@ impl Plugin for ClientCorePlugin {
         app.insert_resource(connect_ui)
             .insert_resource(to_net)
             .insert_resource(from_net)
-            .insert_resource(AppState(self.initial_state))
+            .insert_resource(AppState(self.initial_state.clone()))
             .insert_resource(Chat::default())
             .insert_resource(UiState::default())
             .insert_resource(InventoryState::default())

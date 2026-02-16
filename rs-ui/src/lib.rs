@@ -15,10 +15,12 @@ use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_name, item_texture_candidates,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
 const INVENTORY_SLOT_SPACING: f32 = 4.0;
+const DEFAULT_OPTIONS_PATH: &str = "ruststone_options.toml";
 
 pub struct UiPlugin;
 
@@ -57,6 +59,31 @@ fn connect_ui(
         } else {
             ui_state.paused = true;
         }
+    }
+
+    if !state.options_loaded {
+        let options_path = state.options_path.clone();
+        match window_query.get_single_mut() {
+            Ok(mut window) => {
+                match load_client_options(
+                    &options_path,
+                    &mut state,
+                    &mut render_debug,
+                    &mut window,
+                ) {
+                    Ok(()) => {
+                        state.options_status = format!("Loaded {}", options_path);
+                    }
+                    Err(err) => {
+                        state.options_status = err;
+                    }
+                }
+            }
+            Err(_) => {
+                state.options_status = "Primary window unavailable for options load".to_string();
+            }
+        }
+        state.options_loaded = true;
     }
 
     if keys.just_pressed(KeyCode::Escape) && ui_state.chat_open {
@@ -307,10 +334,28 @@ fn connect_ui(
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
+                let mut options_changed = false;
                 ui.heading("Game Paused");
                 ui.add_space(8.0);
-                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=120.0).text("FOV"));
+                options_changed |= ui
+                    .add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"))
+                    .changed();
+                let mut render_distance = render_debug.render_distance_chunks;
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_distance, 2..=32).text("Render Distance"),
+                    )
+                    .changed();
+                render_debug.render_distance_chunks = render_distance;
+                options_changed |= ui
+                    .checkbox(&mut render_debug.shadows_enabled, "Shadows")
+                    .changed();
+                options_changed |= ui.checkbox(&mut render_debug.fxaa_enabled, "FXAA").changed();
+                options_changed |= ui
+                    .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
+                    .changed();
                 if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
+                    options_changed = true;
                     if let Ok(mut window) = window_query.get_single_mut() {
                         window.present_mode = if state.vsync_enabled {
                             PresentMode::AutoVsync
@@ -320,9 +365,61 @@ fn connect_ui(
                     }
                 }
                 ui.add_space(8.0);
-                if ui.button("Video Settings (todo)").clicked() {}
+                ui.horizontal(|ui| {
+                    ui.label("Options file");
+                    ui.text_edit_singleline(&mut state.options_path);
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Load").clicked() {
+                        let options_path = state.options_path.clone();
+                        if let Ok(mut window) = window_query.get_single_mut() {
+                            match load_client_options(
+                                &options_path,
+                                &mut state,
+                                &mut render_debug,
+                                &mut window,
+                            ) {
+                                Ok(()) => {
+                                    state.options_status = format!("Loaded {}", options_path);
+                                }
+                                Err(err) => state.options_status = err,
+                            }
+                        } else {
+                            state.options_status =
+                                "Unable to load options: primary window unavailable".to_string();
+                        }
+                    }
+                    if ui.button("Save").clicked() {
+                        match save_client_options(&state.options_path, &state, &render_debug) {
+                            Ok(()) => {
+                                state.options_status =
+                                    format!("Saved {}", state.options_path);
+                                state.options_dirty = false;
+                            }
+                            Err(err) => state.options_status = err,
+                        }
+                    }
+                });
+                if !state.options_status.is_empty() {
+                    ui.label(&state.options_status);
+                }
+                if options_changed {
+                    state.options_dirty = true;
+                    match save_client_options(&state.options_path, &state, &render_debug) {
+                        Ok(()) => {
+                            state.options_status = format!("Saved {}", state.options_path);
+                            state.options_dirty = false;
+                        }
+                        Err(err) => state.options_status = err,
+                    }
+                }
+                ui.add_space(8.0);
                 if ui.button("Controls (todo)").clicked() {}
                 if ui.button("Disconnect").clicked() {
+                    if state.options_dirty {
+                        let _ = save_client_options(&state.options_path, &state, &render_debug);
+                        state.options_dirty = false;
+                    }
                     let _ = to_net.0.send(ToNetMessage::Disconnect);
                     close_open_window_if_needed(&to_net, &mut inventory_state);
                     ui_state.chat_open = false;
@@ -331,6 +428,10 @@ fn connect_ui(
                     *app_state = AppState(ApplicationState::Disconnected);
                 }
                 if ui.button("Done").clicked() {
+                    if state.options_dirty {
+                        let _ = save_client_options(&state.options_path, &state, &render_debug);
+                        state.options_dirty = false;
+                    }
                     ui_state.paused = false;
                 }
             });
@@ -457,6 +558,10 @@ pub struct ConnectUiState {
     pub auth_accounts_loaded: bool,
     pub connect_feedback: String,
     pub vsync_enabled: bool,
+    pub options_loaded: bool,
+    pub options_dirty: bool,
+    pub options_path: String,
+    pub options_status: String,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
@@ -470,8 +575,111 @@ impl Default for ConnectUiState {
             auth_accounts_loaded: false,
             connect_feedback: String::new(),
             vsync_enabled: false,
+            options_loaded: false,
+            options_dirty: false,
+            options_path: DEFAULT_OPTIONS_PATH.to_string(),
+            options_status: String::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClientOptionsFile {
+    pub fov_deg: f32,
+    pub render_distance_chunks: i32,
+    pub shadows_enabled: bool,
+    pub fxaa_enabled: bool,
+    pub manual_frustum_cull: bool,
+    pub vsync_enabled: bool,
+}
+
+impl Default for ClientOptionsFile {
+    fn default() -> Self {
+        let render = RenderDebugSettings::default();
+        Self {
+            fov_deg: render.fov_deg,
+            render_distance_chunks: render.render_distance_chunks,
+            shadows_enabled: render.shadows_enabled,
+            fxaa_enabled: render.fxaa_enabled,
+            manual_frustum_cull: render.manual_frustum_cull,
+            vsync_enabled: false,
+        }
+    }
+}
+
+fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> ClientOptionsFile {
+    ClientOptionsFile {
+        fov_deg: render.fov_deg,
+        render_distance_chunks: render.render_distance_chunks,
+        shadows_enabled: render.shadows_enabled,
+        fxaa_enabled: render.fxaa_enabled,
+        manual_frustum_cull: render.manual_frustum_cull,
+        vsync_enabled: state.vsync_enabled,
+    }
+}
+
+fn apply_options(
+    options: &ClientOptionsFile,
+    state: &mut ConnectUiState,
+    render: &mut RenderDebugSettings,
+    window: &mut Window,
+) {
+    render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
+    render.render_distance_chunks = options.render_distance_chunks.clamp(2, 32);
+    render.shadows_enabled = options.shadows_enabled;
+    render.fxaa_enabled = options.fxaa_enabled;
+    render.manual_frustum_cull = options.manual_frustum_cull;
+    state.vsync_enabled = options.vsync_enabled;
+    window.present_mode = if state.vsync_enabled {
+        PresentMode::AutoVsync
+    } else {
+        PresentMode::AutoNoVsync
+    };
+}
+
+fn load_client_options(
+    path: &str,
+    state: &mut ConnectUiState,
+    render: &mut RenderDebugSettings,
+    window: &mut Window,
+) -> Result<(), String> {
+    let path_buf = PathBuf::from(path);
+    let content = match std::fs::read_to_string(&path_buf) {
+        Ok(v) => v,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let defaults = ClientOptionsFile::default();
+            apply_options(&defaults, state, render, window);
+            return save_client_options(path, state, render);
+        }
+        Err(err) => return Err(format!("Failed to read options file {}: {}", path, err)),
+    };
+    let parsed = toml::from_str::<ClientOptionsFile>(&content)
+        .map_err(|err| format!("Invalid TOML options {}: {}", path, err))?;
+    apply_options(&parsed, state, render, window);
+    Ok(())
+}
+
+fn save_client_options(
+    path: &str,
+    state: &ConnectUiState,
+    render: &RenderDebugSettings,
+) -> Result<(), String> {
+    let path_buf = PathBuf::from(path);
+    if let Some(parent) = path_buf.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "Failed to create options directory {}: {}",
+                parent.display(),
+                err
+            )
+        })?;
+    }
+    let body = toml::to_string_pretty(&options_to_file(state, render))
+        .map_err(|err| format!("Failed to encode options TOML: {}", err))?;
+    std::fs::write(&path_buf, body)
+        .map_err(|err| format!("Failed to write options file {}: {}", path, err))
 }
 
 fn short_uuid(uuid: &str) -> String {
