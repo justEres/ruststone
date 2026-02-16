@@ -10,7 +10,7 @@ use bevy_egui::{
     EguiContexts, EguiPlugin, EguiPrimaryContextPass,
     egui::{self},
 };
-use rs_render::RenderDebugSettings;
+use rs_render::{LightingQualityPreset, RenderDebugSettings};
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_max_durability, item_name,
@@ -338,6 +338,23 @@ fn connect_ui(
                 let mut options_changed = false;
                 ui.heading("Game Paused");
                 ui.add_space(8.0);
+                let mut selected_preset = render_debug.lighting_quality;
+                egui::ComboBox::from_label("Lighting Quality")
+                    .selected_text(selected_preset.label())
+                    .show_ui(ui, |ui| {
+                        for preset in LightingQualityPreset::ALL {
+                            ui.selectable_value(&mut selected_preset, preset, preset.label());
+                        }
+                    });
+                if selected_preset != render_debug.lighting_quality {
+                    render_debug.lighting_quality = selected_preset;
+                    apply_lighting_preset_defaults(
+                        render_debug.lighting_quality,
+                        &mut *render_debug,
+                    );
+                    options_changed = true;
+                }
+
                 options_changed |= ui
                     .add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"))
                     .changed();
@@ -585,6 +602,7 @@ impl Default for ConnectUiState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 struct ClientOptionsFile {
     pub fov_deg: f32,
     pub render_distance_chunks: i32,
@@ -592,6 +610,7 @@ struct ClientOptionsFile {
     pub fxaa_enabled: bool,
     pub manual_frustum_cull: bool,
     pub vsync_enabled: bool,
+    pub lighting_quality: String,
 }
 
 impl Default for ClientOptionsFile {
@@ -604,6 +623,7 @@ impl Default for ClientOptionsFile {
             fxaa_enabled: render.fxaa_enabled,
             manual_frustum_cull: render.manual_frustum_cull,
             vsync_enabled: false,
+            lighting_quality: render.lighting_quality.as_options_value().to_string(),
         }
     }
 }
@@ -616,6 +636,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         fxaa_enabled: render.fxaa_enabled,
         manual_frustum_cull: render.manual_frustum_cull,
         vsync_enabled: state.vsync_enabled,
+        lighting_quality: render.lighting_quality.as_options_value().to_string(),
     }
 }
 
@@ -630,12 +651,40 @@ fn apply_options(
     render.shadows_enabled = options.shadows_enabled;
     render.fxaa_enabled = options.fxaa_enabled;
     render.manual_frustum_cull = options.manual_frustum_cull;
+    if let Some(preset) = LightingQualityPreset::from_options_value(&options.lighting_quality) {
+        render.lighting_quality = preset;
+        apply_lighting_preset_defaults(preset, render);
+    }
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync
     } else {
         PresentMode::AutoNoVsync
     };
+}
+
+fn apply_lighting_preset_defaults(
+    preset: LightingQualityPreset,
+    render_debug: &mut RenderDebugSettings,
+) {
+    match preset {
+        LightingQualityPreset::Fast => {
+            render_debug.shadows_enabled = false;
+            render_debug.fxaa_enabled = false;
+        }
+        LightingQualityPreset::Standard => {
+            render_debug.shadows_enabled = false;
+            render_debug.fxaa_enabled = true;
+        }
+        LightingQualityPreset::FancyLow => {
+            render_debug.shadows_enabled = true;
+            render_debug.fxaa_enabled = true;
+        }
+        LightingQualityPreset::FancyHigh => {
+            render_debug.shadows_enabled = true;
+            render_debug.fxaa_enabled = true;
+        }
+    }
 }
 
 fn load_client_options(

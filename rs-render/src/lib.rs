@@ -13,6 +13,7 @@ mod chunk;
 mod components;
 pub mod debug;
 mod input;
+mod lighting;
 mod world;
 
 pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
@@ -20,6 +21,7 @@ pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
 pub use debug::RenderDebugSettings;
+pub use lighting::LightingQualityPreset;
 
 pub struct RenderPlugin;
 
@@ -45,6 +47,7 @@ impl Plugin for RenderPlugin {
             (
                 input::apply_cursor_lock,
                 debug::apply_render_debug_settings,
+                lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
                 enqueue_chunk_meshes,
             ),
