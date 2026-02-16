@@ -11,6 +11,8 @@ use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
+use crate::lighting::LightingQualityPreset;
+
 const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
 
 #[derive(Resource, Debug, Clone)]
@@ -32,6 +34,7 @@ pub struct RenderDebugSettings {
     pub render_held_items: bool,
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
+    pub lighting_quality: LightingQualityPreset,
 }
 
 impl Default for RenderDebugSettings {
@@ -54,6 +57,7 @@ impl Default for RenderDebugSettings {
             render_held_items: true,
             render_first_person_arms: true,
             render_self_model: true,
+            lighting_quality: LightingQualityPreset::Standard,
         }
     }
 }

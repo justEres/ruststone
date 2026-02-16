@@ -13,9 +13,7 @@
 #else
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions,
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+    pbr_functions::main_pass_post_lighting_processing,
 }
 #endif
 
@@ -38,10 +36,67 @@ const ATLAS_UV_INSET: f32 = 0.02;
 @group(2) @binding(100) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(101) var atlas_sampler: sampler;
 
+struct AtlasLightingUniform {
+    sun_dir_and_strength: vec4<f32>,
+    ambient_and_fog: vec4<f32>,
+    quality_and_water: vec4<f32>,
+}
+
+@group(2) @binding(102) var<uniform> lighting_uniform: AtlasLightingUniform;
+
 fn atlas_uv_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> vec2<f32> {
     let tile_size = vec2<f32>(1.0 / ATLAS_COLUMNS, 1.0 / ATLAS_ROWS);
     let inset = tile_size * ATLAS_UV_INSET;
     return tile_origin + inset + fract(local_uv) * (tile_size - inset * 2.0);
+}
+
+fn apply_voxel_lighting(base: vec4<f32>, normal: vec3<f32>, view_z: f32, view_dir: vec3<f32>) -> vec4<f32> {
+    let quality_mode = lighting_uniform.quality_and_water.x;
+    let sun_dir = normalize(lighting_uniform.sun_dir_and_strength.xyz);
+    let sun_strength = lighting_uniform.sun_dir_and_strength.w;
+    let ambient_strength = lighting_uniform.ambient_and_fog.x;
+
+    let ndotl = max(dot(normal, sun_dir), 0.0);
+    var shade = ambient_strength;
+    if quality_mode >= 1.0 {
+        shade += ndotl * sun_strength;
+    }
+
+    if quality_mode >= 2.0 {
+        // Cheap hemispherical lift to avoid pure black undersides.
+        let hemi = normal.y * 0.5 + 0.5;
+        shade *= mix(0.84, 1.12, hemi);
+    }
+
+    if quality_mode >= 3.0 {
+        // Slightly soften contrast in the highest preset.
+        shade = pow(max(shade, 0.0), 0.92);
+    }
+
+    var rgb = base.rgb * shade;
+
+    let transparent_pass = lighting_uniform.quality_and_water.w > 0.5;
+    if transparent_pass && quality_mode >= 2.0 {
+        let absorption = lighting_uniform.quality_and_water.y;
+        let fresnel_boost = lighting_uniform.quality_and_water.z;
+        let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
+        let water_tint = vec3(0.50, 0.66, 0.93);
+        rgb = mix(rgb * (1.0 - absorption), water_tint, fresnel * (0.24 + fresnel_boost));
+    }
+
+    if quality_mode >= 2.0 {
+        let fog_density = lighting_uniform.ambient_and_fog.y;
+        let fog_start = lighting_uniform.ambient_and_fog.z;
+        let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
+        let fog_color = vec3(0.66, 0.73, 0.87);
+        let dist = max(view_z, 0.0);
+        let fog_range = clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+        let fog_exp = 1.0 - exp(-dist * fog_density);
+        let fog = max(fog_range, fog_exp);
+        rgb = mix(rgb, fog_color, fog);
+    }
+
+    return vec4(rgb, base.a);
 }
 
 @fragment
@@ -98,13 +153,16 @@ fn fragment(
     // Write the gbuffer, lighting pass id, and optionally normal and motion_vector textures.
     let out = deferred_output(in, pbr_input);
 #else
-    // In forward mode, calculate the lit color now and apply post-lighting effects.
+    // Custom voxel lighting path (fast/fancy quality presets). This avoids per-pixel
+    // clustered light evaluation for chunk materials.
     var out: FragmentOutput;
-    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
-        out.color = apply_pbr_lighting(pbr_input);
-    } else {
-        out.color = pbr_input.material.base_color;
-    }
+    let voxel_lit = apply_voxel_lighting(
+        pbr_input.material.base_color,
+        normalize(pbr_input.N),
+        abs(in.position.w),
+        normalize(pbr_input.V),
+    );
+    out.color = voxel_lit;
 
     // Apply in-shader post processing (fog, alpha-premultiply, and optional tonemapping/debanding).
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
