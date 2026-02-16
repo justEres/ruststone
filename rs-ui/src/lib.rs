@@ -813,7 +813,7 @@ fn draw_hotbar_ui(
                                     ctx,
                                     item_icons,
                                     ui,
-                                    item,
+                                    item.as_ref(),
                                     selected,
                                     INVENTORY_SLOT_SIZE,
                                     false,
@@ -856,6 +856,7 @@ fn draw_inventory_grid(
     ui.label("Survival Inventory");
     ui.add_space(4.0);
     let mut hovered_any_slot = false;
+    let mut hovered_item: Option<InventoryItemStack> = None;
 
     egui::Grid::new("inventory_main_grid")
         .spacing(egui::Vec2::new(
@@ -868,9 +869,18 @@ fn draw_inventory_grid(
                     let slot = 9 + row * 9 + col;
                     let item = inventory_state.player_slots.get(slot).cloned().flatten();
                     let response =
-                        draw_slot(ctx, item_icons, ui, item, false, INVENTORY_SLOT_SIZE, true);
+                        draw_slot(
+                            ctx,
+                            item_icons,
+                            ui,
+                            item.as_ref(),
+                            false,
+                            INVENTORY_SLOT_SIZE,
+                            true,
+                        );
                     if response.hovered() {
                         hovered_any_slot = true;
+                        hovered_item = item;
                     }
                     handle_inventory_slot_interaction(
                         response,
@@ -901,13 +911,14 @@ fn draw_inventory_grid(
                     ctx,
                     item_icons,
                     ui,
-                    item,
+                    item.as_ref(),
                     selected,
                     INVENTORY_SLOT_SIZE,
                     true,
                 );
                 if response.hovered() {
                     hovered_any_slot = true;
+                    hovered_item = item;
                 }
                 handle_inventory_slot_interaction(response, slot, keys, to_net, inventory_state);
             }
@@ -923,13 +934,17 @@ fn draw_inventory_grid(
             send_inventory_click(-999, 1, 0, to_net, inventory_state);
         }
     }
+
+    if let Some(stack) = hovered_item.as_ref() {
+        draw_inventory_item_tooltip(ctx, stack);
+    }
 }
 
 fn draw_slot(
     ctx: &egui::Context,
     item_icons: &mut ItemIconCache,
     ui: &mut egui::Ui,
-    item: Option<InventoryItemStack>,
+    item: Option<&InventoryItemStack>,
     selected: bool,
     size: f32,
     clickable: bool,
@@ -939,7 +954,7 @@ fn draw_slot(
     } else {
         egui::Sense::hover()
     };
-    let (rect, mut response) = ui.allocate_exact_size(egui::Vec2::splat(size), sense);
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), sense);
     let bg = if selected {
         egui::Color32::from_gray(84)
     } else {
@@ -956,7 +971,7 @@ fn draw_slot(
 
     if let Some(stack) = item {
         let mut icon_drawn = false;
-        if let Some(texture_id) = item_icons.texture_for_stack(ctx, &stack) {
+        if let Some(texture_id) = item_icons.texture_for_stack(ctx, stack) {
             let icon_rect = rect.shrink(4.0);
             ui.painter().image(
                 texture_id,
@@ -985,9 +1000,23 @@ fn draw_slot(
                 egui::Color32::WHITE,
             );
         }
-        response = response.on_hover_ui(|ui| draw_item_tooltip(ui, &stack));
     }
     response
+}
+
+fn draw_inventory_item_tooltip(ctx: &egui::Context, stack: &InventoryItemStack) {
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    egui::Area::new(egui::Id::new("inventory_item_tooltip"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pos + egui::vec2(14.0, 14.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                draw_item_tooltip(ui, stack);
+            });
+        });
 }
 
 fn draw_item_tooltip(ui: &mut egui::Ui, stack: &InventoryItemStack) {
