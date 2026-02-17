@@ -21,7 +21,7 @@ use crate::sim::{
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings};
+use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings, block_state_id};
 
 use crate::entities::RemoteEntity;
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
@@ -60,6 +60,8 @@ pub struct LatencyEstimate {
 pub struct ActionState {
     pub sneaking: bool,
     pub sprinting: bool,
+    pub jump_was_pressed: bool,
+    pub fly_toggle_timer: u8,
 }
 
 #[derive(Default)]
@@ -70,6 +72,26 @@ pub(crate) struct MiningState {
     elapsed_secs: f32,
     total_secs: f32,
     finish_sent: bool,
+}
+
+const SURVIVAL_BLOCK_REACH: f32 = 4.5;
+const CREATIVE_BLOCK_REACH: f32 = 5.0;
+const SURVIVAL_ENTITY_REACH: f32 = 3.0;
+const CREATIVE_ENTITY_REACH: f32 = 5.0;
+
+fn client_abilities_flags(player_status: &rs_utils::PlayerStatus) -> u8 {
+    let mut flags = 0u8;
+    if player_status.flying {
+        flags |= 0x02;
+    }
+    if player_status.can_fly {
+        flags |= 0x04;
+    }
+    if player_status.gamemode == 1 {
+        // Creative mode bit (instabuild). Servers commonly pair this with mayfly.
+        flags |= 0x08;
+    }
+    flags
 }
 
 pub fn input_collect_system(
@@ -406,6 +428,7 @@ pub fn fixed_sim_tick_system(
     mut history: ResMut<PredictionHistory>,
     mut latency: ResMut<LatencyEstimate>,
     mut action_state: ResMut<ActionState>,
+    mut player_status: ResMut<rs_utils::PlayerStatus>,
     collision_map: Res<WorldCollisionMap>,
     app_state: Res<AppState>,
     to_net: Res<ToNet>,
@@ -414,12 +437,48 @@ pub fn fixed_sim_tick_system(
 ) {
     let timer = Timing::start();
     if !matches!(app_state.0, ApplicationState::Connected) || !sim_ready.0 {
+        action_state.jump_was_pressed = false;
+        action_state.fly_toggle_timer = 0;
         timings.fixed_tick_ms = timer.ms();
         return;
     }
     let world = WorldCollision::with_map(&collision_map);
     let tick = sim_clock.tick;
-    let input_snapshot = input.0;
+    let mut input_snapshot = input.0;
+    let jump_pressed = input_snapshot.jump && !action_state.jump_was_pressed;
+    action_state.jump_was_pressed = input_snapshot.jump;
+
+    if action_state.fly_toggle_timer > 0 {
+        action_state.fly_toggle_timer = action_state.fly_toggle_timer.saturating_sub(1);
+    }
+    if player_status.can_fly {
+        if jump_pressed {
+            if action_state.fly_toggle_timer == 0 {
+                // Vanilla 1.8: second jump press within 7 ticks toggles creative flight.
+                action_state.fly_toggle_timer = 7;
+            } else {
+                player_status.flying = !player_status.flying;
+                action_state.fly_toggle_timer = 0;
+                let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+                    flags: client_abilities_flags(&player_status),
+                    flying_speed: player_status.flying_speed,
+                    walking_speed: player_status.walking_speed,
+                });
+            }
+        }
+    } else if player_status.flying {
+        player_status.flying = false;
+        action_state.fly_toggle_timer = 0;
+        let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+            flags: client_abilities_flags(&player_status),
+            flying_speed: player_status.flying_speed,
+            walking_speed: player_status.walking_speed,
+        });
+    }
+
+    input_snapshot.can_fly = player_status.can_fly;
+    input_snapshot.flying = player_status.flying;
+    input_snapshot.flying_speed = player_status.flying_speed;
     sim_render.previous = sim_state.current;
     let next_state = simulate_tick(&sim_state.current, &input_snapshot, &world);
 
@@ -430,6 +489,15 @@ pub fn fixed_sim_tick_system(
     });
 
     sim_state.current = next_state;
+    if player_status.flying && player_status.gamemode != 3 && sim_state.current.on_ground {
+        // Vanilla behavior: landing cancels flying outside spectator mode.
+        player_status.flying = false;
+        let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+            flags: client_abilities_flags(&player_status),
+            flying_speed: player_status.flying_speed,
+            walking_speed: player_status.walking_speed,
+        });
+    }
     sim_clock.tick = sim_clock.tick.wrapping_add(1);
     input.0.jump = false;
 
@@ -684,7 +752,7 @@ pub fn world_interaction_system(
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
     to_net: Res<ToNet>,
-    inventory_state: Res<InventoryState>,
+    mut inventory_state: ResMut<InventoryState>,
     sim_state: Res<SimState>,
     mut swing: ResMut<LocalArmSwing>,
     mut break_indicator: ResMut<BreakIndicator>,
@@ -735,8 +803,20 @@ pub fn world_interaction_system(
     };
     let origin = camera_transform.translation();
     let dir = *camera_transform.forward();
-    let block_hit = raycast_block(&collision_map, origin, dir, 6.0);
-    let entity_hit = raycast_remote_entity(&remote_entities, origin, dir, 4.5);
+    let is_creative = player_status.gamemode == 1;
+    let block_reach = if is_creative {
+        CREATIVE_BLOCK_REACH
+    } else {
+        SURVIVAL_BLOCK_REACH
+    };
+    let entity_reach = if is_creative {
+        CREATIVE_ENTITY_REACH
+    } else {
+        SURVIVAL_ENTITY_REACH
+    };
+
+    let block_hit = raycast_block(&collision_map, origin, dir, block_reach);
+    let entity_hit = raycast_remote_entity(&remote_entities, origin, dir, entity_reach);
 
     if left_just_pressed {
         let _ = to_net.0.send(ToNetMessage::SwingArm);
@@ -859,6 +939,9 @@ pub fn world_interaction_system(
                 cursor_y: 8,
                 cursor_z: 8,
             });
+            if player_status.gamemode != 1 {
+                let _ = inventory_state.consume_selected_hotbar_one();
+            }
         } else {
             let held_item = inventory_state.hotbar_item(inventory_state.selected_hotbar_slot);
             let _ = to_net.0.send(ToNetMessage::UseItem { held_item });
@@ -906,14 +989,18 @@ struct EntityHit {
 
 fn estimate_break_time_secs(block_id: u16, held_item: Option<rs_utils::InventoryItemStack>) -> f32 {
     let hardness = block_hardness(block_id);
-    if hardness <= 0.0 {
+    if hardness < 0.0 {
+        return 9999.0;
+    }
+    if hardness == 0.0 {
         return 0.05;
     }
-    let tool_mult = held_item
-        .map(|stack| tool_efficiency_multiplier(stack.item_id, block_id))
-        .unwrap_or(1.0);
-    let secs = (hardness * 1.5) / tool_mult.max(0.1);
-    secs.clamp(0.1, 10.0)
+    let item_id = held_item.map(|stack| stack.item_id);
+    let can_harvest = can_harvest_block(item_id, block_id);
+    let speed = destroy_speed(item_id, block_id).max(0.1);
+    let damage_per_tick = speed / hardness / if can_harvest { 30.0 } else { 100.0 };
+    let ticks = (1.0 / damage_per_tick).ceil().max(1.0);
+    (ticks / 20.0).clamp(0.05, 9999.0)
 }
 
 fn block_hardness(block_id: u16) -> f32 {
@@ -922,11 +1009,11 @@ fn block_hardness(block_id: u16) -> f32 {
         1 | 4 => 2.0,        // stone, cobble
         2 => 0.6,            // grass
         3 => 0.5,            // dirt
-        5 | 17 => 2.0,       // planks/log
+        5 | 17 | 162 => 2.0, // planks/log
         12 => 0.5,           // sand
         13 => 0.6,           // gravel
-        14 | 15 | 16 => 3.0, // ores
-        18 => 0.2,           // leaves
+        14 | 15 | 16 | 21 | 56 | 73 | 74 | 129 => 3.0, // ores
+        18 | 161 => 0.2,     // leaves
         20 => 0.3,           // glass
         24 | 45 => 0.8,      // sandstone, brick
         49 => 50.0,          // obsidian
@@ -941,33 +1028,112 @@ fn block_hardness(block_id: u16) -> f32 {
         87 => 0.4,           // netherrack
         88 => 0.5,           // soulsand
         89 => 0.3,           // glowstone
+        95 => 0.3,           // stained glass
+        98 => 1.5,           // stone bricks
+        155 => 0.8,          // quartz block
+        159 => 0.8,          // stained hardened clay
+        171 => 0.8,          // carpet/wool-ish break feel
+        172 => 1.25,         // hardened clay
+        173 => 5.0,          // coal block
+        174 => 0.5,          // packed ice
         _ => 1.0,
     }
 }
 
-fn tool_efficiency_multiplier(item_id: i32, block_id: u16) -> f32 {
-    let is_pickaxe = matches!(item_id, 257 | 270 | 274 | 278 | 285);
-    let is_shovel = matches!(item_id, 256 | 269 | 273 | 277 | 284);
-    let is_axe = matches!(item_id, 258 | 271 | 275 | 279 | 286);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolKind {
+    Pickaxe,
+    Shovel,
+    Axe,
+    Sword,
+    Shears,
+}
 
-    let tier_mult = match item_id {
-        269 | 270 | 271 => 2.0, // wood
-        273 | 274 | 275 => 4.0, // stone
-        256..=258 => 6.0,       // iron
-        277..=279 => 8.0,       // diamond
-        284..=286 => 12.0,      // gold
+fn tool_kind(item_id: i32) -> Option<ToolKind> {
+    match item_id {
+        256 | 269 | 273 | 277 | 284 => Some(ToolKind::Shovel),
+        257 | 270 | 274 | 278 | 285 => Some(ToolKind::Pickaxe),
+        258 | 271 | 275 | 279 | 286 => Some(ToolKind::Axe),
+        267 | 268 | 272 | 276 | 283 => Some(ToolKind::Sword),
+        359 => Some(ToolKind::Shears),
+        _ => None,
+    }
+}
+
+fn tool_harvest_level(item_id: i32) -> i32 {
+    match item_id {
+        269 | 270 | 271 | 268 => 0, // wood / gold handled by speed
+        273 | 274 | 275 | 272 => 1, // stone
+        256..=258 | 267 => 2,       // iron
+        277..=279 | 276 => 3,       // diamond
+        284..=286 | 283 => 0,       // gold
+        _ => -1,
+    }
+}
+
+fn tool_speed(item_id: i32) -> f32 {
+    match item_id {
+        269..=271 | 268 => 2.0,
+        273..=275 | 272 => 4.0,
+        256..=258 | 267 => 6.0,
+        277..=279 | 276 => 8.0,
+        284..=286 | 283 => 12.0,
+        359 => 5.0, // shears
         _ => 1.0,
+    }
+}
+
+fn block_required_tool(block_id: u16) -> Option<(ToolKind, i32)> {
+    match block_id {
+        // Pickaxe, mostly stone/ore-like blocks.
+        1 | 4 | 14 | 15 | 16 | 21 | 22 | 24 | 41 | 42 | 45 | 48 | 57 | 61 | 62
+        | 73 | 74 | 79 | 80 | 98 | 101 | 109 | 112 | 121 | 133 | 152 | 155 | 172
+        | 173 => Some((ToolKind::Pickaxe, 0)),
+        // Higher harvest tiers.
+        56 | 129 | 130 => Some((ToolKind::Pickaxe, 2)), // diamond/emerald/ender chest
+        49 | 116 => Some((ToolKind::Pickaxe, 3)),       // obsidian/enchanting table
+        // Shovel blocks.
+        2 | 3 | 12 | 13 | 78 | 82 | 88 | 110 => Some((ToolKind::Shovel, 0)),
+        // Axe blocks.
+        5 | 17 | 47 | 53 | 54 | 58 | 64 | 96 | 107 | 134..=136 | 156 | 162 => {
+            Some((ToolKind::Axe, 0))
+        }
+        _ => None,
+    }
+}
+
+fn block_tool_bonus_kind(block_id: u16) -> Option<ToolKind> {
+    match block_id {
+        18 | 31 | 32 | 37 | 38 | 39 | 40 | 59 | 81 | 83 | 106 | 111 | 141 | 142 | 161 | 175 => {
+            Some(ToolKind::Shears)
+        }
+        30 => Some(ToolKind::Sword), // cobweb
+        _ => block_required_tool(block_id).map(|(kind, _)| kind),
+    }
+}
+
+fn can_harvest_block(item_id: Option<i32>, block_id: u16) -> bool {
+    let Some((required_kind, required_level)) = block_required_tool(block_id) else {
+        return true;
     };
+    let Some(item_id) = item_id else {
+        return false;
+    };
+    if tool_kind(item_id) != Some(required_kind) {
+        return false;
+    }
+    tool_harvest_level(item_id) >= required_level
+}
 
-    let pick_blocks = matches!(
-        block_id,
-        1 | 4 | 14 | 15 | 16 | 21 | 22 | 24 | 41 | 42 | 45 | 49 | 56 | 57 | 61 | 62 | 73 | 74
-    );
-    let shovel_blocks = matches!(block_id, 2 | 3 | 12 | 13 | 80 | 82 | 88);
-    let axe_blocks = matches!(block_id, 5 | 17 | 47 | 53 | 54 | 58);
-
-    if (is_pickaxe && pick_blocks) || (is_shovel && shovel_blocks) || (is_axe && axe_blocks) {
-        tier_mult
+fn destroy_speed(item_id: Option<i32>, block_id: u16) -> f32 {
+    let Some(item_id) = item_id else {
+        return 1.0;
+    };
+    let Some(kind) = tool_kind(item_id) else {
+        return 1.0;
+    };
+    if block_tool_bonus_kind(block_id) == Some(kind) {
+        tool_speed(item_id)
     } else {
         1.0
     }
@@ -1003,8 +1169,9 @@ fn raycast_block(
         let point = origin + dir * t;
         let cell = point.floor().as_ivec3();
         if cell != prev_cell {
-            let block_id = world.block_at(cell.x, cell.y, cell.z);
-            if block_id != 0 {
+            let block_state = world.block_at(cell.x, cell.y, cell.z);
+            let block_id = block_state_id(block_state);
+            if block_id != 0 && !matches!(block_id, 8 | 9 | 10 | 11) {
                 let normal = prev_cell - cell;
                 let normal = IVec3::new(normal.x.signum(), normal.y.signum(), normal.z.signum());
                 return Some(RayHit {
@@ -1089,6 +1256,8 @@ pub fn draw_chunk_debug_system(
     mut gizmos: Gizmos,
     render_debug: Res<RenderDebugSettings>,
     app_state: Res<AppState>,
+    break_indicator: Res<BreakIndicator>,
+    player_status: Res<rs_utils::PlayerStatus>,
     collision_map: Res<WorldCollisionMap>,
     chunks: Query<(&ChunkRoot, &Visibility)>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -1126,12 +1295,32 @@ pub fn draw_chunk_debug_system(
         };
         let origin = cam.translation();
         let dir = *cam.forward();
-        if let Some(hit) = raycast_block(&collision_map, origin, dir, 6.0) {
+        let max_reach = if player_status.gamemode == 1 {
+            CREATIVE_BLOCK_REACH
+        } else {
+            SURVIVAL_BLOCK_REACH
+        };
+        if let Some(hit) = raycast_block(&collision_map, origin, dir, max_reach) {
             let inflate = 0.0025;
             let min = Vec3::new(hit.block.x as f32, hit.block.y as f32, hit.block.z as f32)
                 - Vec3::splat(inflate);
             let max = min + Vec3::splat(1.0 + inflate * 2.0);
             draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.02, 0.02, 0.02, 1.0));
+            if break_indicator.active {
+                let p = break_indicator.progress.clamp(0.0, 1.0);
+                let crack_color = Color::srgb(
+                    0.32 + 0.50 * p,
+                    0.32 - 0.20 * p,
+                    0.32 - 0.20 * p,
+                );
+                let crack_inflate = 0.008 + p * 0.010;
+                draw_aabb_lines(
+                    &mut gizmos,
+                    min - Vec3::splat(crack_inflate),
+                    max + Vec3::splat(crack_inflate),
+                    crack_color,
+                );
+            }
         }
     }
 }
@@ -1286,6 +1475,11 @@ pub fn debug_overlay_system(
             if debug_ui.show_render {
                 ui.separator();
                 ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                ui.add(
+                    egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
+                        .logarithmic(true)
+                        .text("Shadow distance"),
+                );
                 let mut aa_mode = render_debug.aa_mode;
                 egui::ComboBox::from_label("AA")
                     .selected_text(aa_mode.label())
@@ -1358,6 +1552,19 @@ pub fn debug_overlay_system(
                     &mut render_debug.show_target_block_outline,
                     "Target block outline",
                 );
+                let mut cutout_mode = render_debug.cutout_debug_mode as i32;
+                egui::ComboBox::from_label("Cutout debug")
+                    .selected_text(match cutout_mode {
+                        1 => "Atlas RGB",
+                        2 => "Vertex tint",
+                        _ => "Off",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut cutout_mode, 0, "Off");
+                        ui.selectable_value(&mut cutout_mode, 1, "Atlas RGB");
+                        ui.selectable_value(&mut cutout_mode, 2, "Vertex tint");
+                    });
+                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 2) as u8;
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");

@@ -13,6 +13,9 @@ fn input_sequence(len: usize) -> Vec<InputState> {
             jump: i % 30 == 0,
             sprint: i % 20 < 10,
             sneak: i % 50 > 40,
+            can_fly: false,
+            flying: false,
+            flying_speed: 0.05,
             yaw: (i as f32 * 0.01) % 6.28,
             pitch: (i as f32 * 0.005) % 1.5,
         });

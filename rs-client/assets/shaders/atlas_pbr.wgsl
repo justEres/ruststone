@@ -47,6 +47,7 @@ struct AtlasLightingUniform {
     color_grading: vec4<f32>,
     water_effects: vec4<f32>,
     water_controls: vec4<f32>,
+    debug_flags: vec4<f32>,
     reflection_view_proj: mat4x4<f32>,
 }
 
@@ -98,7 +99,9 @@ fn apply_voxel_lighting(
 
     var rgb = base.rgb * shade;
 
-    let transparent_pass = lighting_uniform.quality_and_water.w > 0.5;
+    let pass_mode = lighting_uniform.quality_and_water.w;
+    let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
+    let cutout_pass = pass_mode > 1.5;
     if transparent_pass && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
@@ -170,7 +173,9 @@ fn apply_fancy_post_lighting(
         rgb = pow(max(rgb, vec3(0.0)), vec3(0.96));
     }
 
-    let transparent_pass = lighting_uniform.quality_and_water.w > 0.5;
+    let pass_mode = lighting_uniform.quality_and_water.w;
+    let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
+    let cutout_pass = pass_mode > 1.5;
     if transparent_pass && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
@@ -270,7 +275,11 @@ fn fragment(
 
     // Generate a PbrInput struct from the StandardMaterial bindings.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-    let transparent_pass = lighting_uniform.quality_and_water.w > 0.5;
+    let vertex_tint_rgb = pbr_input.material.base_color.rgb;
+    let pass_mode = lighting_uniform.quality_and_water.w;
+    let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
+    let cutout_pass = pass_mode > 1.5;
+    let cutout_debug_mode = i32(round(lighting_uniform.debug_flags.x));
 
 #ifdef VERTEX_UVS_A
     var tile_origin = vec2<f32>(0.0, 0.0);
@@ -294,13 +303,15 @@ fn fragment(
     }
     let atlas_uv = atlas_uv_from_repeating(uv_local, tile_origin);
     let atlas_sample = textureSample(atlas_texture, atlas_sampler, atlas_uv);
+    let atlas_rgb = atlas_sample.rgb;
     pbr_input.material.base_color *= atlas_sample;
     let atlas_alpha = atlas_sample.a;
 #else
+    let atlas_rgb = pbr_input.material.base_color.rgb;
     let atlas_alpha = pbr_input.material.base_color.a;
 #endif
 
-    if transparent_pass {
+    if transparent_pass || cutout_pass {
         // Keep water/lava blend, but still punch fully transparent texels.
         if atlas_alpha <= 0.001 {
             discard;
@@ -314,10 +325,13 @@ fn fragment(
 
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
     // to avoid backend/material-mode differences on alpha-mask handling.
-    if transparent_pass {
+    if transparent_pass || cutout_pass {
         pbr_input.material.base_color.a = atlas_alpha;
-        // Keep std alpha handling for blended passes (water).
-        pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+        if transparent_pass {
+            // Keep std alpha handling for blended passes (water).
+            pbr_input.material.base_color =
+                alpha_discard(pbr_input.material, pbr_input.material.base_color);
+        }
     } else {
         pbr_input.material.base_color.a = 1.0;
     }
@@ -364,7 +378,12 @@ fn fragment(
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
     let quality_mode = lighting_uniform.quality_and_water.x;
-    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+    if cutout_pass && cutout_debug_mode != 0 {
+        // Diagnostic view for cutout pipeline debugging:
+        // 1 = raw atlas rgb, 2 = raw vertex tint rgb.
+        let debug_rgb = select(vertex_tint_rgb, atlas_rgb, cutout_debug_mode == 1);
+        out.color = vec4(debug_rgb, 1.0);
+    } else if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(
             out.color,

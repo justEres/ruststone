@@ -20,21 +20,33 @@ pub fn handle_packet(
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
                 entity_id: jg.entity_id,
             }));
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: jg.gamemode,
+            });
         }
         Packet::JoinGame_i8_NoDebug(jg) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
                 entity_id: jg.entity_id,
             }));
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: jg.gamemode,
+            });
         }
         Packet::JoinGame_i32(jg) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
                 entity_id: jg.entity_id,
             }));
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: jg.gamemode,
+            });
         }
         Packet::JoinGame_i32_ViewDistance(jg) => {
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
                 entity_id: jg.entity_id,
             }));
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: jg.gamemode,
+            });
         }
         Packet::ChunkData(cd) => {
             let bitmask = cd.bitmask.0 as u16;
@@ -664,6 +676,44 @@ pub fn handle_packet(
                 experience_bar: exp.experience_bar,
                 level: exp.level as i32,
                 total_experience: exp.total_experience as i32,
+            });
+        }
+        Packet::ChangeGameState(gs) => {
+            // 1.8: reason 3 is game mode change; value stores mode as float.
+            if gs.reason == 3 {
+                let mode = gs.value as i32;
+                if (0..=u8::MAX as i32).contains(&mode) {
+                    let _ = to_main.send(FromNetMessage::GameMode {
+                        gamemode: mode as u8,
+                    });
+                }
+            }
+        }
+        Packet::Respawn_Gamemode(respawn) => {
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: respawn.gamemode,
+            });
+        }
+        Packet::Respawn_HashedSeed(respawn) => {
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: respawn.gamemode,
+            });
+        }
+        Packet::Respawn_NBT(respawn) => {
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: respawn.gamemode,
+            });
+        }
+        Packet::Respawn_WorldName(respawn) => {
+            let _ = to_main.send(FromNetMessage::GameMode {
+                gamemode: respawn.gamemode,
+            });
+        }
+        Packet::PlayerAbilities(abilities) => {
+            let _ = to_main.send(FromNetMessage::PlayerAbilities {
+                flags: abilities.flags,
+                flying_speed: abilities.flying_speed,
+                walking_speed: abilities.walking_speed,
             });
         }
         Packet::WindowOpen(open) => {

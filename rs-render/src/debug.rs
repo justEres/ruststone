@@ -80,6 +80,7 @@ impl AntiAliasingMode {
 #[derive(Resource, Debug, Clone)]
 pub struct RenderDebugSettings {
     pub shadows_enabled: bool,
+    pub shadow_distance_scale: f32,
     pub render_distance_chunks: i32,
     pub fov_deg: f32,
     pub use_greedy_meshing: bool,
@@ -112,12 +113,14 @@ pub struct RenderDebugSettings {
     pub water_reflection_tint_strength: f32,
     pub water_wave_strength: f32,
     pub water_wave_speed: f32,
+    pub cutout_debug_mode: u8, // 0 off, 1 atlas, 2 vertex_tint
 }
 
 impl Default for RenderDebugSettings {
     fn default() -> Self {
         Self {
             shadows_enabled: true,
+            shadow_distance_scale: 1.0,
             render_distance_chunks: 12,
             fov_deg: 110.0,
             use_greedy_meshing: true,
@@ -150,6 +153,7 @@ impl Default for RenderDebugSettings {
             water_reflection_tint_strength: 0.20,
             water_wave_strength: 0.42,
             water_wave_speed: 1.0,
+            cutout_debug_mode: 0,
         }
     }
 }

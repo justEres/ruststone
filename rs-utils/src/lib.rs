@@ -246,6 +246,11 @@ pub struct PlayerStatus {
     pub experience_bar: f32,
     pub level: i32,
     pub total_experience: i32,
+    pub gamemode: u8,
+    pub can_fly: bool,
+    pub flying: bool,
+    pub flying_speed: f32,
+    pub walking_speed: f32,
     pub dead: bool,
 }
 
@@ -277,6 +282,11 @@ impl Default for PlayerStatus {
             experience_bar: 0.0,
             level: 0,
             total_experience: 0,
+            gamemode: 0,
+            can_fly: false,
+            flying: false,
+            flying_speed: 0.05,
+            walking_speed: 0.1,
             dead: false,
         }
     }
@@ -429,6 +439,21 @@ impl InventoryState {
     pub fn hotbar_item(&self, hotbar_index: u8) -> Option<InventoryItemStack> {
         let idx = self.hotbar_slot_index(hotbar_index)?;
         self.player_slots.get(idx).cloned().flatten()
+    }
+
+    pub fn consume_selected_hotbar_one(&mut self) -> bool {
+        let Some(idx) = self.hotbar_slot_index(self.selected_hotbar_slot) else {
+            return false;
+        };
+        let Some(Some(mut stack)) = self.player_slots.get(idx).cloned() else {
+            return false;
+        };
+        if stack.count == 0 {
+            return false;
+        }
+        stack.count = stack.count.saturating_sub(1);
+        self.player_slots[idx] = if stack.count == 0 { None } else { Some(stack) };
+        true
     }
 
     pub fn apply_local_click_player_window(
@@ -774,6 +799,11 @@ pub enum ToNetMessage {
     PlayerAction {
         action_id: i8,
     },
+    ClientAbilities {
+        flags: u8,
+        flying_speed: f32,
+        walking_speed: f32,
+    },
     SwingArm,
     UseEntity {
         target_id: i32,
@@ -865,6 +895,14 @@ pub enum FromNetMessage {
         experience_bar: f32,
         level: i32,
         total_experience: i32,
+    },
+    GameMode {
+        gamemode: u8,
+    },
+    PlayerAbilities {
+        flags: u8,
+        flying_speed: f32,
+        walking_speed: f32,
     },
     Inventory(InventoryMessage),
     NetEntity(NetEntityMessage),
