@@ -21,7 +21,7 @@ use crate::block_textures::{
     BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
     classify_tint, is_leaves_block, is_transparent_block, uv_for_texture,
 };
-use crate::lighting::{lighting_uniform_for, uses_shadowed_pbr_path};
+use crate::lighting::{lighting_uniform_for_mode, uses_shadowed_pbr_path};
 
 const CHUNK_SIZE: i32 = 16;
 const SECTION_HEIGHT: i32 = 16;
@@ -39,6 +39,7 @@ pub struct AtlasLightingUniform {
     pub color_grading: Vec4,
     pub water_effects: Vec4,
     pub water_controls: Vec4,
+    pub debug_flags: Vec4,
     pub reflection_view_proj: Mat4,
 }
 
@@ -327,7 +328,7 @@ impl FromWorld for ChunkRenderAssets {
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
                 reflection: reflection_texture.clone(),
-                lighting: lighting_uniform_for(&settings, false),
+                lighting: lighting_uniform_for_mode(&settings, 0.0),
             },
         });
         let transparent_material = materials.add(ChunkAtlasMaterial {
@@ -339,14 +340,13 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
-                depth_bias: 1.0,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
                 reflection: reflection_texture.clone(),
-                lighting: lighting_uniform_for(&settings, true),
+                lighting: lighting_uniform_for_mode(&settings, 1.0),
             },
         });
         let cutout_material = materials.add(ChunkAtlasMaterial {
@@ -356,6 +356,7 @@ impl FromWorld for ChunkRenderAssets {
                 metallic: 0.0,
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
+                // Cutout writes depth like solid geometry while discarding transparent texels.
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: None,
                 unlit: !use_shadowed_pbr,
@@ -364,7 +365,7 @@ impl FromWorld for ChunkRenderAssets {
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
                 reflection: reflection_texture.clone(),
-                lighting: lighting_uniform_for(&settings, false),
+                lighting: lighting_uniform_for_mode(&settings, 2.0),
             },
         });
         let cutout_culled_material = materials.add(ChunkAtlasMaterial {
@@ -374,6 +375,7 @@ impl FromWorld for ChunkRenderAssets {
                 metallic: 0.0,
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
+                // Same as cutout_material, but with backface culling.
                 alpha_mode: AlphaMode::Mask(0.5),
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
                 unlit: !use_shadowed_pbr,
@@ -382,7 +384,7 @@ impl FromWorld for ChunkRenderAssets {
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
                 reflection: reflection_texture.clone(),
-                lighting: lighting_uniform_for(&settings, false),
+                lighting: lighting_uniform_for_mode(&settings, 2.0),
             },
         });
 
@@ -449,6 +451,8 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         } else {
             rgba
         };
+        let mut rgba = rgba;
+        apply_default_foliage_tint(texture_name, &mut rgba);
 
         let atlas_buf = atlas.get_or_insert_with(|| {
             ImageBuffer::from_pixel(
@@ -483,6 +487,43 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         mapping,
         biome_tints,
     )
+}
+
+fn apply_default_foliage_tint(texture_name: &str, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    // Fallback tinting path for grayscale foliage textures.
+    // This keeps cutout foliage readable even when runtime biome tinting is unavailable.
+    let tint = if is_grass_tinted_texture(texture_name) {
+        [0x7f_u8, 0xb2_u8, 0x38_u8]
+    } else if is_foliage_tinted_texture(texture_name) {
+        [0x48_u8, 0xb5_u8, 0x18_u8]
+    } else {
+        return;
+    };
+    for p in img.pixels_mut() {
+        if p.0[3] == 0 {
+            continue;
+        }
+        p.0[0] = ((u16::from(p.0[0]) * u16::from(tint[0])) / 255) as u8;
+        p.0[1] = ((u16::from(p.0[1]) * u16::from(tint[1])) / 255) as u8;
+        p.0[2] = ((u16::from(p.0[2]) * u16::from(tint[2])) / 255) as u8;
+    }
+}
+
+fn is_grass_tinted_texture(name: &str) -> bool {
+    matches!(
+        name,
+        "tallgrass.png"
+            | "fern.png"
+            | "double_plant_grass_bottom.png"
+            | "double_plant_grass_top.png"
+            | "double_plant_fern_bottom.png"
+            | "double_plant_fern_top.png"
+            | "reeds.png"
+    )
+}
+
+fn is_foliage_tinted_texture(name: &str) -> bool {
+    name.starts_with("leaves_") || matches!(name, "vine.png" | "waterlily.png")
 }
 
 fn collect_texture_names(textures_root: &PathBuf) -> Vec<String> {
@@ -952,7 +993,11 @@ fn add_greedy_quad(
         Face::PosX | Face::NegX => (axis, base_y + quad.y as i32, quad.x as i32),
         Face::PosZ | Face::NegZ => (quad.x as i32, base_y + quad.y as i32, axis),
     };
-    let shade = face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face);
+    let shade = if should_apply_prebaked_shade(block_id) {
+        face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face)
+    } else {
+        1.0
+    };
     let color = [
         base_color[0] * shade,
         base_color[1] * shade,
@@ -1128,7 +1173,11 @@ fn add_block_faces(
             biome_tints,
         );
         for vert in verts {
-            let shade = face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert);
+            let shade = if should_apply_prebaked_shade(block_id) {
+                face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert)
+            } else {
+                1.0
+            };
             data.colors.push([
                 base_color[0] * shade,
                 base_color[1] * shade,
@@ -1223,7 +1272,11 @@ fn add_cross_plant(
         z,
         biome_tints,
     );
-    let shade = block_light_factor(snapshot, chunk_x, chunk_z, x, y, z);
+    let shade = if should_apply_prebaked_shade(block_id) {
+        block_light_factor(snapshot, chunk_x, chunk_z, x, y, z)
+    } else {
+        1.0
+    };
     color[0] *= shade;
     color[1] *= shade;
     color[2] *= shade;
@@ -1737,7 +1790,11 @@ fn add_box(
             tint_color_untargeted(block_id, tint)
         };
         if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
-            let shade = face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face);
+            let shade = if should_apply_prebaked_shade(block_id) {
+                face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face)
+            } else {
+                1.0
+            };
             color[0] *= shade;
             color[1] *= shade;
             color[2] *= shade;
@@ -2078,6 +2135,13 @@ fn is_liquid(block_id: u16) -> bool {
     matches!(block_type(block_id), 8 | 9 | 10 | 11)
 }
 
+fn should_apply_prebaked_shade(block_id: u16) -> bool {
+    !matches!(
+        render_group_for_block(block_id),
+        MaterialGroup::Cutout | MaterialGroup::CutoutCulled
+    )
+}
+
 fn render_group_for_block(block_id: u16) -> MaterialGroup {
     let id = block_type(block_id);
     if is_transparent_block(id) {
@@ -2155,12 +2219,20 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
     if is_liquid(neighbor_id) {
         return is_liquid(block_id);
     }
+    let this_type = block_type(block_id);
+    let neighbor_type = block_type(neighbor_id);
+
+    // For leaves, keep front faces on deeper leaf blocks so holes in one leaf
+    // layer reveal the next layer instead of the sky.
+    if is_leaves_block(this_type) && is_leaves_block(neighbor_type) {
+        return false;
+    }
+
     // Alpha-cutout cubes (leaves/glass variants) must not hide solid neighbor faces,
     // otherwise transparent texels show the sky instead of geometry behind.
     // We only cull internal faces between identical cutout cubes.
-    let neighbor_type = block_type(neighbor_id);
     if is_alpha_cutout_cube(neighbor_type) {
-        return block_type(block_id) == neighbor_type && block_id == neighbor_id;
+        return this_type == neighbor_type && block_id == neighbor_id;
     }
     is_occluding_block(neighbor_id)
 }

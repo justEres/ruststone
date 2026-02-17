@@ -197,6 +197,19 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 },
             );
         }
+        ToNetMessage::ClientAbilities {
+            flags,
+            flying_speed,
+            walking_speed,
+        } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::ClientAbilities_f32 {
+                    flags,
+                    flying_speed,
+                    walking_speed,
+                },
+            );
+        }
         ToNetMessage::SwingArm => {
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::ArmSwing_Handsfree { empty: () },

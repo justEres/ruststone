@@ -7,6 +7,9 @@ pub struct InputState {
     pub jump: bool,
     pub sprint: bool,
     pub sneak: bool,
+    pub can_fly: bool,
+    pub flying: bool,
+    pub flying_speed: f32,
     pub yaw: f32,
     pub pitch: f32,
 }

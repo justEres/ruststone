@@ -1379,6 +1379,7 @@ pub fn first_person_viewmodel_system(
     >,
     existing: Query<(Entity, &FirstPersonViewModelParts), With<FirstPersonViewModel>>,
 ) {
+    let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
     let active = matches!(app_state.0, ApplicationState::Connected)
         && !ui_state.chat_open
         && !ui_state.paused
@@ -1386,6 +1387,7 @@ pub fn first_person_viewmodel_system(
         && !player_status.dead
         && render_debug.render_held_items
         && render_debug.render_first_person_arms
+        && held.is_some()
         && matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
 
     if !active {
@@ -1404,7 +1406,6 @@ pub fn first_person_viewmodel_system(
         return;
     };
 
-    let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
     if let Some(stack) = held.as_ref() {
         item_textures.request_stack(&stack);
     }

@@ -24,6 +24,10 @@ const SNEAK_EDGE_STEP: f32 = 0.05;
 const MOVE_INPUT_DAMPING: f32 = 0.98;
 const SNEAK_INPUT_SCALE: f32 = 0.3;
 const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
+const FLY_VERTICAL_ACCEL_MULT: f32 = 3.0;
+const FLY_HORIZONTAL_DAMPING: f32 = 0.91;
+const FLY_VERTICAL_DAMPING: f32 = 0.6;
+const FLY_SPRINT_MULT: f32 = 2.0;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -670,7 +674,41 @@ pub fn simulate_tick(
     state.yaw = input.yaw;
     state.pitch = input.pitch;
     let sprinting = effective_sprint(input);
+    let flying = input.can_fly && input.flying;
     let in_water = world.is_player_in_water(state.pos);
+
+    if flying {
+        let fly_speed = input.flying_speed.max(0.0);
+        let fly_move_speed = fly_speed * if sprinting { FLY_SPRINT_MULT } else { 1.0 };
+
+        let mut wish = Vec3::new(
+            input.strafe * MOVE_INPUT_DAMPING,
+            0.0,
+            input.forward * MOVE_INPUT_DAMPING,
+        );
+        if wish.length_squared() > 1.0 {
+            wish = wish.normalize();
+        }
+
+        move_flying(&mut state.vel, wish.x, wish.z, fly_move_speed, state.yaw);
+
+        if input.sneak {
+            state.vel.y -= fly_speed * FLY_VERTICAL_ACCEL_MULT;
+        }
+        if input.jump {
+            state.vel.y += fly_speed * FLY_VERTICAL_ACCEL_MULT;
+        }
+
+        let (pos, vel, on_ground, _) = world.resolve(state.pos, state.vel, state.on_ground);
+        state.pos = pos;
+        state.vel = vel;
+        state.on_ground = on_ground;
+
+        state.vel.x *= FLY_HORIZONTAL_DAMPING;
+        state.vel.z *= FLY_HORIZONTAL_DAMPING;
+        state.vel.y *= FLY_VERTICAL_DAMPING;
+        return state;
+    }
 
     if !in_water && state.on_ground && input.jump {
         state.vel.y = JUMP_VEL;

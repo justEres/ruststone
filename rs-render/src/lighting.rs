@@ -239,6 +239,13 @@ pub fn lighting_uniform_for(
     settings: &RenderDebugSettings,
     transparent_pass: bool,
 ) -> AtlasLightingUniform {
+    lighting_uniform_for_mode(settings, if transparent_pass { 1.0 } else { 0.0 })
+}
+
+pub fn lighting_uniform_for_mode(
+    settings: &RenderDebugSettings,
+    pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
+) -> AtlasLightingUniform {
     let preset = settings.lighting_quality;
     let params = preset_params(preset);
     AtlasLightingUniform {
@@ -258,7 +265,7 @@ pub fn lighting_uniform_for(
             preset as u32 as f32,
             params.water_absorption,
             params.water_fresnel,
-            if transparent_pass { 1.0 } else { 0.0 },
+            pass_mode,
         ),
         color_grading: Vec4::new(
             settings.color_saturation,
@@ -288,6 +295,7 @@ pub fn lighting_uniform_for(
                 0.0
             },
         ),
+        debug_flags: Vec4::new(settings.cutout_debug_mode as f32, 0.0, 0.0, 0.0),
         reflection_view_proj: Mat4::IDENTITY,
     }
 }
@@ -310,20 +318,24 @@ pub fn apply_lighting_quality(
     }
 
     if let Some(mat) = materials.get_mut(&assets.opaque_material) {
-        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.extension.lighting = lighting_uniform_for_mode(&settings, 0.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.alpha_mode = AlphaMode::Opaque;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
-        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.alpha_mode = AlphaMode::Mask(0.5);
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
-        mat.extension.lighting = lighting_uniform_for(&settings, false);
+        mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.alpha_mode = AlphaMode::Mask(0.5);
     }
     if let Some(mat) = materials.get_mut(&assets.transparent_material) {
-        mat.extension.lighting = lighting_uniform_for(&settings, true);
+        mat.extension.lighting = lighting_uniform_for_mode(&settings, 1.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.alpha_mode = AlphaMode::Blend;
         if settings.water_reflections_enabled {
             mat.base.perceptual_roughness = 0.08;
             mat.base.reflectance = 0.9;
@@ -335,6 +347,7 @@ pub fn apply_lighting_quality(
 
     let params = preset_params(settings.lighting_quality);
     let shadow_params = shadow_quality_params(settings.shadow_quality);
+    let shadow_dist_scale = settings.shadow_distance_scale.clamp(0.25, 20.0);
     shadow_map.size = shadow_params.map_size;
 
     let allow_shadows =
@@ -353,8 +366,8 @@ pub fn apply_lighting_quality(
             if let Some(mut cascade_cfg) = cascade_cfg {
                 *cascade_cfg = CascadeShadowConfigBuilder {
                     num_cascades: shadow_params.cascades,
-                    maximum_distance: shadow_params.max_distance,
-                    first_cascade_far_bound: shadow_params.first_cascade_far_bound,
+                    maximum_distance: shadow_params.max_distance * shadow_dist_scale,
+                    first_cascade_far_bound: shadow_params.first_cascade_far_bound * shadow_dist_scale,
                     minimum_distance: 0.1,
                     ..default()
                 }

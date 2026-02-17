@@ -364,6 +364,13 @@ fn connect_ui(
                 options_changed |= ui
                     .checkbox(&mut render_debug.shadows_enabled, "Shadows")
                     .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
+                            .logarithmic(true)
+                            .text("Shadow distance"),
+                    )
+                    .changed();
                 let mut selected_shadow_quality = render_debug.shadow_quality;
                 egui::ComboBox::from_label("Shadow Quality")
                     .selected_text(selected_shadow_quality.label())
@@ -752,6 +759,7 @@ struct ClientOptionsFile {
     pub fov_deg: f32,
     pub render_distance_chunks: i32,
     pub shadows_enabled: bool,
+    pub shadow_distance_scale: f32,
     pub fxaa_enabled: bool,
     pub aa_mode: String,
     pub manual_frustum_cull: bool,
@@ -780,6 +788,7 @@ impl Default for ClientOptionsFile {
             fov_deg: render.fov_deg,
             render_distance_chunks: render.render_distance_chunks,
             shadows_enabled: render.shadows_enabled,
+            shadow_distance_scale: render.shadow_distance_scale,
             fxaa_enabled: render.fxaa_enabled,
             aa_mode: render.aa_mode.as_options_value().to_string(),
             manual_frustum_cull: render.manual_frustum_cull,
@@ -808,6 +817,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         fov_deg: render.fov_deg,
         render_distance_chunks: render.render_distance_chunks,
         shadows_enabled: render.shadows_enabled,
+        shadow_distance_scale: render.shadow_distance_scale,
         fxaa_enabled: render.fxaa_enabled,
         aa_mode: render.aa_mode.as_options_value().to_string(),
         manual_frustum_cull: render.manual_frustum_cull,
@@ -857,6 +867,7 @@ fn apply_options(
     }
     // Explicit toggles in options file override preset defaults.
     render.shadows_enabled = options.shadows_enabled;
+    render.shadow_distance_scale = options.shadow_distance_scale.clamp(0.25, 20.0);
     render.fxaa_enabled = matches!(
         render.aa_mode,
         AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
@@ -1030,6 +1041,8 @@ fn draw_hotbar_ui(
     player_status: &PlayerStatus,
     item_icons: &mut ItemIconCache,
 ) {
+    let is_creative = player_status.gamemode == 1;
+    let armor_frac = equipped_armor_points(inventory_state) as f32 / 20.0;
     let health_frac = (player_status.health / 20.0).clamp(0.0, 1.0);
     let hunger_frac = (player_status.food as f32 / 20.0).clamp(0.0, 1.0);
     let xp_frac = player_status.experience_bar.clamp(0.0, 1.0);
@@ -1044,30 +1057,45 @@ fn draw_hotbar_ui(
                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(64)))
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
-                    let (bars_rect, _) = ui
-                        .allocate_exact_size(egui::vec2(hotbar_width, 10.0), egui::Sense::hover());
-                    let half_width = (hotbar_width - INVENTORY_SLOT_SPACING) * 0.5;
-                    let health_rect = egui::Rect::from_min_size(
-                        bars_rect.min,
-                        egui::vec2(half_width, bars_rect.height()),
-                    );
-                    let hunger_rect = egui::Rect::from_min_size(
-                        egui::pos2(health_rect.max.x + INVENTORY_SLOT_SPACING, bars_rect.min.y),
-                        egui::vec2(half_width, bars_rect.height()),
-                    );
-                    draw_stat_bar(
-                        ui.painter(),
-                        health_rect,
-                        health_frac,
-                        egui::Color32::from_rgb(170, 46, 46),
-                    );
-                    draw_stat_bar(
-                        ui.painter(),
-                        hunger_rect,
-                        hunger_frac,
-                        egui::Color32::from_rgb(181, 122, 43),
-                    );
-                    ui.add_space(3.0);
+                    if !is_creative {
+                        let (armor_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(hotbar_width, 7.0),
+                            egui::Sense::hover(),
+                        );
+                        draw_stat_bar(
+                            ui.painter(),
+                            armor_rect,
+                            armor_frac.clamp(0.0, 1.0),
+                            egui::Color32::from_rgb(126, 170, 218),
+                        );
+                        ui.add_space(3.0);
+                        let (bars_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(hotbar_width, 10.0),
+                            egui::Sense::hover(),
+                        );
+                        let half_width = (hotbar_width - INVENTORY_SLOT_SPACING) * 0.5;
+                        let health_rect = egui::Rect::from_min_size(
+                            bars_rect.min,
+                            egui::vec2(half_width, bars_rect.height()),
+                        );
+                        let hunger_rect = egui::Rect::from_min_size(
+                            egui::pos2(health_rect.max.x + INVENTORY_SLOT_SPACING, bars_rect.min.y),
+                            egui::vec2(half_width, bars_rect.height()),
+                        );
+                        draw_stat_bar(
+                            ui.painter(),
+                            health_rect,
+                            health_frac,
+                            egui::Color32::from_rgb(170, 46, 46),
+                        );
+                        draw_stat_bar(
+                            ui.painter(),
+                            hunger_rect,
+                            hunger_frac,
+                            egui::Color32::from_rgb(181, 122, 43),
+                        );
+                        ui.add_space(3.0);
+                    }
                     let (xp_rect, _) =
                         ui.allocate_exact_size(egui::vec2(hotbar_width, 7.0), egui::Sense::hover());
                     draw_stat_bar(
@@ -1123,6 +1151,42 @@ fn draw_stat_bar(painter: &egui::Painter, rect: egui::Rect, progress: f32, fill:
     painter.rect_filled(fill_rect, 1.5, fill);
 }
 
+fn equipped_armor_points(inventory_state: &InventoryState) -> i32 {
+    let mut points = 0;
+    for slot in [5usize, 6usize, 7usize, 8usize] {
+        if let Some(Some(stack)) = inventory_state.player_slots.get(slot) {
+            points += armor_points_for_item(stack.item_id);
+        }
+    }
+    points.clamp(0, 20)
+}
+
+fn armor_points_for_item(item_id: i32) -> i32 {
+    match item_id {
+        298 => 1, // leather helmet
+        299 => 3, // leather chestplate
+        300 => 2, // leather leggings
+        301 => 1, // leather boots
+        302 => 1, // chain helmet
+        303 => 5, // chain chestplate
+        304 => 4, // chain leggings
+        305 => 1, // chain boots
+        306 => 2, // iron helmet
+        307 => 6, // iron chestplate
+        308 => 5, // iron leggings
+        309 => 2, // iron boots
+        310 => 3, // diamond helmet
+        311 => 8, // diamond chestplate
+        312 => 6, // diamond leggings
+        313 => 3, // diamond boots
+        314 => 2, // gold helmet
+        315 => 5, // gold chestplate
+        316 => 3, // gold leggings
+        317 => 1, // gold boots
+        _ => 0,
+    }
+}
+
 fn draw_inventory_grid(
     ctx: &egui::Context,
     ui: &mut egui::Ui,
@@ -1136,6 +1200,41 @@ fn draw_inventory_grid(
     let mut hovered_any_slot = false;
     let mut hovered_item: Option<InventoryItemStack> = None;
 
+    ui.label("Armor");
+    ui.add_space(4.0);
+    egui::Grid::new("inventory_armor_row")
+        .spacing(egui::Vec2::new(
+            INVENTORY_SLOT_SPACING,
+            INVENTORY_SLOT_SPACING,
+        ))
+        .show(ui, |ui| {
+            for slot in [5usize, 6usize, 7usize, 8usize] {
+                let item = inventory_state.player_slots.get(slot).cloned().flatten();
+                let response = draw_slot(
+                    ctx,
+                    item_icons,
+                    ui,
+                    item.as_ref(),
+                    false,
+                    INVENTORY_SLOT_SIZE,
+                    true,
+                );
+                if response.hovered() {
+                    hovered_any_slot = true;
+                    hovered_item = item;
+                }
+                handle_inventory_slot_interaction(
+                    response,
+                    slot as i16,
+                    keys,
+                    to_net,
+                    inventory_state,
+                );
+            }
+            ui.end_row();
+        });
+
+    ui.add_space(8.0);
     egui::Grid::new("inventory_main_grid")
         .spacing(egui::Vec2::new(
             INVENTORY_SLOT_SPACING,

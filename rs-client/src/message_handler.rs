@@ -45,6 +45,11 @@ pub fn handle_messages(
             FromNetMessage::Connected => {
                 *app_state = AppState(ApplicationState::Connected);
                 player_status.dead = false;
+                player_status.gamemode = 0;
+                player_status.can_fly = false;
+                player_status.flying = false;
+                player_status.flying_speed = 0.05;
+                player_status.walking_speed = 0.1;
                 sim_clock.tick = 0;
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
@@ -57,6 +62,9 @@ pub fn handle_messages(
                 sim_ready.0 = false;
                 sim_render.previous = sim_state.current;
                 inventory_state.reset();
+                player_status.gamemode = 0;
+                player_status.can_fly = false;
+                player_status.flying = false;
             }
             FromNetMessage::ChatMessage(msg) => {
                 chat.0.push_back(msg);
@@ -159,6 +167,31 @@ pub fn handle_messages(
                 player_status.experience_bar = experience_bar.clamp(0.0, 1.0);
                 player_status.level = level.max(0);
                 player_status.total_experience = total_experience.max(0);
+            }
+            FromNetMessage::GameMode { gamemode } => {
+                // 1.8 join packet: lower 3 bits hold game mode, bit 3 is hardcore flag.
+                let mode = gamemode & 0x07;
+                player_status.gamemode = mode;
+                let can_fly = matches!(mode, 1 | 3);
+                player_status.can_fly = can_fly;
+                if !can_fly {
+                    player_status.flying = false;
+                }
+            }
+            FromNetMessage::PlayerAbilities {
+                flags,
+                flying_speed,
+                walking_speed,
+            } => {
+                // 1.8 abilities flags: 0x01 invuln, 0x02 flying, 0x04 mayfly, 0x08 creative.
+                let can_fly = (flags & 0x04) != 0 || (flags & 0x08) != 0;
+                player_status.can_fly = can_fly;
+                player_status.flying = (flags & 0x02) != 0 && can_fly;
+                player_status.flying_speed = flying_speed;
+                player_status.walking_speed = walking_speed;
+                if (flags & 0x08) != 0 {
+                    player_status.gamemode = 1;
+                }
             }
             FromNetMessage::Inventory(event) => {
                 apply_inventory_message(&mut inventory_state, event);
