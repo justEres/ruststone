@@ -34,6 +34,7 @@
 const ATLAS_COLUMNS: f32 = 64.0;
 const ATLAS_ROWS: f32 = 64.0;
 const ATLAS_UV_INSET: f32 = 0.02;
+const ATLAS_UV_PACK_SCALE: f32 = 1024.0;
 
 @group(2) @binding(100) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(101) var atlas_sampler: sampler;
@@ -47,6 +48,7 @@ struct AtlasLightingUniform {
     color_grading: vec4<f32>,
     water_effects: vec4<f32>,
     water_controls: vec4<f32>,
+    water_extra: vec4<f32>,
     debug_flags: vec4<f32>,
     reflection_view_proj: mat4x4<f32>,
 }
@@ -57,6 +59,16 @@ fn atlas_uv_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> vec2<
     let tile_size = vec2<f32>(1.0 / ATLAS_COLUMNS, 1.0 / ATLAS_ROWS);
     let inset = tile_size * ATLAS_UV_INSET;
     return tile_origin + inset + fract(local_uv) * (tile_size - inset * 2.0);
+}
+
+fn atlas_texel_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> vec4<f32> {
+    let uv = atlas_uv_from_repeating(local_uv, tile_origin);
+    let tex_size_u = textureDimensions(atlas_texture, 0);
+    let tex_size = vec2<f32>(f32(tex_size_u.x), f32(tex_size_u.y));
+    let max_xy = vec2<f32>(tex_size.x - 1.0, tex_size.y - 1.0);
+    let texel_f = clamp(floor(uv * tex_size), vec2<f32>(0.0, 0.0), max_xy);
+    let texel = vec2<i32>(i32(texel_f.x), i32(texel_f.y));
+    return textureLoad(atlas_texture, texel, 0);
 }
 
 fn safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
@@ -101,7 +113,6 @@ fn apply_voxel_lighting(
 
     let pass_mode = lighting_uniform.quality_and_water.w;
     let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
-    let cutout_pass = pass_mode > 1.5;
     if transparent_pass && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
@@ -122,8 +133,10 @@ fn apply_voxel_lighting(
                 clamp(pow(clamp(-reflected.y, 0.0, 1.0), 0.72) * 1.25, 0.0, 1.0);
             let terrain_blend = select(0.0, terrain_blend_val, terrain_enabled);
             let env_reflection_base = mix(sky, terrain, terrain_blend);
+            let sky_fill = clamp(lighting_uniform.debug_flags.y, 0.0, 1.0);
+            let env_reflection_fallback = mix(env_reflection_base, sky, sky_fill);
             let env_reflection = mix(
-                env_reflection_base,
+                env_reflection_fallback,
                 water_scene_reflection,
                 water_scene_reflection_valid * select(0.0, 1.0, terrain_enabled),
             );
@@ -175,7 +188,6 @@ fn apply_fancy_post_lighting(
 
     let pass_mode = lighting_uniform.quality_and_water.w;
     let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
-    let cutout_pass = pass_mode > 1.5;
     if transparent_pass && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
@@ -196,8 +208,10 @@ fn apply_fancy_post_lighting(
                 clamp(pow(clamp(-reflected.y, 0.0, 1.0), 0.72) * 1.25, 0.0, 1.0);
             let terrain_blend = select(0.0, terrain_blend_val, terrain_enabled);
             let env_reflection_base = mix(sky, terrain, terrain_blend);
+            let sky_fill = clamp(lighting_uniform.debug_flags.y, 0.0, 1.0);
+            let env_reflection_fallback = mix(env_reflection_base, sky, sky_fill);
             let env_reflection = mix(
-                env_reflection_base,
+                env_reflection_fallback,
                 water_scene_reflection,
                 water_scene_reflection_valid * select(0.0, 1.0, terrain_enabled),
             );
@@ -277,32 +291,44 @@ fn fragment(
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     let vertex_tint_rgb = pbr_input.material.base_color.rgb;
     let pass_mode = lighting_uniform.quality_and_water.w;
-    let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
-    let cutout_pass = pass_mode > 1.5;
+    let pass_mode_valid = pass_mode == pass_mode;
+    let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
+    let cutout_pass = pass_mode_valid && pass_mode > 1.5;
     let cutout_debug_mode = i32(round(lighting_uniform.debug_flags.x));
 
 #ifdef VERTEX_UVS_A
-    var tile_origin = vec2<f32>(0.0, 0.0);
-#ifdef VERTEX_UVS_B
-    tile_origin = in.uv_b;
-#endif
-    var uv_local = in.uv;
+    let packed_uv = in.uv;
+    let tile_cell = floor(packed_uv / vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE));
+    var uv_local = packed_uv - tile_cell * vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE);
+    var tile_origin = tile_cell / vec2<f32>(ATLAS_COLUMNS, ATLAS_ROWS);
     var water_wave = vec2<f32>(0.0, 0.0);
     if transparent_pass {
         let t = lighting_uniform.water_effects.w * lighting_uniform.water_effects.z;
         let amp = lighting_uniform.water_effects.y;
+        let detail_amp = lighting_uniform.water_extra.x;
+        let detail_scale = lighting_uniform.water_extra.y;
+        let detail_speed = lighting_uniform.water_extra.z;
         let wp = in.world_position.xyz;
-        water_wave = vec2<f32>(
+        let base_wave = vec2<f32>(
             sin((wp.x + wp.z) * 0.42 + t * 2.3)
                 + 0.55 * sin(wp.x * 0.95 - t * 1.7),
             cos((wp.x - wp.z) * 0.31 - t * 1.6)
                 + 0.5 * cos(wp.z * 1.05 + t * 1.4),
         );
+        let detail_wave = vec2<f32>(
+            sin((wp.x * detail_scale + wp.z * detail_scale * 1.37) * 0.83 + t * (2.7 + detail_speed)),
+            cos((wp.x * detail_scale * 1.21 - wp.z * detail_scale) * 0.71 - t * (2.2 + detail_speed)),
+        );
+        let micro_wave = vec2<f32>(
+            sin((wp.x * detail_scale * 2.5 + wp.z * detail_scale * 3.2) * 1.31 + t * (3.7 + detail_speed * 1.7)),
+            cos((wp.z * detail_scale * 2.9 - wp.x * detail_scale * 2.1) * 1.19 - t * (3.2 + detail_speed * 1.5)),
+        );
+        water_wave = base_wave + detail_wave * detail_amp + micro_wave * (detail_amp * 0.42);
         let wave_scale = amp * 0.11;
         uv_local += water_wave * wave_scale;
     }
-    let atlas_uv = atlas_uv_from_repeating(uv_local, tile_origin);
-    let atlas_sample = textureSample(atlas_texture, atlas_sampler, atlas_uv);
+    // Manual texel fetch keeps alpha-cutout stable across quality pipeline switches.
+    let atlas_sample = atlas_texel_from_repeating(uv_local, tile_origin);
     let atlas_rgb = atlas_sample.rgb;
     pbr_input.material.base_color *= atlas_sample;
     let atlas_alpha = atlas_sample.a;
@@ -311,27 +337,26 @@ fn fragment(
     let atlas_alpha = pbr_input.material.base_color.a;
 #endif
 
-    if transparent_pass || cutout_pass {
+    if transparent_pass {
         // Keep water/lava blend, but still punch fully transparent texels.
-        if atlas_alpha <= 0.001 {
+        if !(atlas_alpha > 0.001) {
             discard;
         }
     } else {
-        // Hard cutout for foliage/glass/cross meshes.
-        if atlas_alpha < 0.5 {
+        // Hard cutout for foliage/glass/cross meshes and opaque block passes.
+        // Use a NaN-safe comparison: invalid alpha should be discarded too.
+        if !(atlas_alpha >= 0.5) {
             discard;
         }
     }
 
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
     // to avoid backend/material-mode differences on alpha-mask handling.
-    if transparent_pass || cutout_pass {
+    if transparent_pass {
         pbr_input.material.base_color.a = atlas_alpha;
-        if transparent_pass {
-            // Keep std alpha handling for blended passes (water).
-            pbr_input.material.base_color =
-                alpha_discard(pbr_input.material, pbr_input.material.base_color);
-        }
+        // Keep std alpha handling for blended passes (water).
+        pbr_input.material.base_color =
+            alpha_discard(pbr_input.material, pbr_input.material.base_color);
     } else {
         pbr_input.material.base_color.a = 1.0;
     }
@@ -359,12 +384,20 @@ fn fragment(
         let clip = lighting_uniform.reflection_view_proj * vec4<f32>(in.world_position.xyz, 1.0);
         if clip.w > 0.0001 {
             let ndc = clip.xy / clip.w;
-            let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5))
+            let uv_raw = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5))
                 + water_wave * (lighting_uniform.water_effects.y * 0.025);
-            if all(uv >= vec2<f32>(0.001, 0.001)) && all(uv <= vec2<f32>(0.999, 0.999)) {
-                water_scene_reflection = textureSample(reflection_texture, reflection_sampler, uv).rgb;
-                water_scene_reflection_valid = 1.0;
-            }
+            let uv = clamp(uv_raw, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+            water_scene_reflection = textureSample(reflection_texture, reflection_sampler, uv).rgb;
+
+            let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+            let edge_fade = clamp(lighting_uniform.water_extra.w, 0.01, 0.5);
+            let edge_valid = smoothstep(0.0, edge_fade, edge);
+
+            let outside = max(vec2<f32>(0.0, 0.0), max(-uv_raw, uv_raw - vec2<f32>(1.0, 1.0)));
+            let outside_dist = max(outside.x, outside.y);
+            let oob_valid = 1.0 - smoothstep(0.0, edge_fade * 1.7, outside_dist);
+
+            water_scene_reflection_valid = edge_valid * oob_valid;
         }
     }
     let base_normal = safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0));
@@ -378,10 +411,25 @@ fn fragment(
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
     let quality_mode = lighting_uniform.quality_and_water.x;
-    if cutout_pass && cutout_debug_mode != 0 {
+    if cutout_debug_mode == 4 {
+        let pass_rgb = select(
+            vec3<f32>(0.16, 0.16, 0.16), // opaque-ish
+            vec3<f32>(0.2, 0.45, 1.0),   // transparent
+            transparent_pass,
+        );
+        out.color = vec4(
+            select(pass_rgb, vec3<f32>(0.2, 1.0, 0.35), cutout_pass), // cutout
+            1.0,
+        );
+    } else if cutout_pass && cutout_debug_mode != 0 {
         // Diagnostic view for cutout pipeline debugging:
-        // 1 = raw atlas rgb, 2 = raw vertex tint rgb.
-        let debug_rgb = select(vertex_tint_rgb, atlas_rgb, cutout_debug_mode == 1);
+        // 1 = raw atlas rgb, 2 = raw vertex tint rgb, 3 = atlas alpha.
+        var debug_rgb = vec3<f32>(atlas_alpha, atlas_alpha, atlas_alpha);
+        if cutout_debug_mode == 1 {
+            debug_rgb = atlas_rgb;
+        } else if cutout_debug_mode == 2 {
+            debug_rgb = vertex_tint_rgb;
+        }
         out.color = vec4(debug_rgb, 1.0);
     } else if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);

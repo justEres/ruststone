@@ -52,6 +52,7 @@ impl Plugin for RenderPlugin {
                 debug::apply_render_debug_settings,
                 lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),
                 lighting::update_water_animation.after(lighting::apply_lighting_quality),
+                lighting::update_material_debug_stats.after(lighting::update_water_animation),
                 lighting::apply_antialiasing.after(debug::apply_render_debug_settings),
                 lighting::apply_ssao_quality.after(lighting::apply_lighting_quality),
                 reflection::spawn_reflection_camera,

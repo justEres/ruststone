@@ -9,6 +9,8 @@
     - ✅ shadows are only rendering upto a certain distance. increase or make it configurable until "infinity"
     - when changing rendering mode, the transparency of leaves and so on breaks.
 
+    - Grass sides use mask for color tint to only tint the top and not the dirt part of the texture
+
 - Animations:
     - ✅ Block breaking animation
     - ✅ correct break duration aproxximation -> also for eating and so on... 
@@ -58,6 +60,7 @@
 - Rendering in general:
     - all block models -> doors, fences...
     - ✅ better antialiasing
+
     - Lods (optional, very late in development, experimental)
 
     - Entitys: 

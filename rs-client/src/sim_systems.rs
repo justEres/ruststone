@@ -1526,7 +1526,7 @@ pub fn debug_overlay_system(
                 ui.add(
                     egui::Slider::new(
                         &mut render_debug.water_reflection_tint_strength,
-                        0.0..=1.0,
+                        0.0..=2.0,
                     )
                     .text("Blue tint strength"),
                 );
@@ -1537,6 +1537,40 @@ pub fn debug_overlay_system(
                 ui.add(
                     egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
                         .text("Water wave speed"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut render_debug.water_wave_detail_strength,
+                        0.0..=1.2,
+                    )
+                    .text("Wave detail strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
+                        .text("Wave detail scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
+                        .text("Wave detail speed"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.02..=0.5)
+                        .text("Reflection edge fade"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
+                        .text("Sky fallback fill"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
+                        .text("Reflection overscan"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut render_debug.water_reflection_resolution_scale,
+                        0.5..=3.0,
+                    )
+                    .text("Reflection resolution"),
                 );
                 ui.checkbox(&mut render_debug.render_held_items, "Render held items");
                 ui.checkbox(
@@ -1557,14 +1591,19 @@ pub fn debug_overlay_system(
                     .selected_text(match cutout_mode {
                         1 => "Atlas RGB",
                         2 => "Vertex tint",
+                        3 => "Atlas alpha",
+                        4 => "Pass mode",
                         _ => "Off",
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut cutout_mode, 0, "Off");
                         ui.selectable_value(&mut cutout_mode, 1, "Atlas RGB");
                         ui.selectable_value(&mut cutout_mode, 2, "Vertex tint");
+                        ui.selectable_value(&mut cutout_mode, 3, "Atlas alpha");
+                        ui.selectable_value(&mut cutout_mode, 4, "Pass mode");
                     });
-                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 2) as u8;
+                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 4) as u8;
+                ui.checkbox(&mut render_debug.cutout_use_blend, "Cutout uses blend alpha mode");
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
@@ -1735,6 +1774,28 @@ pub fn debug_overlay_system(
                 ui.label(format!(
                     "chunks: {} / {} (distance)",
                     render_perf.visible_chunks, render_perf.total_chunks
+                ));
+                ui.separator();
+                ui.label(format!(
+                    "mat pass w: o={:.1} c={:.1} cc={:.1} t={:.1}",
+                    render_perf.mat_pass_opaque,
+                    render_perf.mat_pass_cutout,
+                    render_perf.mat_pass_cutout_culled,
+                    render_perf.mat_pass_transparent
+                ));
+                ui.label(format!(
+                    "mat alpha: o={} c={} cc={} t={}",
+                    render_perf.mat_alpha_opaque,
+                    render_perf.mat_alpha_cutout,
+                    render_perf.mat_alpha_cutout_culled,
+                    render_perf.mat_alpha_transparent
+                ));
+                ui.label(format!(
+                    "mat unlit: o={} c={} cc={} t={}",
+                    render_perf.mat_unlit_opaque,
+                    render_perf.mat_unlit_cutout,
+                    render_perf.mat_unlit_cutout_culled,
+                    render_perf.mat_unlit_transparent
                 ));
             }
         });

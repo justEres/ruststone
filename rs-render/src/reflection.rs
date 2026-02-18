@@ -60,7 +60,8 @@ pub fn spawn_reflection_camera(
             target: state.texture.clone().into(),
             order: -100,
             is_active: false,
-            clear_color: Color::srgb(0.0, 0.0, 0.0).into(),
+            // Keep non-rendered regions closer to sky color to avoid black SSR artifacts.
+            clear_color: Color::srgb(0.50, 0.62, 0.84).into(),
             ..default()
         },
         main_projection.clone(),
@@ -98,6 +99,10 @@ pub fn sync_reflection_camera(
     let active = settings.water_reflections_enabled && settings.water_terrain_ssr;
     reflection_camera.is_active = active;
     *reflection_projection = main_projection.clone();
+    if let Projection::Perspective(p) = &mut *reflection_projection {
+        p.fov = (p.fov * settings.water_reflection_overscan.clamp(1.0, 3.0))
+            .clamp(15.0f32.to_radians(), 170.0f32.to_radians());
+    }
 
     let cam_pos = main_transform.translation();
     let reflected_pos = Vec3::new(cam_pos.x, 2.0 * state.plane_y - cam_pos.y, cam_pos.z);
@@ -116,6 +121,7 @@ pub fn sync_reflection_camera(
 }
 
 pub fn resize_reflection_target(
+    settings: Res<RenderDebugSettings>,
     mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut state: ResMut<ReflectionPassState>,
@@ -123,8 +129,12 @@ pub fn resize_reflection_target(
     let Ok(window) = windows.single() else {
         return;
     };
-    let desired_width = (window.physical_width().max(2) / 2).max(512);
-    let desired_height = (window.physical_height().max(2) / 2).max(512);
+    // Keep reflection target slightly oversized/undersized via user scale to reduce borders.
+    let scale = settings.water_reflection_resolution_scale.clamp(0.5, 3.0);
+    let desired_width = ((window.physical_width().max(2) as f32) * scale) as u32;
+    let desired_height = ((window.physical_height().max(2) as f32) * scale) as u32;
+    let desired_width = desired_width.max(512);
+    let desired_height = desired_height.max(512);
     if desired_width == state.width && desired_height == state.height {
         return;
     }
