@@ -3,11 +3,19 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
-use crate::chunk::{ChunkRenderAssets, ChunkStore, snapshot_for_chunk};
+use crate::chunk::{
+    ChunkRenderAssets, ChunkStore, ChunkSubmeshGroup, DepthSortBaseLocal, MaterialGroup,
+    snapshot_for_chunk,
+};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
+use crate::reflection::{
+    CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
+    MAIN_RENDER_LAYER,
+};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
+use bevy::render::view::RenderLayers;
 use bevy::render::view::ViewVisibility;
 
 use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
@@ -100,7 +108,26 @@ pub struct RenderDebugSettings {
     pub render_self_model: bool,
     pub lighting_quality: LightingQualityPreset,
     pub shadow_quality: ShadowQualityPreset,
+    pub shader_quality_mode: u8, // 0 fast .. 3 fancy
     pub enable_pbr_terrain_lighting: bool,
+    pub sun_azimuth_deg: f32,
+    pub sun_elevation_deg: f32,
+    pub sun_strength: f32,
+    pub ambient_strength: f32,
+    pub ambient_brightness: f32,
+    pub sun_illuminance: f32,
+    pub fill_illuminance: f32,
+    pub fog_density: f32,
+    pub fog_start: f32,
+    pub fog_end: f32,
+    pub water_absorption: f32,
+    pub water_fresnel: f32,
+    pub shadow_map_size: u32,
+    pub shadow_cascades: u8,
+    pub shadow_max_distance: f32,
+    pub shadow_first_cascade_far_bound: f32,
+    pub shadow_depth_bias: f32,
+    pub shadow_normal_bias: f32,
     pub color_saturation: f32,
     pub color_contrast: f32,
     pub color_brightness: f32,
@@ -122,6 +149,15 @@ pub struct RenderDebugSettings {
     pub water_reflection_sky_fill: f32,
     pub cutout_debug_mode: u8, // 0 off, 1 atlas, 2 vertex_tint, 3 alpha, 4 pass mode
     pub cutout_use_blend: bool,
+    pub cutout_manual_depth_sort: bool,
+    pub cutout_depth_sort_strength: f32,
+    pub show_layer_entities: bool,
+    pub show_layer_chunks_opaque: bool,
+    pub show_layer_chunks_cutout: bool,
+    pub show_layer_chunks_transparent: bool,
+    pub leaf_depth_layer_faces: bool,
+    pub force_remesh: bool,
+    pub material_rebuild_nonce: u32,
 }
 
 impl Default for RenderDebugSettings {
@@ -148,7 +184,26 @@ impl Default for RenderDebugSettings {
             render_self_model: true,
             lighting_quality: LightingQualityPreset::Standard,
             shadow_quality: ShadowQualityPreset::Medium,
+            shader_quality_mode: 2,
             enable_pbr_terrain_lighting: false,
+            sun_azimuth_deg: 62.0,
+            sun_elevation_deg: 62.0,
+            sun_strength: 0.56,
+            ambient_strength: 0.52,
+            ambient_brightness: 0.80,
+            sun_illuminance: 11_500.0,
+            fill_illuminance: 2_200.0,
+            fog_density: 0.012,
+            fog_start: 70.0,
+            fog_end: 220.0,
+            water_absorption: 0.18,
+            water_fresnel: 0.12,
+            shadow_map_size: 1536,
+            shadow_cascades: 2,
+            shadow_max_distance: 96.0,
+            shadow_first_cascade_far_bound: 28.0,
+            shadow_depth_bias: 0.022,
+            shadow_normal_bias: 0.55,
             color_saturation: 1.08,
             color_contrast: 1.06,
             color_brightness: 0.0,
@@ -170,6 +225,15 @@ impl Default for RenderDebugSettings {
             water_reflection_sky_fill: 0.55,
             cutout_debug_mode: 0,
             cutout_use_blend: true,
+            cutout_manual_depth_sort: true,
+            cutout_depth_sort_strength: 0.8,
+            show_layer_entities: true,
+            show_layer_chunks_opaque: true,
+            show_layer_chunks_cutout: true,
+            show_layer_chunks_transparent: true,
+            leaf_depth_layer_faces: true,
+            force_remesh: false,
+            material_rebuild_nonce: 0,
         }
     }
 }
@@ -177,12 +241,14 @@ impl Default for RenderDebugSettings {
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct MeshingToggleState {
     pub last_use_greedy: bool,
+    pub last_leaf_depth_layer_faces: bool,
 }
 
 impl Default for MeshingToggleState {
     fn default() -> Self {
         Self {
             last_use_greedy: true,
+            last_leaf_depth_layer_faces: true,
         }
     }
 }
@@ -229,7 +295,7 @@ pub fn apply_render_debug_settings(
         Query<(Entity, &ChunkRoot, &mut Visibility)>,
         Query<(&ChildOf, &mut Visibility), With<Mesh3d>>,
     )>,
-    mut cameras: Query<&mut Projection, With<PlayerCamera>>,
+    mut cameras: Query<(&mut Projection, &mut RenderLayers), With<PlayerCamera>>,
     mut wireframe: ResMut<WireframeConfig>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
@@ -240,10 +306,27 @@ pub fn apply_render_debug_settings(
                 light.shadows_enabled = settings.shadows_enabled;
             }
         }
-        for mut projection in &mut cameras {
+        for (mut projection, mut render_layers) in &mut cameras {
             if let Projection::Perspective(persp) = &mut *projection {
                 persp.fov = settings.fov_deg.to_radians();
             }
+            let mut layers: Vec<usize> = Vec::new();
+            if settings.show_layer_entities {
+                layers.push(MAIN_RENDER_LAYER);
+            }
+            if settings.show_layer_chunks_opaque {
+                layers.push(CHUNK_OPAQUE_RENDER_LAYER);
+            }
+            if settings.show_layer_chunks_cutout {
+                layers.push(CHUNK_CUTOUT_RENDER_LAYER);
+            }
+            if settings.show_layer_chunks_transparent {
+                layers.push(CHUNK_TRANSPARENT_RENDER_LAYER);
+            }
+            if layers.is_empty() {
+                layers.push(MAIN_RENDER_LAYER);
+            }
+            *render_layers = RenderLayers::from_layers(&layers);
         }
         wireframe.global = settings.wireframe_enabled;
     }
@@ -281,17 +364,22 @@ pub fn apply_render_debug_settings(
 }
 
 pub fn remesh_on_meshing_toggle(
-    settings: Res<RenderDebugSettings>,
+    mut settings: ResMut<RenderDebugSettings>,
     mut state: ResMut<MeshingToggleState>,
     store: Res<ChunkStore>,
     async_mesh: Res<MeshAsyncResources>,
     mut in_flight: ResMut<MeshInFlight>,
     assets: Res<ChunkRenderAssets>,
 ) {
-    if settings.use_greedy_meshing == state.last_use_greedy {
+    if settings.use_greedy_meshing == state.last_use_greedy
+        && settings.leaf_depth_layer_faces == state.last_leaf_depth_layer_faces
+        && !settings.force_remesh
+    {
         return;
     }
     state.last_use_greedy = settings.use_greedy_meshing;
+    state.last_leaf_depth_layer_faces = settings.leaf_depth_layer_faces;
+    settings.force_remesh = false;
     in_flight.chunks.clear();
     for key in store.chunks.keys().copied() {
         let snapshot = snapshot_for_chunk(&store, key);
@@ -299,12 +387,73 @@ pub fn remesh_on_meshing_toggle(
             chunk_key: key,
             snapshot,
             use_greedy: settings.use_greedy_meshing,
+            leaf_depth_layer_faces: settings.leaf_depth_layer_faces,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);
         }
+    }
+}
+
+pub fn manual_cutout_depth_sort(
+    settings: Res<RenderDebugSettings>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut cutout_meshes: Query<
+        (
+            &ChunkSubmeshGroup,
+            &mut Transform,
+            &DepthSortBaseLocal,
+            &GlobalTransform,
+        ),
+        With<Mesh3d>,
+    >,
+) {
+    let Ok(camera_transform) = camera.single() else {
+        return;
+    };
+    let view_dir = *camera_transform.forward();
+    let cam_pos = camera_transform.translation();
+
+    let mut min_depth = f32::INFINITY;
+    let mut max_depth = f32::NEG_INFINITY;
+    for (group, _, _, world_tf) in &cutout_meshes {
+        if !matches!(
+            group.0,
+            MaterialGroup::Cutout | MaterialGroup::CutoutCulled
+        ) {
+            continue;
+        }
+        let depth = (world_tf.translation() - cam_pos).dot(view_dir);
+        min_depth = min_depth.min(depth);
+        max_depth = max_depth.max(depth);
+    }
+
+    if !min_depth.is_finite() || !max_depth.is_finite() {
+        return;
+    }
+
+    let depth_range = (max_depth - min_depth).max(0.0001);
+    for (group, mut local_tf, base_local, world_tf) in &mut cutout_meshes {
+        if !matches!(
+            group.0,
+            MaterialGroup::Cutout | MaterialGroup::CutoutCulled
+        ) {
+            continue;
+        }
+
+        if !settings.cutout_use_blend || !settings.cutout_manual_depth_sort {
+            local_tf.translation = base_local.0;
+            continue;
+        }
+
+        // Blend-transparent leaf/cutout meshes can interpenetrate and sort poorly.
+        // Apply a small camera-relative bias to stabilize ordering between submeshes.
+        let depth = (world_tf.translation() - cam_pos).dot(view_dir);
+        let t = (depth - min_depth) / depth_range; // 0..1
+        let sort_bias = (t - 0.5) * settings.cutout_depth_sort_strength;
+        local_tf.translation = base_local.0 + view_dir * sort_bias;
     }
 }
 

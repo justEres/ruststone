@@ -59,6 +59,7 @@ impl Plugin for RenderPlugin {
                 reflection::sync_reflection_camera.after(reflection::spawn_reflection_camera),
                 reflection::resize_reflection_target,
                 debug::remesh_on_meshing_toggle,
+                debug::manual_cutout_depth_sort.after(debug::apply_render_debug_settings),
                 enqueue_chunk_meshes,
             ),
         )
@@ -126,6 +127,7 @@ fn enqueue_chunk_meshes(
             chunk_key: key,
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
+            leaf_depth_layer_faces: render_debug.leaf_depth_layer_faces,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };
@@ -217,10 +219,18 @@ fn apply_mesh_results(
             if data.positions.is_empty() {
                 continue;
             }
-            let mesh_layers = if matches!(group, chunk::MaterialGroup::Transparent) {
-                RenderLayers::layer(reflection::MAIN_RENDER_LAYER)
-            } else {
-                RenderLayers::layer(reflection::MAIN_RENDER_LAYER).with(reflection::REFLECTION_RENDER_LAYER)
+            let mesh_layers = match group {
+                chunk::MaterialGroup::Opaque => RenderLayers::layer(
+                    reflection::CHUNK_OPAQUE_RENDER_LAYER,
+                )
+                .with(reflection::REFLECTION_RENDER_LAYER),
+                chunk::MaterialGroup::Cutout | chunk::MaterialGroup::CutoutCulled => {
+                    RenderLayers::layer(reflection::CHUNK_CUTOUT_RENDER_LAYER)
+                        .with(reflection::REFLECTION_RENDER_LAYER)
+                }
+                chunk::MaterialGroup::Transparent => {
+                    RenderLayers::layer(reflection::CHUNK_TRANSPARENT_RENDER_LAYER)
+                }
             };
             active_keys.insert(group);
             let (mesh, bounds) = chunk::build_mesh_from_data(data);
@@ -232,10 +242,19 @@ fn apply_mesh_results(
                     let handle = meshes.add(mesh);
                     commands
                         .entity(submesh.entity)
-                        .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
+                        .insert((
+                            Mesh3d(handle.clone()),
+                            mesh_layers.clone(),
+                            chunk::ChunkSubmeshGroup(group),
+                            chunk::DepthSortBaseLocal(Vec3::ZERO),
+                        ));
                     submesh.mesh = handle;
                 }
-                commands.entity(submesh.entity).insert(mesh_layers.clone());
+                commands.entity(submesh.entity).insert((
+                    mesh_layers.clone(),
+                    chunk::ChunkSubmeshGroup(group),
+                    chunk::DepthSortBaseLocal(Vec3::ZERO),
+                ));
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
                     let half = (max - min) * 0.5;
@@ -253,6 +272,8 @@ fn apply_mesh_results(
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material),
                         mesh_layers,
+                        chunk::ChunkSubmeshGroup(group),
+                        chunk::DepthSortBaseLocal(Vec3::ZERO),
                         Transform::default(),
                         GlobalTransform::default(),
                         Visibility::Inherited,

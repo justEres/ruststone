@@ -10,6 +10,7 @@
     - when changing rendering mode, the transparency of leaves and so on breaks.
 
     - Grass sides use mask for color tint to only tint the top and not the dirt part of the texture
+        -> the mask in in the texture folder
 
 - Animations:
     - ✅ Block breaking animation
@@ -77,8 +78,8 @@
     - use all available threads for bevy scheduler
     - ✅ make timing analysis a compile time feature flag -> no time counting -> more performance
 
-- Debugging: 
-    - better timing analysis support
+<!-- - Debugging: 
+    - better timing analysis support -->
 
 - Shipping:
     - tested windows support

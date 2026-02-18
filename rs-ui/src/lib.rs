@@ -336,235 +336,377 @@ fn connect_ui(
                 let mut options_changed = false;
                 ui.heading("Game Paused");
                 ui.add_space(8.0);
-                let mut selected_preset = render_debug.lighting_quality;
-                egui::ComboBox::from_label("Lighting Quality")
-                    .selected_text(selected_preset.label())
-                    .show_ui(ui, |ui| {
-                        for preset in LightingQualityPreset::ALL {
-                            ui.selectable_value(&mut selected_preset, preset, preset.label());
-                        }
-                    });
-                if selected_preset != render_debug.lighting_quality {
-                    render_debug.lighting_quality = selected_preset;
-                    apply_lighting_preset_defaults(
-                        render_debug.lighting_quality,
-                        &mut *render_debug,
-                    );
-                    options_changed = true;
-                }
-
-                options_changed |= ui
-                    .add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"))
-                    .changed();
-                let mut render_distance = render_debug.render_distance_chunks;
-                options_changed |= ui
-                    .add(egui::Slider::new(&mut render_distance, 2..=32).text("Render Distance"))
-                    .changed();
-                render_debug.render_distance_chunks = render_distance;
-                options_changed |= ui
-                    .checkbox(&mut render_debug.shadows_enabled, "Shadows")
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
-                            .logarithmic(true)
-                            .text("Shadow distance"),
-                    )
-                    .changed();
-                let mut selected_shadow_quality = render_debug.shadow_quality;
-                egui::ComboBox::from_label("Shadow Quality")
-                    .selected_text(selected_shadow_quality.label())
-                    .show_ui(ui, |ui| {
-                        for preset in ShadowQualityPreset::ALL {
-                            ui.selectable_value(
-                                &mut selected_shadow_quality,
-                                preset,
-                                preset.label(),
-                            );
-                        }
-                    });
-                if selected_shadow_quality != render_debug.shadow_quality {
-                    render_debug.shadow_quality = selected_shadow_quality;
-                    options_changed = true;
-                }
-                let mut selected_aa_mode = render_debug.aa_mode;
-                egui::ComboBox::from_label("Anti-aliasing")
-                    .selected_text(selected_aa_mode.label())
-                    .show_ui(ui, |ui| {
-                        for mode in AntiAliasingMode::ALL {
-                            ui.selectable_value(&mut selected_aa_mode, mode, mode.label());
-                        }
-                    });
-                if selected_aa_mode != render_debug.aa_mode {
-                    render_debug.aa_mode = selected_aa_mode;
-                    render_debug.fxaa_enabled = matches!(
-                        render_debug.aa_mode,
-                        AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
-                    );
-                    options_changed = true;
-                }
-                options_changed |= ui
-                    .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
-                    .changed();
-                options_changed |= ui
-                    .checkbox(
-                        &mut render_debug.enable_pbr_terrain_lighting,
-                        "PBR terrain shadows (experimental)",
-                    )
-                    .changed();
-                options_changed |= ui
-                    .checkbox(
-                        &mut render_debug.water_reflections_enabled,
-                        "Water reflections",
-                    )
-                    .changed();
-                options_changed |= ui
-                    .checkbox(
-                        &mut render_debug.water_terrain_ssr,
-                        "Dedicated terrain reflection pass",
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_strength,
-                            0.0..=3.0,
-                        )
-                        .text("Water reflection strength"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_near_boost,
-                            0.0..=1.0,
-                        )
-                        .text("Near reflection boost"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .checkbox(
-                        &mut render_debug.water_reflection_blue_tint,
-                        "Blue reflection tint",
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_tint_strength,
-                            0.0..=2.0,
-                        )
-                        .text("Blue tint strength"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
-                            .text("Water wave strength"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
-                            .text("Water wave speed"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_wave_detail_strength, 0.0..=1.0)
-                            .text("Water detail wave strength"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
-                            .text("Water detail wave scale"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
-                            .text("Water detail wave speed"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.01..=0.5)
-                            .text("Reflection edge fade"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
-                            .text("Reflection sky fallback"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
-                            .text("Reflection overscan"),
-                    )
-                    .changed();
-                options_changed |= ui
-                    .add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_resolution_scale,
-                            0.5..=3.0,
-                        )
-                        .text("Reflection resolution scale"),
-                    )
-                    .changed();
-                if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
-                    options_changed = true;
-                    if let Ok(mut window) = window_query.get_single_mut() {
-                        window.present_mode = if state.vsync_enabled {
-                            PresentMode::AutoVsync
-                        } else {
-                            PresentMode::AutoNoVsync
-                        };
-                    }
-                }
-                if ui.button("Visual Settings...").clicked() {
-                    state.visual_settings_open = !state.visual_settings_open;
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label("Options file");
-                    ui.text_edit_singleline(&mut state.options_path);
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Load").clicked() {
-                        let options_path = state.options_path.clone();
-                        if let Ok(mut window) = window_query.get_single_mut() {
-                            match load_client_options(
-                                &options_path,
-                                &mut state,
-                                &mut render_debug,
-                                &mut window,
-                            ) {
-                                Ok(()) => {
-                                    state.options_status = format!("Loaded {}", options_path);
+                let general_section = egui::CollapsingHeader::new("General")
+                    .default_open(state.options_section_general)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0)
+                                    .text("FOV"),
+                            )
+                            .changed();
+                        let mut render_distance = render_debug.render_distance_chunks;
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_distance, 2..=32)
+                                    .text("Render Distance"),
+                            )
+                            .changed();
+                        render_debug.render_distance_chunks = render_distance;
+                        let mut selected_aa_mode = render_debug.aa_mode;
+                        egui::ComboBox::from_label("Anti-aliasing")
+                            .selected_text(selected_aa_mode.label())
+                            .show_ui(ui, |ui| {
+                                for mode in AntiAliasingMode::ALL {
+                                    ui.selectable_value(&mut selected_aa_mode, mode, mode.label());
                                 }
-                                Err(err) => state.options_status = err,
-                            }
-                        } else {
-                            state.options_status =
-                                "Unable to load options: primary window unavailable".to_string();
+                            });
+                        if selected_aa_mode != render_debug.aa_mode {
+                            render_debug.aa_mode = selected_aa_mode;
+                            render_debug.fxaa_enabled = matches!(
+                                render_debug.aa_mode,
+                                AntiAliasingMode::Fxaa
+                                    | AntiAliasingMode::Msaa4
+                                    | AntiAliasingMode::Msaa8
+                            );
+                            options_changed = true;
                         }
-                    }
-                    if ui.button("Save").clicked() {
-                        match save_client_options(&state.options_path, &state, &render_debug) {
-                            Ok(()) => {
-                                state.options_status = format!("Saved {}", state.options_path);
-                                state.options_dirty = false;
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.leaf_depth_layer_faces,
+                                "Leaf depth layer faces",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.cutout_use_blend,
+                                "Cutout blend alpha",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.cutout_manual_depth_sort,
+                                "Manual cutout depth sort",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.cutout_depth_sort_strength,
+                                    0.0..=2.5,
+                                )
+                                .text("Cutout depth sort strength"),
+                            )
+                            .changed();
+                        if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
+                            options_changed = true;
+                            if let Ok(mut window) = window_query.get_single_mut() {
+                                window.present_mode = if state.vsync_enabled {
+                                    PresentMode::AutoVsync
+                                } else {
+                                    PresentMode::AutoNoVsync
+                                };
                             }
-                            Err(err) => state.options_status = err,
                         }
-                    }
-                });
-                if !state.options_status.is_empty() {
-                    ui.label(&state.options_status);
-                }
+                    });
+                state.options_section_general = general_section.fully_open();
+
+                let lighting_section = egui::CollapsingHeader::new("Lighting & Shadows")
+                    .default_open(state.options_section_lighting)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.enable_pbr_terrain_lighting, "PBR terrain path")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.shadows_enabled, "Shadows")
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.shader_quality_mode, 0..=3)
+                                    .text("Shader quality mode"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.shadow_distance_scale,
+                                    0.25..=20.0,
+                                )
+                                .logarithmic(true)
+                                .text("Shadow distance"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.shadow_map_size, 256..=4096)
+                                    .text("Shadow map size"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.shadow_cascades, 1..=4)
+                                    .text("Shadow cascades"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.shadow_max_distance,
+                                    16.0..=320.0,
+                                )
+                                .text("Shadow max distance"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.sun_azimuth_deg, -180.0..=180.0)
+                                    .text("Sun azimuth"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.sun_elevation_deg, -20.0..=89.0)
+                                    .text("Sun elevation"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
+                                    .text("Sun strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
+                                    .text("Ambient strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
+                                    .text("Fog density"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.fog_start, 0.0..=400.0)
+                                    .text("Fog start"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.fog_end, 1.0..=600.0)
+                                    .text("Fog end"),
+                            )
+                            .changed();
+                    });
+                state.options_section_lighting = lighting_section.fully_open();
+
+                let water_section = egui::CollapsingHeader::new("Water")
+                    .default_open(state.options_section_water)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.water_reflections_enabled,
+                                "Water reflections",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.water_terrain_ssr,
+                                "Dedicated terrain reflection pass",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_strength,
+                                    0.0..=3.0,
+                                )
+                                .text("Water reflection strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_near_boost,
+                                    0.0..=1.0,
+                                )
+                                .text("Near reflection boost"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.water_reflection_blue_tint,
+                                "Blue reflection tint",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_tint_strength,
+                                    0.0..=2.0,
+                                )
+                                .text("Blue tint strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
+                                    .text("Water wave strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
+                                    .text("Water wave speed"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_strength,
+                                    0.0..=1.0,
+                                )
+                                .text("Water detail wave strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_scale,
+                                    1.0..=8.0,
+                                )
+                                .text("Water detail wave scale"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_speed,
+                                    0.0..=4.0,
+                                )
+                                .text("Water detail wave speed"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_edge_fade,
+                                    0.01..=0.5,
+                                )
+                                .text("Reflection edge fade"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_sky_fill,
+                                    0.0..=1.0,
+                                )
+                                .text("Reflection sky fallback"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_overscan,
+                                    1.0..=3.0,
+                                )
+                                .text("Reflection overscan"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_resolution_scale,
+                                    0.5..=3.0,
+                                )
+                                .text("Reflection resolution scale"),
+                            )
+                            .changed();
+                    });
+                state.options_section_water = water_section.fully_open();
+
+                let layers_section = egui::CollapsingHeader::new("Render Layers")
+                    .default_open(state.options_section_layers)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.show_layer_entities, "Show entities layer")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.show_layer_chunks_opaque,
+                                "Show opaque chunks layer",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.show_layer_chunks_cutout,
+                                "Show cutout chunks layer",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.show_layer_chunks_transparent,
+                                "Show transparent chunks layer",
+                            )
+                            .changed();
+                    });
+                state.options_section_layers = layers_section.fully_open();
+
+                let system_section = egui::CollapsingHeader::new("System")
+                    .default_open(state.options_section_system)
+                    .show(ui, |ui| {
+                        if ui.button("Visual Settings...").clicked() {
+                            state.visual_settings_open = !state.visual_settings_open;
+                        }
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Options file");
+                            ui.text_edit_singleline(&mut state.options_path);
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.button("Load").clicked() {
+                                let options_path = state.options_path.clone();
+                                if let Ok(mut window) = window_query.get_single_mut() {
+                                    match load_client_options(
+                                        &options_path,
+                                        &mut state,
+                                        &mut render_debug,
+                                        &mut window,
+                                    ) {
+                                        Ok(()) => {
+                                            state.options_status = format!("Loaded {}", options_path);
+                                        }
+                                        Err(err) => state.options_status = err,
+                                    }
+                                } else {
+                                    state.options_status =
+                                        "Unable to load options: primary window unavailable"
+                                            .to_string();
+                                }
+                            }
+                            if ui.button("Save").clicked() {
+                                match save_client_options(&state.options_path, &state, &render_debug)
+                                {
+                                    Ok(()) => {
+                                        state.options_status = format!("Saved {}", state.options_path);
+                                        state.options_dirty = false;
+                                    }
+                                    Err(err) => state.options_status = err,
+                                }
+                            }
+                        });
+                        if !state.options_status.is_empty() {
+                            ui.label(&state.options_status);
+                        }
+                    });
+                state.options_section_system = system_section.fully_open();
+
                 if options_changed {
                     state.options_dirty = true;
                     match save_client_options(&state.options_path, &state, &render_debug) {
@@ -776,6 +918,11 @@ pub struct ConnectUiState {
     pub options_path: String,
     pub options_status: String,
     pub visual_settings_open: bool,
+    pub options_section_general: bool,
+    pub options_section_lighting: bool,
+    pub options_section_water: bool,
+    pub options_section_layers: bool,
+    pub options_section_system: bool,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
@@ -794,6 +941,11 @@ impl Default for ConnectUiState {
             options_path: DEFAULT_OPTIONS_PATH.to_string(),
             options_status: String::new(),
             visual_settings_open: false,
+            options_section_general: true,
+            options_section_lighting: true,
+            options_section_water: true,
+            options_section_layers: false,
+            options_section_system: true,
         }
     }
 }
@@ -811,7 +963,26 @@ struct ClientOptionsFile {
     pub vsync_enabled: bool,
     pub lighting_quality: String,
     pub shadow_quality: String,
+    pub shader_quality_mode: u8,
     pub enable_pbr_terrain_lighting: bool,
+    pub sun_azimuth_deg: f32,
+    pub sun_elevation_deg: f32,
+    pub sun_strength: f32,
+    pub ambient_strength: f32,
+    pub ambient_brightness: f32,
+    pub sun_illuminance: f32,
+    pub fill_illuminance: f32,
+    pub fog_density: f32,
+    pub fog_start: f32,
+    pub fog_end: f32,
+    pub water_absorption: f32,
+    pub water_fresnel: f32,
+    pub shadow_map_size: u32,
+    pub shadow_cascades: u8,
+    pub shadow_max_distance: f32,
+    pub shadow_first_cascade_far_bound: f32,
+    pub shadow_depth_bias: f32,
+    pub shadow_normal_bias: f32,
     pub color_saturation: f32,
     pub color_contrast: f32,
     pub color_brightness: f32,
@@ -831,6 +1002,14 @@ struct ClientOptionsFile {
     pub water_reflection_overscan: f32,
     pub water_reflection_resolution_scale: f32,
     pub water_reflection_sky_fill: f32,
+    pub leaf_depth_layer_faces: bool,
+    pub cutout_use_blend: bool,
+    pub cutout_manual_depth_sort: bool,
+    pub cutout_depth_sort_strength: f32,
+    pub show_layer_entities: bool,
+    pub show_layer_chunks_opaque: bool,
+    pub show_layer_chunks_cutout: bool,
+    pub show_layer_chunks_transparent: bool,
 }
 
 impl Default for ClientOptionsFile {
@@ -847,7 +1026,26 @@ impl Default for ClientOptionsFile {
             vsync_enabled: false,
             lighting_quality: render.lighting_quality.as_options_value().to_string(),
             shadow_quality: render.shadow_quality.as_options_value().to_string(),
+            shader_quality_mode: render.shader_quality_mode,
             enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+            sun_azimuth_deg: render.sun_azimuth_deg,
+            sun_elevation_deg: render.sun_elevation_deg,
+            sun_strength: render.sun_strength,
+            ambient_strength: render.ambient_strength,
+            ambient_brightness: render.ambient_brightness,
+            sun_illuminance: render.sun_illuminance,
+            fill_illuminance: render.fill_illuminance,
+            fog_density: render.fog_density,
+            fog_start: render.fog_start,
+            fog_end: render.fog_end,
+            water_absorption: render.water_absorption,
+            water_fresnel: render.water_fresnel,
+            shadow_map_size: render.shadow_map_size,
+            shadow_cascades: render.shadow_cascades,
+            shadow_max_distance: render.shadow_max_distance,
+            shadow_first_cascade_far_bound: render.shadow_first_cascade_far_bound,
+            shadow_depth_bias: render.shadow_depth_bias,
+            shadow_normal_bias: render.shadow_normal_bias,
             color_saturation: render.color_saturation,
             color_contrast: render.color_contrast,
             color_brightness: render.color_brightness,
@@ -867,6 +1065,14 @@ impl Default for ClientOptionsFile {
             water_reflection_overscan: render.water_reflection_overscan,
             water_reflection_resolution_scale: render.water_reflection_resolution_scale,
             water_reflection_sky_fill: render.water_reflection_sky_fill,
+            leaf_depth_layer_faces: render.leaf_depth_layer_faces,
+            cutout_use_blend: render.cutout_use_blend,
+            cutout_manual_depth_sort: render.cutout_manual_depth_sort,
+            cutout_depth_sort_strength: render.cutout_depth_sort_strength,
+            show_layer_entities: render.show_layer_entities,
+            show_layer_chunks_opaque: render.show_layer_chunks_opaque,
+            show_layer_chunks_cutout: render.show_layer_chunks_cutout,
+            show_layer_chunks_transparent: render.show_layer_chunks_transparent,
         }
     }
 }
@@ -883,7 +1089,26 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         vsync_enabled: state.vsync_enabled,
         lighting_quality: render.lighting_quality.as_options_value().to_string(),
         shadow_quality: render.shadow_quality.as_options_value().to_string(),
+        shader_quality_mode: render.shader_quality_mode,
         enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+        sun_azimuth_deg: render.sun_azimuth_deg,
+        sun_elevation_deg: render.sun_elevation_deg,
+        sun_strength: render.sun_strength,
+        ambient_strength: render.ambient_strength,
+        ambient_brightness: render.ambient_brightness,
+        sun_illuminance: render.sun_illuminance,
+        fill_illuminance: render.fill_illuminance,
+        fog_density: render.fog_density,
+        fog_start: render.fog_start,
+        fog_end: render.fog_end,
+        water_absorption: render.water_absorption,
+        water_fresnel: render.water_fresnel,
+        shadow_map_size: render.shadow_map_size,
+        shadow_cascades: render.shadow_cascades,
+        shadow_max_distance: render.shadow_max_distance,
+        shadow_first_cascade_far_bound: render.shadow_first_cascade_far_bound,
+        shadow_depth_bias: render.shadow_depth_bias,
+        shadow_normal_bias: render.shadow_normal_bias,
         color_saturation: render.color_saturation,
         color_contrast: render.color_contrast,
         color_brightness: render.color_brightness,
@@ -903,6 +1128,14 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_reflection_overscan: render.water_reflection_overscan,
         water_reflection_resolution_scale: render.water_reflection_resolution_scale,
         water_reflection_sky_fill: render.water_reflection_sky_fill,
+        leaf_depth_layer_faces: render.leaf_depth_layer_faces,
+        cutout_use_blend: render.cutout_use_blend,
+        cutout_manual_depth_sort: render.cutout_manual_depth_sort,
+        cutout_depth_sort_strength: render.cutout_depth_sort_strength,
+        show_layer_entities: render.show_layer_entities,
+        show_layer_chunks_opaque: render.show_layer_chunks_opaque,
+        show_layer_chunks_cutout: render.show_layer_chunks_cutout,
+        show_layer_chunks_transparent: render.show_layer_chunks_transparent,
     }
 }
 
@@ -916,11 +1149,11 @@ fn apply_options(
     render.render_distance_chunks = options.render_distance_chunks.clamp(2, 32);
     if let Some(preset) = LightingQualityPreset::from_options_value(&options.lighting_quality) {
         render.lighting_quality = preset;
-        apply_lighting_preset_defaults(preset, render);
     }
     if let Some(preset) = ShadowQualityPreset::from_options_value(&options.shadow_quality) {
         render.shadow_quality = preset;
     }
+    render.shader_quality_mode = options.shader_quality_mode.clamp(0, 3);
     if let Some(mode) = AntiAliasingMode::from_options_value(&options.aa_mode) {
         render.aa_mode = mode;
     } else {
@@ -940,6 +1173,25 @@ fn apply_options(
     );
     render.manual_frustum_cull = options.manual_frustum_cull;
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
+    render.sun_azimuth_deg = options.sun_azimuth_deg.clamp(-360.0, 360.0);
+    render.sun_elevation_deg = options.sun_elevation_deg.clamp(-89.0, 89.0);
+    render.sun_strength = options.sun_strength.clamp(0.0, 2.0);
+    render.ambient_strength = options.ambient_strength.clamp(0.0, 2.0);
+    render.ambient_brightness = options.ambient_brightness.clamp(0.0, 2.0);
+    render.sun_illuminance = options.sun_illuminance.clamp(0.0, 50_000.0);
+    render.fill_illuminance = options.fill_illuminance.clamp(0.0, 10_000.0);
+    render.fog_density = options.fog_density.clamp(0.0, 0.1);
+    render.fog_start = options.fog_start.clamp(0.0, 1_000.0);
+    render.fog_end = options.fog_end.clamp(0.0, 2_000.0);
+    render.water_absorption = options.water_absorption.clamp(0.0, 1.0);
+    render.water_fresnel = options.water_fresnel.clamp(0.0, 1.0);
+    render.shadow_map_size = options.shadow_map_size.clamp(256, 4096);
+    render.shadow_cascades = options.shadow_cascades.clamp(1, 4);
+    render.shadow_max_distance = options.shadow_max_distance.clamp(4.0, 500.0);
+    render.shadow_first_cascade_far_bound =
+        options.shadow_first_cascade_far_bound.clamp(1.0, 300.0);
+    render.shadow_depth_bias = options.shadow_depth_bias.clamp(0.0, 0.2);
+    render.shadow_normal_bias = options.shadow_normal_bias.clamp(0.0, 2.0);
     render.color_saturation = options.color_saturation.clamp(0.0, 2.0);
     render.color_contrast = options.color_contrast.clamp(0.0, 2.0);
     render.color_brightness = options.color_brightness.clamp(-0.5, 0.5);
@@ -961,44 +1213,20 @@ fn apply_options(
     render.water_reflection_resolution_scale =
         options.water_reflection_resolution_scale.clamp(0.5, 3.0);
     render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
+    render.leaf_depth_layer_faces = options.leaf_depth_layer_faces;
+    render.cutout_use_blend = options.cutout_use_blend;
+    render.cutout_manual_depth_sort = options.cutout_manual_depth_sort;
+    render.cutout_depth_sort_strength = options.cutout_depth_sort_strength.clamp(0.0, 2.5);
+    render.show_layer_entities = options.show_layer_entities;
+    render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;
+    render.show_layer_chunks_cutout = options.show_layer_chunks_cutout;
+    render.show_layer_chunks_transparent = options.show_layer_chunks_transparent;
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync
     } else {
         PresentMode::AutoNoVsync
     };
-}
-
-fn apply_lighting_preset_defaults(
-    preset: LightingQualityPreset,
-    render_debug: &mut RenderDebugSettings,
-) {
-    match preset {
-        LightingQualityPreset::Fast => {
-            render_debug.shadows_enabled = false;
-            render_debug.fxaa_enabled = false;
-            render_debug.aa_mode = AntiAliasingMode::Off;
-            render_debug.shadow_quality = ShadowQualityPreset::Low;
-        }
-        LightingQualityPreset::Standard => {
-            render_debug.shadows_enabled = false;
-            render_debug.fxaa_enabled = true;
-            render_debug.aa_mode = AntiAliasingMode::SmaaHigh;
-            render_debug.shadow_quality = ShadowQualityPreset::Low;
-        }
-        LightingQualityPreset::FancyLow => {
-            render_debug.shadows_enabled = true;
-            render_debug.fxaa_enabled = true;
-            render_debug.aa_mode = AntiAliasingMode::SmaaHigh;
-            render_debug.shadow_quality = ShadowQualityPreset::Medium;
-        }
-        LightingQualityPreset::FancyHigh => {
-            render_debug.shadows_enabled = true;
-            render_debug.fxaa_enabled = true;
-            render_debug.aa_mode = AntiAliasingMode::SmaaUltra;
-            render_debug.shadow_quality = ShadowQualityPreset::High;
-        }
-    }
 }
 
 fn load_client_options(

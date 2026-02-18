@@ -59,6 +59,7 @@ pub struct MeshJob {
     pub chunk_key: (i32, i32),
     pub snapshot: ChunkColumnSnapshot,
     pub use_greedy: bool,
+    pub leaf_depth_layer_faces: bool,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
 }
@@ -66,7 +67,12 @@ pub struct MeshJob {
 impl MeshJob {
     pub fn build_mesh(self) -> MeshBatch {
         self.snapshot
-            .build_mesh_data(self.use_greedy, &self.texture_mapping, &self.biome_tints)
+            .build_mesh_data(
+                self.use_greedy,
+                self.leaf_depth_layer_faces,
+                &self.texture_mapping,
+                &self.biome_tints,
+            )
     }
 }
 
