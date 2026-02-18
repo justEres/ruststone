@@ -452,7 +452,7 @@ fn connect_ui(
                     .add(
                         egui::Slider::new(
                             &mut render_debug.water_reflection_tint_strength,
-                            0.0..=1.0,
+                            0.0..=2.0,
                         )
                         .text("Blue tint strength"),
                     )
@@ -467,6 +467,51 @@ fn connect_ui(
                     .add(
                         egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
                             .text("Water wave speed"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_wave_detail_strength, 0.0..=1.0)
+                            .text("Water detail wave strength"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
+                            .text("Water detail wave scale"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
+                            .text("Water detail wave speed"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.01..=0.5)
+                            .text("Reflection edge fade"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
+                            .text("Reflection sky fallback"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
+                            .text("Reflection overscan"),
+                    )
+                    .changed();
+                options_changed |= ui
+                    .add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_resolution_scale,
+                            0.5..=3.0,
+                        )
+                        .text("Reflection resolution scale"),
                     )
                     .changed();
                 if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
@@ -779,6 +824,13 @@ struct ClientOptionsFile {
     pub water_reflection_tint_strength: f32,
     pub water_wave_strength: f32,
     pub water_wave_speed: f32,
+    pub water_wave_detail_strength: f32,
+    pub water_wave_detail_scale: f32,
+    pub water_wave_detail_speed: f32,
+    pub water_reflection_edge_fade: f32,
+    pub water_reflection_overscan: f32,
+    pub water_reflection_resolution_scale: f32,
+    pub water_reflection_sky_fill: f32,
 }
 
 impl Default for ClientOptionsFile {
@@ -808,6 +860,13 @@ impl Default for ClientOptionsFile {
             water_reflection_tint_strength: render.water_reflection_tint_strength,
             water_wave_strength: render.water_wave_strength,
             water_wave_speed: render.water_wave_speed,
+            water_wave_detail_strength: render.water_wave_detail_strength,
+            water_wave_detail_scale: render.water_wave_detail_scale,
+            water_wave_detail_speed: render.water_wave_detail_speed,
+            water_reflection_edge_fade: render.water_reflection_edge_fade,
+            water_reflection_overscan: render.water_reflection_overscan,
+            water_reflection_resolution_scale: render.water_reflection_resolution_scale,
+            water_reflection_sky_fill: render.water_reflection_sky_fill,
         }
     }
 }
@@ -837,6 +896,13 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_reflection_tint_strength: render.water_reflection_tint_strength,
         water_wave_strength: render.water_wave_strength,
         water_wave_speed: render.water_wave_speed,
+        water_wave_detail_strength: render.water_wave_detail_strength,
+        water_wave_detail_scale: render.water_wave_detail_scale,
+        water_wave_detail_speed: render.water_wave_detail_speed,
+        water_reflection_edge_fade: render.water_reflection_edge_fade,
+        water_reflection_overscan: render.water_reflection_overscan,
+        water_reflection_resolution_scale: render.water_reflection_resolution_scale,
+        water_reflection_sky_fill: render.water_reflection_sky_fill,
     }
 }
 
@@ -884,9 +950,17 @@ fn apply_options(
     render.water_reflection_near_boost = options.water_reflection_near_boost.clamp(0.0, 1.0);
     render.water_reflection_blue_tint = options.water_reflection_blue_tint;
     render.water_reflection_tint_strength =
-        options.water_reflection_tint_strength.clamp(0.0, 1.0);
+        options.water_reflection_tint_strength.clamp(0.0, 2.0);
     render.water_wave_strength = options.water_wave_strength.clamp(0.0, 1.2);
     render.water_wave_speed = options.water_wave_speed.clamp(0.0, 4.0);
+    render.water_wave_detail_strength = options.water_wave_detail_strength.clamp(0.0, 1.0);
+    render.water_wave_detail_scale = options.water_wave_detail_scale.clamp(1.0, 8.0);
+    render.water_wave_detail_speed = options.water_wave_detail_speed.clamp(0.0, 4.0);
+    render.water_reflection_edge_fade = options.water_reflection_edge_fade.clamp(0.01, 0.5);
+    render.water_reflection_overscan = options.water_reflection_overscan.clamp(1.0, 3.0);
+    render.water_reflection_resolution_scale =
+        options.water_reflection_resolution_scale.clamp(0.5, 3.0);
+    render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
     state.vsync_enabled = options.vsync_enabled;
     window.present_mode = if state.vsync_enabled {
         PresentMode::AutoVsync

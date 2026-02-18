@@ -113,7 +113,15 @@ pub struct RenderDebugSettings {
     pub water_reflection_tint_strength: f32,
     pub water_wave_strength: f32,
     pub water_wave_speed: f32,
-    pub cutout_debug_mode: u8, // 0 off, 1 atlas, 2 vertex_tint
+    pub water_wave_detail_strength: f32,
+    pub water_wave_detail_scale: f32,
+    pub water_wave_detail_speed: f32,
+    pub water_reflection_edge_fade: f32,
+    pub water_reflection_overscan: f32,
+    pub water_reflection_resolution_scale: f32,
+    pub water_reflection_sky_fill: f32,
+    pub cutout_debug_mode: u8, // 0 off, 1 atlas, 2 vertex_tint, 3 alpha, 4 pass mode
+    pub cutout_use_blend: bool,
 }
 
 impl Default for RenderDebugSettings {
@@ -153,7 +161,15 @@ impl Default for RenderDebugSettings {
             water_reflection_tint_strength: 0.20,
             water_wave_strength: 0.42,
             water_wave_speed: 1.0,
+            water_wave_detail_strength: 0.22,
+            water_wave_detail_scale: 2.4,
+            water_wave_detail_speed: 1.7,
+            water_reflection_edge_fade: 0.22,
+            water_reflection_overscan: 1.30,
+            water_reflection_resolution_scale: 1.0,
+            water_reflection_sky_fill: 0.55,
             cutout_debug_mode: 0,
+            cutout_use_blend: true,
         }
     }
 }
@@ -191,6 +207,18 @@ pub struct RenderPerfStats {
     pub apply_debug_ms: f32,
     pub gather_stats_ms: f32,
     pub manual_cull_ms: f32,
+    pub mat_pass_opaque: f32,
+    pub mat_pass_cutout: f32,
+    pub mat_pass_cutout_culled: f32,
+    pub mat_pass_transparent: f32,
+    pub mat_alpha_opaque: u8,
+    pub mat_alpha_cutout: u8,
+    pub mat_alpha_cutout_culled: u8,
+    pub mat_alpha_transparent: u8,
+    pub mat_unlit_opaque: bool,
+    pub mat_unlit_cutout: bool,
+    pub mat_unlit_cutout_culled: bool,
+    pub mat_unlit_transparent: bool,
 }
 
 pub fn apply_render_debug_settings(

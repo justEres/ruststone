@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, OpaqueRendererMethod};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
@@ -28,6 +28,7 @@ const SECTION_HEIGHT: i32 = 16;
 const WORLD_HEIGHT: i32 = 256;
 const TEXTURE_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
 const ATLAS_PBR_SHADER_PATH: &str = "shaders/atlas_pbr.wgsl";
+const ATLAS_UV_PACK_SCALE: f32 = 1024.0;
 
 pub type ChunkAtlasMaterial = ExtendedMaterial<StandardMaterial, AtlasTextureExtension>;
 
@@ -39,6 +40,7 @@ pub struct AtlasLightingUniform {
     pub color_grading: Vec4,
     pub water_effects: Vec4,
     pub water_controls: Vec4,
+    pub water_extra: Vec4,
     pub debug_flags: Vec4,
     pub reflection_view_proj: Mat4,
 }
@@ -303,6 +305,11 @@ impl FromWorld for ChunkRenderAssets {
         sampler.address_mode_u = ImageAddressMode::ClampToEdge;
         sampler.address_mode_v = ImageAddressMode::ClampToEdge;
         sampler.address_mode_w = ImageAddressMode::ClampToEdge;
+        // Keep atlas texels stable across quality/pipeline switches.
+        // Mip filtering on cutout alpha introduces gray halos on transparent texels.
+        sampler.mipmap_filter = bevy::image::ImageFilterMode::Nearest;
+        sampler.lod_min_clamp = 0.0;
+        sampler.lod_max_clamp = 0.0;
         atlas_image.sampler = ImageSampler::Descriptor(sampler);
         let atlas_handle = {
             let mut images = world.resource_mut::<Assets<Image>>();
@@ -314,6 +321,11 @@ impl FromWorld for ChunkRenderAssets {
         };
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
         let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
+        let cutout_alpha_mode = if settings.cutout_use_blend {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        };
 
         let opaque_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
@@ -322,6 +334,7 @@ impl FromWorld for ChunkRenderAssets {
                 metallic: 0.0,
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
+                opaque_render_method: OpaqueRendererMethod::Forward,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
@@ -340,6 +353,7 @@ impl FromWorld for ChunkRenderAssets {
                 perceptual_roughness: 1.0,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
+                opaque_render_method: OpaqueRendererMethod::Forward,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
@@ -357,8 +371,10 @@ impl FromWorld for ChunkRenderAssets {
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 // Cutout writes depth like solid geometry while discarding transparent texels.
-                alpha_mode: AlphaMode::Mask(0.5),
+                // Switchable for debugging; shader still performs cutout discard.
+                alpha_mode: cutout_alpha_mode,
                 cull_mode: None,
+                opaque_render_method: OpaqueRendererMethod::Forward,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
@@ -376,8 +392,9 @@ impl FromWorld for ChunkRenderAssets {
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
                 // Same as cutout_material, but with backface culling.
-                alpha_mode: AlphaMode::Mask(0.5),
+                alpha_mode: cutout_alpha_mode,
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
+                opaque_render_method: OpaqueRendererMethod::Forward,
                 unlit: !use_shadowed_pbr,
                 ..default()
             },
@@ -595,12 +612,31 @@ fn missing_texture_image() -> DynamicImage {
 }
 
 pub fn apply_mesh_data(mesh: &mut Mesh, data: MeshData) {
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, data.uvs_b);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, data.colors);
-    mesh.insert_indices(Indices::U32(data.indices));
+    let MeshData {
+        positions,
+        normals,
+        mut uvs,
+        uvs_b,
+        colors,
+        indices,
+        ..
+    } = data;
+
+    // Pack tile cell into UV0 so shader path remains stable even if UV1 is omitted
+    // by some internal pipeline variants.
+    for (uv, tile_origin) in uvs.iter_mut().zip(uvs_b.iter()) {
+        let col = (tile_origin[0] * ATLAS_COLUMNS as f32).round();
+        let row = (tile_origin[1] * ATLAS_ROWS as f32).round();
+        uv[0] += col * ATLAS_UV_PACK_SCALE;
+        uv[1] += row * ATLAS_UV_PACK_SCALE;
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs_b);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
 }
 
 pub fn build_mesh_from_data(data: MeshData) -> (Mesh, Option<(Vec3, Vec3)>) {
