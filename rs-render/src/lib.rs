@@ -58,6 +58,8 @@ impl Plugin for RenderPlugin {
                 reflection::spawn_reflection_camera,
                 reflection::sync_reflection_camera.after(reflection::spawn_reflection_camera),
                 reflection::resize_reflection_target,
+                debug::refresh_render_state_on_mode_change
+                    .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
                 debug::manual_cutout_depth_sort.after(debug::apply_render_debug_settings),
                 enqueue_chunk_meshes,

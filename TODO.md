@@ -7,10 +7,12 @@
     - ✅ block outline for water -> should not be there
     - ✅ when hand is empty, the hand is still rendered. also when placing blocks, it does not always remove the item directly
     - ✅ shadows are only rendering upto a certain distance. increase or make it configurable until "infinity"
-    - when changing rendering mode, the transparency of leaves and so on breaks.
+    - ✅ when changing rendering mode, the transparency of leaves and so on breaks.
 
     - Grass sides use mask for color tint to only tint the top and not the dirt part of the texture
         -> the mask in in the texture folder
+
+    - in f5 / front perspective mode the controls are inverted. always go from cameras perspective when deciding walk direction. 
 
 - Animations:
     - ✅ Block breaking animation
@@ -75,7 +77,7 @@
     
 
 - Optimisations:
-    - use all available threads for bevy scheduler
+    - ✅ use all available threads for bevy scheduler
     - ✅ make timing analysis a compile time feature flag -> no time counting -> more performance
 
 <!-- - Debugging: 

@@ -397,6 +397,22 @@ pub fn remesh_on_meshing_toggle(
     }
 }
 
+pub fn refresh_render_state_on_mode_change(
+    mut settings: ResMut<RenderDebugSettings>,
+    mut last_mode: Local<Option<(u8, bool)>>,
+) {
+    let mode = (
+        settings.shader_quality_mode,
+        settings.enable_pbr_terrain_lighting,
+    );
+    let changed = last_mode.map(|m| m != mode).unwrap_or(false);
+    if changed {
+        settings.material_rebuild_nonce = settings.material_rebuild_nonce.wrapping_add(1);
+        settings.force_remesh = true;
+    }
+    *last_mode = Some(mode);
+}
+
 pub fn manual_cutout_depth_sort(
     settings: Res<RenderDebugSettings>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,

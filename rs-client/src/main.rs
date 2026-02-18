@@ -63,6 +63,9 @@ fn main() {
     tracing_subscriber::fmt().without_time().compact().init();
 
     info!("Starting ruststone");
+    let thread_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
 
     let (tx_outgoing, rx_outgoing) = crossbeam::channel::unbounded::<ToNetMessage>();
     let (tx_incoming, rx_incoming) = crossbeam::channel::unbounded::<FromNetMessage>();
@@ -94,6 +97,9 @@ fn main() {
     App::new()
         .add_plugins(
             DefaultPlugins
+                .set(bevy::app::TaskPoolPlugin {
+                    task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(thread_count),
+                })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Ruststone Client".into(),
