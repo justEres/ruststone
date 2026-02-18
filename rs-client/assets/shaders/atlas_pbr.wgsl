@@ -36,6 +36,13 @@ const ATLAS_ROWS: f32 = 64.0;
 const ATLAS_UV_INSET: f32 = 0.02;
 const ATLAS_UV_PACK_SCALE: f32 = 1024.0;
 
+// Rendering architecture notes:
+// - This shader is shared by opaque/cutout/water materials.
+// - `quality_and_water.w` selects pass type:
+//   0 = opaque, 1 = transparent (water), 2 = cutout.
+// - Cutout/opaque transparency is controlled with explicit `discard`, not mask state.
+//   This keeps behavior stable across runtime quality and pipeline switches.
+
 @group(2) @binding(100) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(101) var atlas_sampler: sampler;
 @group(2) @binding(103) var reflection_texture: texture_2d<f32>;
@@ -70,6 +77,8 @@ fn atlas_texel_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> ve
     let texel = vec2<i32>(i32(texel_f.x), i32(texel_f.y));
     return textureLoad(atlas_texture, texel, 0);
 }
+
+// --- Math helpers -------------------------------------------------------------
 
 fn safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
     let len2 = dot(v, v);
@@ -287,6 +296,7 @@ fn fragment(
     in.uv = forward_decal_info.uv;
 #endif
 
+    // Stage 1: Base material and atlas sampling.
     // Generate a PbrInput struct from the StandardMaterial bindings.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     let vertex_tint_rgb = pbr_input.material.base_color.rgb;
@@ -295,6 +305,7 @@ fn fragment(
     let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
     let cutout_pass = pass_mode_valid && pass_mode > 1.5;
     let cutout_debug_mode = i32(round(lighting_uniform.debug_flags.x));
+    let cutout_blend_enabled = lighting_uniform.debug_flags.z > 0.5;
 
 #ifdef VERTEX_UVS_A
     let packed_uv = in.uv;
@@ -350,11 +361,12 @@ fn fragment(
         }
     }
 
+    // Stage 2: Pass-specific alpha handling.
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
     // to avoid backend/material-mode differences on alpha-mask handling.
-    if transparent_pass {
+    if transparent_pass || (cutout_pass && cutout_blend_enabled) {
         pbr_input.material.base_color.a = atlas_alpha;
-        // Keep std alpha handling for blended passes (water).
+        // Keep std alpha handling for blended passes (water/cutout blend debug).
         pbr_input.material.base_color =
             alpha_discard(pbr_input.material, pbr_input.material.base_color);
     } else {
@@ -372,6 +384,7 @@ fn fragment(
     // Write the gbuffer, lighting pass id, and optionally normal and motion_vector textures.
     let out = deferred_output(in, pbr_input);
 #else
+    // Stage 3: Lighting.
     // Hybrid path:
     // - Fast/Standard: cheap custom voxel lighting (no dynamic shadow sampling).
     // - Fancy presets: Bevy PBR lighting + CSM shadows + lightweight post stylization.

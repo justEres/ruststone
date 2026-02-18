@@ -109,163 +109,44 @@ impl ShadowQualityPreset {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ShadowQualityParams {
-    map_size: usize,
-    cascades: usize,
-    max_distance: f32,
-    first_cascade_far_bound: f32,
-}
-
-fn shadow_quality_params(preset: ShadowQualityPreset) -> ShadowQualityParams {
-    match preset {
-        ShadowQualityPreset::Off => ShadowQualityParams {
-            map_size: 512,
-            cascades: 1,
-            max_distance: 24.0,
-            first_cascade_far_bound: 8.0,
-        },
-        ShadowQualityPreset::Low => ShadowQualityParams {
-            map_size: 1024,
-            cascades: 1,
-            max_distance: 56.0,
-            first_cascade_far_bound: 16.0,
-        },
-        ShadowQualityPreset::Medium => ShadowQualityParams {
-            map_size: 1536,
-            cascades: 2,
-            max_distance: 96.0,
-            first_cascade_far_bound: 28.0,
-        },
-        ShadowQualityPreset::High => ShadowQualityParams {
-            map_size: 2048,
-            cascades: 3,
-            max_distance: 144.0,
-            first_cascade_far_bound: 36.0,
-        },
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct LightingPresetParams {
-    sun_dir: Vec3,
-    sun_strength: f32,
-    ambient_strength: f32,
-    ambient_brightness: f32,
-    sun_illuminance: f32,
-    fill_illuminance: f32,
-    fog_density: f32,
-    fog_start: f32,
-    fog_end: f32,
-    water_absorption: f32,
-    water_fresnel: f32,
-    shadow_depth_bias: f32,
-    shadow_normal_bias: f32,
-}
-
-fn preset_params(preset: LightingQualityPreset) -> LightingPresetParams {
-    match preset {
-        LightingQualityPreset::Fast => LightingPresetParams {
-            sun_dir: Vec3::new(0.35, 0.86, 0.36).normalize(),
-            sun_strength: 0.0,
-            ambient_strength: 1.0,
-            ambient_brightness: 1.0,
-            sun_illuminance: 6_500.0,
-            fill_illuminance: 1_900.0,
-            fog_density: 0.0,
-            fog_start: 0.0,
-            fog_end: 0.0,
-            water_absorption: 0.0,
-            water_fresnel: 0.0,
-            shadow_depth_bias: 0.03,
-            shadow_normal_bias: 0.8,
-        },
-        LightingQualityPreset::Standard => LightingPresetParams {
-            sun_dir: Vec3::new(0.30, 0.86, 0.42).normalize(),
-            sun_strength: 0.48,
-            ambient_strength: 0.62,
-            ambient_brightness: 0.95,
-            sun_illuminance: 7_500.0,
-            fill_illuminance: 2_100.0,
-            fog_density: 0.0,
-            fog_start: 0.0,
-            fog_end: 0.0,
-            water_absorption: 0.0,
-            water_fresnel: 0.0,
-            shadow_depth_bias: 0.025,
-            shadow_normal_bias: 0.7,
-        },
-        LightingQualityPreset::FancyLow => LightingPresetParams {
-            sun_dir: Vec3::new(0.22, 0.88, 0.41).normalize(),
-            sun_strength: 0.56,
-            ambient_strength: 0.52,
-            ambient_brightness: 0.80,
-            sun_illuminance: 11_500.0,
-            fill_illuminance: 2_200.0,
-            fog_density: 0.012,
-            fog_start: 70.0,
-            fog_end: 220.0,
-            water_absorption: 0.18,
-            water_fresnel: 0.12,
-            shadow_depth_bias: 0.022,
-            shadow_normal_bias: 0.55,
-        },
-        LightingQualityPreset::FancyHigh => LightingPresetParams {
-            sun_dir: Vec3::new(0.19, 0.90, 0.39).normalize(),
-            sun_strength: 0.62,
-            ambient_strength: 0.48,
-            ambient_brightness: 0.72,
-            sun_illuminance: 14_000.0,
-            fill_illuminance: 2_450.0,
-            fog_density: 0.017,
-            fog_start: 52.0,
-            fog_end: 170.0,
-            water_absorption: 0.26,
-            water_fresnel: 0.18,
-            shadow_depth_bias: 0.018,
-            shadow_normal_bias: 0.46,
-        },
-    }
-}
-
 pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
     settings.enable_pbr_terrain_lighting
-        && matches!(
-            settings.lighting_quality,
-            LightingQualityPreset::FancyLow | LightingQualityPreset::FancyHigh
-        )
 }
 
-pub fn lighting_uniform_for(
-    settings: &RenderDebugSettings,
-    transparent_pass: bool,
-) -> AtlasLightingUniform {
-    lighting_uniform_for_mode(settings, if transparent_pass { 1.0 } else { 0.0 })
+fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
+    if settings.cutout_use_blend {
+        AlphaMode::Blend
+    } else {
+        AlphaMode::Opaque
+    }
 }
 
 pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
 ) -> AtlasLightingUniform {
-    let preset = settings.lighting_quality;
-    let params = preset_params(preset);
+    let az = settings.sun_azimuth_deg.to_radians();
+    let el = settings.sun_elevation_deg.to_radians();
+    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
+        .normalize_or_zero();
+    let quality_mode = settings.shader_quality_mode.clamp(0, 3) as f32;
     AtlasLightingUniform {
         sun_dir_and_strength: Vec4::new(
-            params.sun_dir.x,
-            params.sun_dir.y,
-            params.sun_dir.z,
-            params.sun_strength,
+            sun_dir.x,
+            sun_dir.y,
+            sun_dir.z,
+            settings.sun_strength,
         ),
         ambient_and_fog: Vec4::new(
-            params.ambient_strength,
-            params.fog_density,
-            params.fog_start,
-            params.fog_end,
+            settings.ambient_strength,
+            settings.fog_density,
+            settings.fog_start,
+            settings.fog_end,
         ),
         quality_and_water: Vec4::new(
-            preset as u32 as f32,
-            params.water_absorption,
-            params.water_fresnel,
+            quality_mode,
+            settings.water_absorption,
+            settings.water_fresnel,
             pass_mode,
         ),
         color_grading: Vec4::new(
@@ -305,7 +186,7 @@ pub fn lighting_uniform_for_mode(
         debug_flags: Vec4::new(
             settings.cutout_debug_mode as f32,
             settings.water_reflection_sky_fill,
-            0.0,
+            if settings.cutout_use_blend { 1.0 } else { 0.0 },
             0.0,
         ),
         reflection_view_proj: Mat4::IDENTITY,
@@ -325,14 +206,15 @@ pub fn apply_lighting_quality(
     )>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut ambient: ResMut<AmbientLight>,
-    mut last_material_key: Local<Option<(LightingQualityPreset, bool)>>,
+    mut last_material_key: Local<Option<(u8, bool, bool, u32)>>,
 ) {
-    let cutout_alpha_mode = if settings.cutout_use_blend {
-        AlphaMode::Blend
-    } else {
-        AlphaMode::Opaque
-    };
-    let material_key = (settings.lighting_quality, settings.enable_pbr_terrain_lighting);
+    let cutout_alpha_mode = cutout_alpha_mode(&settings);
+    let material_key = (
+        settings.shader_quality_mode,
+        settings.enable_pbr_terrain_lighting,
+        settings.cutout_use_blend,
+        settings.material_rebuild_nonce,
+    );
     let recreate_materials = last_material_key
         .map(|k| k != material_key)
         .unwrap_or(true);
@@ -377,7 +259,7 @@ pub fn apply_lighting_quality(
                 } else {
                     1.0
                 },
-                alpha_mode: cutout_alpha_mode,
+                alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
                 opaque_render_method: OpaqueRendererMethod::Forward,
                 unlit: !use_shadowed_pbr,
@@ -399,7 +281,7 @@ pub fn apply_lighting_quality(
                 alpha_mode: cutout_alpha_mode,
                 cull_mode: None,
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: crate::chunk::AtlasTextureExtension {
@@ -415,10 +297,10 @@ pub fn apply_lighting_quality(
                 metallic: 0.0,
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
-                alpha_mode: AlphaMode::Blend,
+                alpha_mode: cutout_alpha_mode,
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: true,
+                unlit: !use_shadowed_pbr,
                 ..default()
             },
             extension: crate::chunk::AtlasTextureExtension {
@@ -454,15 +336,13 @@ pub fn apply_lighting_quality(
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
         mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
-        // Keep cutout on the deterministic voxel path: avoids prepass/alpha-mask
-        // specialization issues across runtime quality switches.
-        mat.base.unlit = true;
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
         mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
-        mat.base.unlit = true;
+        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
@@ -480,29 +360,31 @@ pub fn apply_lighting_quality(
         }
     }
 
-    let params = preset_params(settings.lighting_quality);
-    let shadow_params = shadow_quality_params(settings.shadow_quality);
     let shadow_dist_scale = settings.shadow_distance_scale.clamp(0.25, 20.0);
-    shadow_map.size = shadow_params.map_size;
+    shadow_map.size = settings.shadow_map_size.clamp(256, 4096) as usize;
 
-    let allow_shadows =
-        settings.shadows_enabled && settings.shadow_quality != ShadowQualityPreset::Off;
+    let allow_shadows = settings.shadows_enabled && settings.shadow_cascades > 0;
     let is_fancy = uses_shadowed_pbr_path(&settings);
-    let sun_travel_dir = -params.sun_dir;
-    ambient.brightness = params.ambient_brightness;
+    let az = settings.sun_azimuth_deg.to_radians();
+    let el = settings.sun_elevation_deg.to_radians();
+    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
+        .normalize_or_zero();
+    let sun_travel_dir = -sun_dir;
+    ambient.brightness = settings.ambient_brightness;
 
     for (mut light, mut light_transform, shadow_light, cascade_cfg) in &mut lights {
         if shadow_light.is_some() {
             light.shadows_enabled = allow_shadows;
-            light.illuminance = params.sun_illuminance;
-            light.shadow_depth_bias = params.shadow_depth_bias;
-            light.shadow_normal_bias = params.shadow_normal_bias;
+            light.illuminance = settings.sun_illuminance;
+            light.shadow_depth_bias = settings.shadow_depth_bias;
+            light.shadow_normal_bias = settings.shadow_normal_bias;
             light_transform.look_to(sun_travel_dir, Vec3::Y);
             if let Some(mut cascade_cfg) = cascade_cfg {
                 *cascade_cfg = CascadeShadowConfigBuilder {
-                    num_cascades: shadow_params.cascades,
-                    maximum_distance: shadow_params.max_distance * shadow_dist_scale,
-                    first_cascade_far_bound: shadow_params.first_cascade_far_bound * shadow_dist_scale,
+                    num_cascades: settings.shadow_cascades.clamp(1, 4) as usize,
+                    maximum_distance: settings.shadow_max_distance * shadow_dist_scale,
+                    first_cascade_far_bound: settings.shadow_first_cascade_far_bound
+                        * shadow_dist_scale,
                     minimum_distance: 0.1,
                     ..default()
                 }
@@ -510,9 +392,9 @@ pub fn apply_lighting_quality(
             }
         } else {
             light.illuminance = if is_fancy {
-                params.fill_illuminance
+                settings.fill_illuminance
             } else {
-                params.fill_illuminance * 0.95
+                settings.fill_illuminance * 0.95
             };
             light_transform.look_to(
                 Vec3::new(-sun_travel_dir.x, sun_travel_dir.y, -sun_travel_dir.z),
@@ -543,16 +425,22 @@ pub fn update_water_animation(
     } else {
         (Mat4::IDENTITY, DEFAULT_WATER_PLANE_Y)
     };
-    let cutout_alpha_mode = if settings.cutout_use_blend {
-        AlphaMode::Blend
-    } else {
-        AlphaMode::Opaque
-    };
+    let cutout_alpha_mode = cutout_alpha_mode(&settings);
 
     for (handle, pass_mode, force_unlit, alpha_mode) in [
         (&assets.opaque_material, 0.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Opaque),
-        (&assets.cutout_material, 2.0, true, cutout_alpha_mode),
-        (&assets.cutout_culled_material, 2.0, true, cutout_alpha_mode),
+        (
+            &assets.cutout_material,
+            2.0,
+            !uses_shadowed_pbr_path(&settings),
+            cutout_alpha_mode,
+        ),
+        (
+            &assets.cutout_culled_material,
+            2.0,
+            !uses_shadowed_pbr_path(&settings),
+            cutout_alpha_mode,
+        ),
         (&assets.transparent_material, 1.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Blend),
     ] {
         if let Some(mat) = materials.get_mut(handle) {
@@ -586,7 +474,12 @@ pub fn update_water_animation(
                 settings.water_reflection_edge_fade,
             );
             mat.extension.lighting.debug_flags =
-                Vec4::new(settings.cutout_debug_mode as f32, settings.water_reflection_sky_fill, 0.0, 0.0);
+                Vec4::new(
+                    settings.cutout_debug_mode as f32,
+                    settings.water_reflection_sky_fill,
+                    if settings.cutout_use_blend { 1.0 } else { 0.0 },
+                    0.0,
+                );
             mat.extension.lighting.reflection_view_proj = reflection_view_proj;
         }
     }
@@ -757,13 +650,13 @@ pub fn apply_ssao_quality(
             .remove::<ScreenSpaceAmbientOcclusion>();
         return;
     }
-    match settings.lighting_quality {
-        LightingQualityPreset::Fast | LightingQualityPreset::Standard => {
+    match settings.shader_quality_mode {
+        0 | 1 => {
             commands
                 .entity(camera_entity)
                 .remove::<ScreenSpaceAmbientOcclusion>();
         }
-        LightingQualityPreset::FancyLow => {
+        2 => {
             commands
                 .entity(camera_entity)
                 .insert(ScreenSpaceAmbientOcclusion {
@@ -771,7 +664,7 @@ pub fn apply_ssao_quality(
                     constant_object_thickness: 0.25,
                 });
         }
-        LightingQualityPreset::FancyHigh => {
+        _ => {
             commands
                 .entity(camera_entity)
                 .insert(ScreenSpaceAmbientOcclusion {

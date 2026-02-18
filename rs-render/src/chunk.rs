@@ -174,6 +174,7 @@ impl ChunkColumnSnapshot {
     pub fn build_mesh_data(
         &self,
         use_greedy: bool,
+        leaf_depth_layer_faces: bool,
         texture_mapping: &AtlasBlockMapping,
         biome_tints: &BiomeTintResolver,
     ) -> MeshBatch {
@@ -182,6 +183,7 @@ impl ChunkColumnSnapshot {
                 self,
                 self.center_key.0,
                 self.center_key.1,
+                leaf_depth_layer_faces,
                 texture_mapping,
                 biome_tints,
             )
@@ -190,6 +192,7 @@ impl ChunkColumnSnapshot {
                 self,
                 self.center_key.0,
                 self.center_key.1,
+                leaf_depth_layer_faces,
                 texture_mapping,
                 biome_tints,
             )
@@ -226,13 +229,19 @@ impl Default for MeshBatch {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum MaterialGroup {
     Opaque,
     Cutout,
     CutoutCulled,
     Transparent,
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ChunkSubmeshGroup(pub MaterialGroup);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DepthSortBaseLocal(pub Vec3);
 
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
@@ -723,6 +732,7 @@ fn build_chunk_mesh_culled(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
+    leaf_depth_layer_faces: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -769,6 +779,7 @@ fn build_chunk_mesh_culled(
                         snapshot,
                         texture_mapping,
                         biome_tints,
+                        leaf_depth_layer_faces,
                         chunk_x,
                         chunk_z,
                         x,
@@ -804,6 +815,7 @@ fn build_chunk_mesh_greedy(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
+    leaf_depth_layer_faces: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -879,7 +891,7 @@ fn build_chunk_mesh_greedy(
                         };
                         let neighbor =
                             block_at(snapshot, chunk_x, chunk_z, x + dx, base_y + y + dy, z + dz);
-                        if face_is_occluded(block_id, neighbor) {
+                        if face_is_occluded(block_id, neighbor, leaf_depth_layer_faces) {
                             continue;
                         }
 
@@ -1091,6 +1103,7 @@ fn add_block_faces(
     snapshot: &ChunkColumnSnapshot,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
+    leaf_depth_layer_faces: bool,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -1182,7 +1195,7 @@ fn add_block_faces(
 
     for (face, dx, dy, dz, normal, verts) in faces {
         let neighbor = block_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz);
-        if face_is_occluded(block_id, neighbor) {
+        if face_is_occluded(block_id, neighbor, leaf_depth_layer_faces) {
             continue;
         }
 
@@ -1793,7 +1806,7 @@ fn add_box(
         if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, block_id_for_cull)) = neighbor_ctx {
             if boundary_face {
                 let neighbor = block_at(snapshot, chunk_x, chunk_z, bx + dx, by + dy, bz + dz);
-                if face_is_occluded(block_id_for_cull, neighbor) {
+                if face_is_occluded(block_id_for_cull, neighbor, true) {
                     continue;
                 }
             }
@@ -2248,7 +2261,7 @@ fn pane_connects_to(neighbor_state: u16) -> bool {
     is_occluding_block(neighbor_state)
 }
 
-fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
+fn face_is_occluded(block_id: u16, neighbor_id: u16, leaf_depth_layer_faces: bool) -> bool {
     if block_type(neighbor_id) == 0 {
         return false;
     }
@@ -2260,7 +2273,7 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16) -> bool {
 
     // For leaves, keep front faces on deeper leaf blocks so holes in one leaf
     // layer reveal the next layer instead of the sky.
-    if is_leaves_block(this_type) && is_leaves_block(neighbor_type) {
+    if leaf_depth_layer_faces && is_leaves_block(this_type) && is_leaves_block(neighbor_type) {
         return false;
     }
 

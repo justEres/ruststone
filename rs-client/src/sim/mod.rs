@@ -110,6 +110,12 @@ pub struct DebugUiState {
     pub show_prediction: bool,
     pub show_performance: bool,
     pub show_render: bool,
+    pub render_show_layers: bool,
+    pub render_show_lighting: bool,
+    pub render_show_water: bool,
+    pub render_show_misc: bool,
+    pub perf_show_schedules: bool,
+    pub perf_show_render_stats: bool,
 }
 
 impl Default for DebugUiState {
@@ -119,6 +125,12 @@ impl Default for DebugUiState {
             show_prediction: true,
             show_performance: true,
             show_render: true,
+            render_show_layers: true,
+            render_show_lighting: true,
+            render_show_water: true,
+            render_show_misc: true,
+            perf_show_schedules: true,
+            perf_show_render_stats: true,
         }
     }
 }

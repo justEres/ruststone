@@ -6,7 +6,10 @@ use bevy::render::view::Msaa;
 
 use crate::components::{LookAngles, Player, PlayerCamera, Velocity};
 use crate::debug::{AntiAliasingMode, RenderDebugSettings};
-use crate::reflection::{MAIN_RENDER_LAYER, REFLECTION_RENDER_LAYER};
+use crate::reflection::{
+    CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
+    MAIN_RENDER_LAYER,
+};
 
 const EYE_HEIGHT: f32 = 1.62;
 
@@ -50,7 +53,10 @@ pub fn spawn_player(
                     fov: debug_settings.fov_deg.to_radians(),
                     ..Default::default()
                 }),
-                RenderLayers::layer(MAIN_RENDER_LAYER).with(REFLECTION_RENDER_LAYER),
+                RenderLayers::layer(MAIN_RENDER_LAYER)
+                    .with(CHUNK_OPAQUE_RENDER_LAYER)
+                    .with(CHUNK_CUTOUT_RENDER_LAYER)
+                    .with(CHUNK_TRANSPARENT_RENDER_LAYER),
                 Transform::from_xyz(0.0, EYE_HEIGHT, 0.0),
                 Visibility::Inherited,
                 InheritedVisibility::default(),

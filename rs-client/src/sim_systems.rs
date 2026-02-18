@@ -1444,13 +1444,10 @@ pub fn debug_overlay_system(
     egui::Window::new("Debug")
         .default_pos(egui::pos2(12.0, 12.0))
         .show(ctx, |ui| {
-            ui.checkbox(&mut debug_ui.show_prediction, "Prediction");
-            ui.checkbox(&mut debug_ui.show_performance, "Performance");
-            ui.checkbox(&mut debug_ui.show_render, "Render");
-
             let frame_ms = (time.delta_secs_f64() * 1000.0) as f32;
-
-            if debug_ui.show_performance {
+            let performance_section = egui::CollapsingHeader::new("Performance")
+                .default_open(debug_ui.show_performance)
+                .show(ui, |ui| {
                 ui.separator();
                 if let Some(fps) = diagnostics
                     .get(&FrameTimeDiagnosticsPlugin::FPS)
@@ -1470,122 +1467,260 @@ pub fn debug_overlay_system(
                         "n/a".to_string()
                     }
                 ));
-            }
+            });
+            debug_ui.show_performance = performance_section.fully_open();
 
-            if debug_ui.show_render {
+            let render_section = egui::CollapsingHeader::new("Render")
+                .default_open(debug_ui.show_render)
+                .show(ui, |ui| {
                 ui.separator();
-                ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
-                ui.add(
-                    egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
-                        .logarithmic(true)
-                        .text("Shadow distance"),
-                );
-                let mut aa_mode = render_debug.aa_mode;
-                egui::ComboBox::from_label("AA")
-                    .selected_text(aa_mode.label())
-                    .show_ui(ui, |ui| {
-                        for mode in rs_render::AntiAliasingMode::ALL {
-                            ui.selectable_value(&mut aa_mode, mode, mode.label());
-                        }
-                    });
-                if aa_mode != render_debug.aa_mode {
-                    render_debug.aa_mode = aa_mode;
-                    render_debug.fxaa_enabled = matches!(
-                        render_debug.aa_mode,
-                        rs_render::AntiAliasingMode::Fxaa
-                            | rs_render::AntiAliasingMode::Msaa4
-                            | rs_render::AntiAliasingMode::Msaa8
+                let layers_section = egui::CollapsingHeader::new("Layers")
+                    .default_open(debug_ui.render_show_layers)
+                    .show(ui, |ui| {
+                    ui.separator();
+                    ui.checkbox(&mut render_debug.show_layer_entities, "Layer: entities");
+                    ui.checkbox(
+                        &mut render_debug.show_layer_chunks_opaque,
+                        "Layer: chunks opaque",
                     );
-                }
-                ui.checkbox(
-                    &mut render_debug.use_greedy_meshing,
-                    "Binary greedy meshing",
-                );
-                ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
-                ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
-                ui.checkbox(
-                    &mut render_debug.water_reflections_enabled,
-                    "Water reflections",
-                );
-                ui.checkbox(
-                    &mut render_debug.water_terrain_ssr,
-                    "Dedicated terrain reflection pass",
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_reflection_strength, 0.0..=3.0)
-                        .text("Water reflection strength"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_reflection_near_boost, 0.0..=1.0)
-                        .text("Near reflection boost"),
-                );
-                ui.checkbox(
-                    &mut render_debug.water_reflection_blue_tint,
-                    "Blue reflection tint",
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut render_debug.water_reflection_tint_strength,
-                        0.0..=2.0,
-                    )
-                    .text("Blue tint strength"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
-                        .text("Water wave strength"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
-                        .text("Water wave speed"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut render_debug.water_wave_detail_strength,
-                        0.0..=1.2,
-                    )
-                    .text("Wave detail strength"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
-                        .text("Wave detail scale"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
-                        .text("Wave detail speed"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.02..=0.5)
-                        .text("Reflection edge fade"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
-                        .text("Sky fallback fill"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
-                        .text("Reflection overscan"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut render_debug.water_reflection_resolution_scale,
-                        0.5..=3.0,
-                    )
-                    .text("Reflection resolution"),
-                );
-                ui.checkbox(&mut render_debug.render_held_items, "Render held items");
-                ui.checkbox(
-                    &mut render_debug.render_first_person_arms,
-                    "First-person arms",
-                );
-                ui.checkbox(&mut render_debug.render_self_model, "Render self model");
-                ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
-                ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
-                ui.checkbox(&mut render_debug.show_look_info, "Look info");
-                ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
-                ui.checkbox(
-                    &mut render_debug.show_target_block_outline,
-                    "Target block outline",
-                );
+                    ui.checkbox(
+                        &mut render_debug.show_layer_chunks_cutout,
+                        "Layer: chunks cutout",
+                    );
+                    ui.checkbox(
+                        &mut render_debug.show_layer_chunks_transparent,
+                        "Layer: chunks transparent",
+                    );
+                    ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
+                });
+                debug_ui.render_show_layers = layers_section.fully_open();
+
+                let lighting_section = egui::CollapsingHeader::new("Lighting")
+                    .default_open(debug_ui.render_show_lighting)
+                    .show(ui, |ui| {
+                    ui.separator();
+                    ui.checkbox(&mut render_debug.enable_pbr_terrain_lighting, "Enable PBR path");
+                    ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shader_quality_mode, 0..=3)
+                            .text("Shader quality mode"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
+                            .logarithmic(true)
+                            .text("Shadow distance"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_map_size, 256..=4096)
+                            .text("Shadow map size"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_cascades, 1..=4)
+                            .text("Shadow cascades"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_max_distance, 8.0..=400.0)
+                            .text("Shadow max distance"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut render_debug.shadow_first_cascade_far_bound,
+                            4.0..=200.0,
+                        )
+                        .text("Shadow first cascade far"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_depth_bias, 0.0..=0.2)
+                            .text("Shadow depth bias"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.shadow_normal_bias, 0.0..=2.0)
+                            .text("Shadow normal bias"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.sun_azimuth_deg, -180.0..=180.0)
+                            .text("Sun azimuth"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.sun_elevation_deg, -20.0..=89.0)
+                            .text("Sun elevation"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
+                            .text("Sun strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
+                            .text("Ambient strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.ambient_brightness, 0.0..=2.0)
+                            .text("Ambient brightness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
+                            .text("Fog density"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.fog_start, 0.0..=500.0)
+                            .text("Fog start"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.fog_end, 1.0..=700.0)
+                            .text("Fog end"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_absorption, 0.0..=1.0)
+                            .text("Water absorption"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_fresnel, 0.0..=1.0)
+                            .text("Water fresnel"),
+                    );
+                });
+                debug_ui.render_show_lighting = lighting_section.fully_open();
+
+                let water_section = egui::CollapsingHeader::new("Water")
+                    .default_open(debug_ui.render_show_water)
+                    .show(ui, |ui| {
+                    ui.separator();
+                    ui.checkbox(
+                        &mut render_debug.water_reflections_enabled,
+                        "Water reflections",
+                    );
+                    ui.checkbox(
+                        &mut render_debug.water_terrain_ssr,
+                        "Dedicated terrain reflection pass",
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_reflection_strength, 0.0..=3.0)
+                            .text("Water reflection strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_reflection_near_boost, 0.0..=1.0)
+                            .text("Near reflection boost"),
+                    );
+                    ui.checkbox(
+                        &mut render_debug.water_reflection_blue_tint,
+                        "Blue reflection tint",
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_tint_strength,
+                            0.0..=2.0,
+                        )
+                        .text("Blue tint strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
+                            .text("Water wave strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
+                            .text("Water wave speed"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut render_debug.water_wave_detail_strength,
+                            0.0..=1.2,
+                        )
+                        .text("Wave detail strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
+                            .text("Wave detail scale"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
+                            .text("Wave detail speed"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.02..=0.5)
+                            .text("Reflection edge fade"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
+                            .text("Sky fallback fill"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
+                            .text("Reflection overscan"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut render_debug.water_reflection_resolution_scale,
+                            0.5..=3.0,
+                        )
+                        .text("Reflection resolution"),
+                    );
+                });
+                debug_ui.render_show_water = water_section.fully_open();
+
+                let misc_section = egui::CollapsingHeader::new("Misc")
+                    .default_open(debug_ui.render_show_misc)
+                    .show(ui, |ui| {
+                    ui.separator();
+                    let mut aa_mode = render_debug.aa_mode;
+                    egui::ComboBox::from_label("AA")
+                        .selected_text(aa_mode.label())
+                        .show_ui(ui, |ui| {
+                            for mode in rs_render::AntiAliasingMode::ALL {
+                                ui.selectable_value(&mut aa_mode, mode, mode.label());
+                            }
+                        });
+                    if aa_mode != render_debug.aa_mode {
+                        render_debug.aa_mode = aa_mode;
+                        render_debug.fxaa_enabled = matches!(
+                            render_debug.aa_mode,
+                            rs_render::AntiAliasingMode::Fxaa
+                                | rs_render::AntiAliasingMode::Msaa4
+                                | rs_render::AntiAliasingMode::Msaa8
+                        );
+                    }
+                    ui.checkbox(
+                        &mut render_debug.use_greedy_meshing,
+                        "Binary greedy meshing",
+                    );
+                    ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
+                    ui.checkbox(
+                        &mut render_debug.leaf_depth_layer_faces,
+                        "Leaf depth layer faces",
+                    );
+                    ui.checkbox(
+                        &mut render_debug.cutout_use_blend,
+                        "Cutout blend alpha",
+                    );
+                    ui.checkbox(
+                        &mut render_debug.cutout_manual_depth_sort,
+                        "Manual cutout depth sort",
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_debug.cutout_depth_sort_strength, 0.0..=2.5)
+                            .text("Cutout depth sort strength"),
+                    );
+                    if ui.button("Force remesh chunks").clicked() {
+                        render_debug.force_remesh = true;
+                    }
+                    if ui.button("Rebuild render materials").clicked() {
+                        render_debug.material_rebuild_nonce =
+                            render_debug.material_rebuild_nonce.wrapping_add(1);
+                    }
+                    ui.checkbox(&mut render_debug.render_held_items, "Render held items");
+                    ui.checkbox(
+                        &mut render_debug.render_first_person_arms,
+                        "First-person arms",
+                    );
+                    ui.checkbox(&mut render_debug.render_self_model, "Render self model");
+                    ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
+                    ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
+                    ui.checkbox(&mut render_debug.show_look_info, "Look info");
+                    ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
+                    ui.checkbox(
+                        &mut render_debug.show_target_block_outline,
+                        "Target block outline",
+                    );
+                });
+                debug_ui.render_show_misc = misc_section.fully_open();
                 let mut cutout_mode = render_debug.cutout_debug_mode as i32;
                 egui::ComboBox::from_label("Cutout debug")
                     .selected_text(match cutout_mode {
@@ -1603,7 +1738,6 @@ pub fn debug_overlay_system(
                         ui.selectable_value(&mut cutout_mode, 4, "Pass mode");
                     });
                 render_debug.cutout_debug_mode = cutout_mode.clamp(0, 4) as u8;
-                ui.checkbox(&mut render_debug.cutout_use_blend, "Cutout uses blend alpha mode");
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
@@ -1641,9 +1775,12 @@ pub fn debug_overlay_system(
                     ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
                     ui.label(format!("facing: {} ({})", card, axis));
                 }
-            }
+            });
+            debug_ui.show_render = render_section.fully_open();
 
-            if debug_ui.show_prediction {
+            let prediction_section = egui::CollapsingHeader::new("Prediction")
+                .default_open(debug_ui.show_prediction)
+                .show(ui, |ui| {
                 ui.separator();
                 ui.label(format!("tick: {}", sim_clock.tick));
                 ui.label(format!("history cap: {}", history.0.capacity()));
@@ -1654,10 +1791,19 @@ pub fn debug_overlay_system(
                     debug.smoothing_offset_len
                 ));
                 ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
-            }
+            });
+            debug_ui.show_prediction = prediction_section.fully_open();
 
             if debug_ui.show_performance {
                 ui.separator();
+                let schedule_section = egui::CollapsingHeader::new("Schedule Timings")
+                    .default_open(debug_ui.perf_show_schedules)
+                    .show(ui, |_ui| {});
+                debug_ui.perf_show_schedules = schedule_section.fully_open();
+                let render_stats_section = egui::CollapsingHeader::new("Render Timings")
+                    .default_open(debug_ui.perf_show_render_stats)
+                    .show(ui, |_ui| {});
+                debug_ui.perf_show_render_stats = render_stats_section.fully_open();
                 let pct = |ms: f32| {
                     if frame_ms <= 0.0 {
                         None
@@ -1670,133 +1816,137 @@ pub fn debug_overlay_system(
                         .map(|p| format!("{:.1}%", p))
                         .unwrap_or_else(|| "n/a".to_string())
                 };
-                ui.label(format!(
-                    "handle_messages: {:.3}ms {}",
-                    timings.handle_messages_ms,
-                    fmt_pct(timings.handle_messages_ms)
-                ));
-                ui.label(format!(
-                    "update schedule: {:.3}ms {}",
-                    timings.update_ms,
-                    fmt_pct(timings.update_ms)
-                ));
-                ui.label(format!(
-                    "post update: {:.3}ms {}",
-                    timings.post_update_ms,
-                    fmt_pct(timings.post_update_ms)
-                ));
-                ui.label(format!(
-                    "fixed update: {:.3}ms {}",
-                    timings.fixed_update_ms,
-                    fmt_pct(timings.fixed_update_ms)
-                ));
-                ui.label(format!(
-                    "input_collect: {:.3}ms {}",
-                    timings.input_collect_ms,
-                    fmt_pct(timings.input_collect_ms)
-                ));
-                ui.label(format!(
-                    "net_apply: {:.3}ms {}",
-                    timings.net_apply_ms,
-                    fmt_pct(timings.net_apply_ms)
-                ));
-                ui.label(format!(
-                    "fixed_tick: {:.3}ms {}",
-                    timings.fixed_tick_ms,
-                    fmt_pct(timings.fixed_tick_ms)
-                ));
-                ui.label(format!(
-                    "smoothing: {:.3}ms {}",
-                    timings.smoothing_ms,
-                    fmt_pct(timings.smoothing_ms)
-                ));
-                ui.label(format!(
-                    "apply_transform: {:.3}ms {}",
-                    timings.apply_transform_ms,
-                    fmt_pct(timings.apply_transform_ms)
-                ));
-                ui.label(format!(
-                    "debug_ui: {:.3}ms {}",
-                    timings.debug_ui_ms,
-                    fmt_pct(timings.debug_ui_ms)
-                ));
-                ui.label(format!(
-                    "ui: {:.3}ms {}",
-                    timings.ui_ms,
-                    fmt_pct(timings.ui_ms)
-                ));
-
-                ui.label(format!(
-                    "mesh build ms: {:.2} (avg {:.2}) [async]",
-                    render_perf.last_mesh_build_ms, render_perf.avg_mesh_build_ms
-                ));
-                ui.label(format!(
-                    "mesh apply ms: {:.2} (avg {:.2}) {}",
-                    render_perf.last_apply_ms,
-                    render_perf.avg_apply_ms,
-                    fmt_pct(render_perf.last_apply_ms)
-                ));
-                ui.label(format!(
-                    "mesh enqueue ms: {:.2} (avg {:.2}) {}",
-                    render_perf.last_enqueue_ms,
-                    render_perf.avg_enqueue_ms,
-                    fmt_pct(render_perf.last_enqueue_ms)
-                ));
-                ui.label(format!(
-                    "manual cull ms: {:.2} {}",
-                    render_perf.manual_cull_ms,
-                    fmt_pct(render_perf.manual_cull_ms)
-                ));
-                ui.label(format!(
-                    "render debug ms: {:.2} {}",
-                    render_perf.apply_debug_ms,
-                    fmt_pct(render_perf.apply_debug_ms)
-                ));
-                ui.label(format!(
-                    "render stats ms: {:.2} {}",
-                    render_perf.gather_stats_ms,
-                    fmt_pct(render_perf.gather_stats_ms)
-                ));
-                ui.label(format!(
-                    "mesh applied: {} in_flight: {} updates: {} (raw {})",
-                    render_perf.last_meshes_applied,
-                    render_perf.in_flight,
-                    render_perf.last_updates,
-                    render_perf.last_updates_raw
-                ));
-                ui.label(format!(
-                    "meshes: dist {} / {} view {} / {}",
-                    render_perf.visible_meshes_distance,
-                    render_perf.total_meshes,
-                    render_perf.visible_meshes_view,
-                    render_perf.total_meshes
-                ));
-                ui.label(format!(
-                    "chunks: {} / {} (distance)",
-                    render_perf.visible_chunks, render_perf.total_chunks
-                ));
-                ui.separator();
-                ui.label(format!(
-                    "mat pass w: o={:.1} c={:.1} cc={:.1} t={:.1}",
-                    render_perf.mat_pass_opaque,
-                    render_perf.mat_pass_cutout,
-                    render_perf.mat_pass_cutout_culled,
-                    render_perf.mat_pass_transparent
-                ));
-                ui.label(format!(
-                    "mat alpha: o={} c={} cc={} t={}",
-                    render_perf.mat_alpha_opaque,
-                    render_perf.mat_alpha_cutout,
-                    render_perf.mat_alpha_cutout_culled,
-                    render_perf.mat_alpha_transparent
-                ));
-                ui.label(format!(
-                    "mat unlit: o={} c={} cc={} t={}",
-                    render_perf.mat_unlit_opaque,
-                    render_perf.mat_unlit_cutout,
-                    render_perf.mat_unlit_cutout_culled,
-                    render_perf.mat_unlit_transparent
-                ));
+                if debug_ui.perf_show_schedules {
+                    ui.label(format!(
+                        "handle_messages: {:.3}ms {}",
+                        timings.handle_messages_ms,
+                        fmt_pct(timings.handle_messages_ms)
+                    ));
+                    ui.label(format!(
+                        "update schedule: {:.3}ms {}",
+                        timings.update_ms,
+                        fmt_pct(timings.update_ms)
+                    ));
+                    ui.label(format!(
+                        "post update: {:.3}ms {}",
+                        timings.post_update_ms,
+                        fmt_pct(timings.post_update_ms)
+                    ));
+                    ui.label(format!(
+                        "fixed update: {:.3}ms {}",
+                        timings.fixed_update_ms,
+                        fmt_pct(timings.fixed_update_ms)
+                    ));
+                    ui.label(format!(
+                        "input_collect: {:.3}ms {}",
+                        timings.input_collect_ms,
+                        fmt_pct(timings.input_collect_ms)
+                    ));
+                    ui.label(format!(
+                        "net_apply: {:.3}ms {}",
+                        timings.net_apply_ms,
+                        fmt_pct(timings.net_apply_ms)
+                    ));
+                    ui.label(format!(
+                        "fixed_tick: {:.3}ms {}",
+                        timings.fixed_tick_ms,
+                        fmt_pct(timings.fixed_tick_ms)
+                    ));
+                    ui.label(format!(
+                        "smoothing: {:.3}ms {}",
+                        timings.smoothing_ms,
+                        fmt_pct(timings.smoothing_ms)
+                    ));
+                    ui.label(format!(
+                        "apply_transform: {:.3}ms {}",
+                        timings.apply_transform_ms,
+                        fmt_pct(timings.apply_transform_ms)
+                    ));
+                    ui.label(format!(
+                        "debug_ui: {:.3}ms {}",
+                        timings.debug_ui_ms,
+                        fmt_pct(timings.debug_ui_ms)
+                    ));
+                    ui.label(format!(
+                        "ui: {:.3}ms {}",
+                        timings.ui_ms,
+                        fmt_pct(timings.ui_ms)
+                    ));
+                }
+                if debug_ui.perf_show_render_stats {
+                    ui.separator();
+                    ui.label(format!(
+                        "mesh build ms: {:.2} (avg {:.2}) [async]",
+                        render_perf.last_mesh_build_ms, render_perf.avg_mesh_build_ms
+                    ));
+                    ui.label(format!(
+                        "mesh apply ms: {:.2} (avg {:.2}) {}",
+                        render_perf.last_apply_ms,
+                        render_perf.avg_apply_ms,
+                        fmt_pct(render_perf.last_apply_ms)
+                    ));
+                    ui.label(format!(
+                        "mesh enqueue ms: {:.2} (avg {:.2}) {}",
+                        render_perf.last_enqueue_ms,
+                        render_perf.avg_enqueue_ms,
+                        fmt_pct(render_perf.last_enqueue_ms)
+                    ));
+                    ui.label(format!(
+                        "manual cull ms: {:.2} {}",
+                        render_perf.manual_cull_ms,
+                        fmt_pct(render_perf.manual_cull_ms)
+                    ));
+                    ui.label(format!(
+                        "render debug ms: {:.2} {}",
+                        render_perf.apply_debug_ms,
+                        fmt_pct(render_perf.apply_debug_ms)
+                    ));
+                    ui.label(format!(
+                        "render stats ms: {:.2} {}",
+                        render_perf.gather_stats_ms,
+                        fmt_pct(render_perf.gather_stats_ms)
+                    ));
+                    ui.label(format!(
+                        "mesh applied: {} in_flight: {} updates: {} (raw {})",
+                        render_perf.last_meshes_applied,
+                        render_perf.in_flight,
+                        render_perf.last_updates,
+                        render_perf.last_updates_raw
+                    ));
+                    ui.label(format!(
+                        "meshes: dist {} / {} view {} / {}",
+                        render_perf.visible_meshes_distance,
+                        render_perf.total_meshes,
+                        render_perf.visible_meshes_view,
+                        render_perf.total_meshes
+                    ));
+                    ui.label(format!(
+                        "chunks: {} / {} (distance)",
+                        render_perf.visible_chunks, render_perf.total_chunks
+                    ));
+                    ui.separator();
+                    ui.label(format!(
+                        "mat pass w: o={:.1} c={:.1} cc={:.1} t={:.1}",
+                        render_perf.mat_pass_opaque,
+                        render_perf.mat_pass_cutout,
+                        render_perf.mat_pass_cutout_culled,
+                        render_perf.mat_pass_transparent
+                    ));
+                    ui.label(format!(
+                        "mat alpha: o={} c={} cc={} t={}",
+                        render_perf.mat_alpha_opaque,
+                        render_perf.mat_alpha_cutout,
+                        render_perf.mat_alpha_cutout_culled,
+                        render_perf.mat_alpha_transparent
+                    ));
+                    ui.label(format!(
+                        "mat unlit: o={} c={} cc={} t={}",
+                        render_perf.mat_unlit_opaque,
+                        render_perf.mat_unlit_cutout,
+                        render_perf.mat_unlit_cutout_culled,
+                        render_perf.mat_unlit_transparent
+                    ));
+                }
             }
         });
     let elapsed_ms = timer.ms();
