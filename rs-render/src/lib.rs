@@ -130,6 +130,9 @@ fn enqueue_chunk_meshes(
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
             leaf_depth_layer_faces: render_debug.leaf_depth_layer_faces,
+            voxel_ao_enabled: render_debug.voxel_ao_enabled,
+            voxel_ao_strength: render_debug.voxel_ao_strength,
+            voxel_ao_cutout: render_debug.voxel_ao_cutout,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };

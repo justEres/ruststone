@@ -127,6 +127,9 @@ pub struct RenderDebugSettings {
     pub color_contrast: f32,
     pub color_brightness: f32,
     pub color_gamma: f32,
+    pub voxel_ao_enabled: bool,
+    pub voxel_ao_strength: f32,
+    pub voxel_ao_cutout: bool,
     pub water_reflections_enabled: bool,
     pub water_terrain_ssr: bool,
     pub water_reflection_strength: f32,
@@ -210,6 +213,9 @@ impl Default for RenderDebugSettings {
             color_contrast: 1.06,
             color_brightness: 0.0,
             color_gamma: 1.0,
+            voxel_ao_enabled: true,
+            voxel_ao_strength: 1.0,
+            voxel_ao_cutout: true,
             water_reflections_enabled: true,
             water_terrain_ssr: false,
             water_reflection_strength: 0.85,
@@ -245,6 +251,9 @@ impl Default for RenderDebugSettings {
 pub struct MeshingToggleState {
     pub last_use_greedy: bool,
     pub last_leaf_depth_layer_faces: bool,
+    pub last_voxel_ao_enabled: bool,
+    pub last_voxel_ao_cutout: bool,
+    pub last_voxel_ao_strength: f32,
 }
 
 impl Default for MeshingToggleState {
@@ -252,6 +261,9 @@ impl Default for MeshingToggleState {
         Self {
             last_use_greedy: true,
             last_leaf_depth_layer_faces: true,
+            last_voxel_ao_enabled: true,
+            last_voxel_ao_cutout: true,
+            last_voxel_ao_strength: 1.0,
         }
     }
 }
@@ -359,12 +371,18 @@ pub fn remesh_on_meshing_toggle(
 ) {
     if settings.use_greedy_meshing == state.last_use_greedy
         && settings.leaf_depth_layer_faces == state.last_leaf_depth_layer_faces
+        && settings.voxel_ao_enabled == state.last_voxel_ao_enabled
+        && settings.voxel_ao_cutout == state.last_voxel_ao_cutout
+        && (settings.voxel_ao_strength - state.last_voxel_ao_strength).abs() < 0.001
         && !settings.force_remesh
     {
         return;
     }
     state.last_use_greedy = settings.use_greedy_meshing;
     state.last_leaf_depth_layer_faces = settings.leaf_depth_layer_faces;
+    state.last_voxel_ao_enabled = settings.voxel_ao_enabled;
+    state.last_voxel_ao_cutout = settings.voxel_ao_cutout;
+    state.last_voxel_ao_strength = settings.voxel_ao_strength;
     settings.force_remesh = false;
     in_flight.chunks.clear();
     for key in store.chunks.keys().copied() {
@@ -374,6 +392,9 @@ pub fn remesh_on_meshing_toggle(
             snapshot,
             use_greedy: settings.use_greedy_meshing,
             leaf_depth_layer_faces: settings.leaf_depth_layer_faces,
+            voxel_ao_enabled: settings.voxel_ao_enabled,
+            voxel_ao_strength: settings.voxel_ao_strength,
+            voxel_ao_cutout: settings.voxel_ao_cutout,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };

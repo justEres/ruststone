@@ -60,6 +60,9 @@ pub struct MeshJob {
     pub snapshot: ChunkColumnSnapshot,
     pub use_greedy: bool,
     pub leaf_depth_layer_faces: bool,
+    pub voxel_ao_enabled: bool,
+    pub voxel_ao_strength: f32,
+    pub voxel_ao_cutout: bool,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
 }
@@ -70,6 +73,9 @@ impl MeshJob {
             .build_mesh_data(
                 self.use_greedy,
                 self.leaf_depth_layer_faces,
+                self.voxel_ao_enabled,
+                self.voxel_ao_strength,
+                self.voxel_ao_cutout,
                 &self.texture_mapping,
                 &self.biome_tints,
             )
