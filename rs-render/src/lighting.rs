@@ -5,7 +5,7 @@ use bevy::core_pipeline::{
 use bevy::pbr::{
     CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap,
     OpaqueRendererMethod,
-    ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
+    ScreenSpaceAmbientOcclusion,
 };
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
@@ -115,7 +115,9 @@ pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
 
 fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
     let _ = settings;
-    // Cutout uses explicit alpha discard in shader and must write depth.
+    // Composition-stable route:
+    // cutout renders in the opaque queue and uses explicit shader discard.
+    // This avoids alpha-mode/pipeline switching differences between quality presets.
     AlphaMode::Opaque
 }
 
@@ -226,11 +228,16 @@ pub fn lighting_uniform_for_mode(
             },
         ),
         debug_flags: Vec4::new(
-            settings.cutout_debug_mode as f32,
+            if fixed_debug {
+                settings.cutout_debug_mode as f32
+            } else {
+                0.0
+            },
             settings.water_reflection_sky_fill,
             if cutout_blend_enabled { 1.0 } else { 0.0 },
             if fixed_debug { 1.0 } else { 0.0 },
         ),
+        grass_overlay_info: Vec4::new(f32::NAN, f32::NAN, f32::NAN, f32::NAN),
         reflection_view_proj: Mat4::IDENTITY,
     }
 }
@@ -251,6 +258,12 @@ pub fn apply_lighting_quality(
     mut last_material_key: Local<Option<(u8, bool, bool, bool, u32)>>,
 ) {
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
+    let grass_overlay_info = assets.grass_overlay_info;
+    let make_lighting = |pass_mode: f32| {
+        let mut u = lighting_uniform_for_mode(&settings, pass_mode);
+        u.grass_overlay_info = grass_overlay_info;
+        u
+    };
     let material_key = (
         settings.shader_quality_mode,
         settings.enable_pbr_terrain_lighting,
@@ -284,7 +297,7 @@ pub fn apply_lighting_quality(
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
                 reflection: assets.reflection_texture.clone(),
-                lighting: lighting_uniform_for_mode(&settings, 0.0),
+                lighting: make_lighting(0.0),
             },
         });
         let transparent_material = materials.add(ChunkAtlasMaterial {
@@ -311,7 +324,7 @@ pub fn apply_lighting_quality(
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
                 reflection: assets.reflection_texture.clone(),
-                lighting: lighting_uniform_for_mode(&settings, 1.0),
+                lighting: make_lighting(1.0),
             },
         });
         let cutout_material = materials.add(ChunkAtlasMaterial {
@@ -330,7 +343,7 @@ pub fn apply_lighting_quality(
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
                 reflection: assets.reflection_texture.clone(),
-                lighting: lighting_uniform_for_mode(&settings, 2.0),
+                lighting: make_lighting(2.0),
             },
         });
         let cutout_culled_material = materials.add(ChunkAtlasMaterial {
@@ -349,7 +362,7 @@ pub fn apply_lighting_quality(
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
                 reflection: assets.reflection_texture.clone(),
-                lighting: lighting_uniform_for_mode(&settings, 2.0),
+                lighting: make_lighting(2.0),
             },
         });
 
@@ -372,25 +385,25 @@ pub fn apply_lighting_quality(
     }
 
     if let Some(mat) = materials.get_mut(&assets.opaque_material) {
-        mat.extension.lighting = lighting_uniform_for_mode(&settings, 0.0);
+        mat.extension.lighting = make_lighting(0.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = AlphaMode::Opaque;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
-        mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
+        mat.extension.lighting = make_lighting(2.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
-        mat.extension.lighting = lighting_uniform_for_mode(&settings, 2.0);
+        mat.extension.lighting = make_lighting(2.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
     if let Some(mat) = materials.get_mut(&assets.transparent_material) {
-        mat.extension.lighting = lighting_uniform_for_mode(&settings, 1.0);
+        mat.extension.lighting = make_lighting(1.0);
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = AlphaMode::Blend;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
@@ -546,11 +559,16 @@ pub fn update_water_animation(
             );
             mat.extension.lighting.debug_flags =
                 Vec4::new(
-                    settings.cutout_debug_mode as f32,
+                    if fixed_debug {
+                        settings.cutout_debug_mode as f32
+                    } else {
+                        0.0
+                    },
                     settings.water_reflection_sky_fill,
                     if cutout_blend_enabled { 1.0 } else { 0.0 },
                     if fixed_debug { 1.0 } else { 0.0 },
                 );
+            mat.extension.lighting.grass_overlay_info = assets.grass_overlay_info;
             mat.extension.lighting.reflection_view_proj = reflection_view_proj;
         }
     }
@@ -711,37 +729,15 @@ pub fn apply_ssao_quality(
     let Ok(camera_entity) = camera_query.single() else {
         return;
     };
-    let aa_uses_msaa = matches!(
-        settings.aa_mode,
-        AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
-    );
-    if aa_uses_msaa {
-        commands
-            .entity(camera_entity)
-            .remove::<ScreenSpaceAmbientOcclusion>();
-        return;
-    }
-    match settings.shader_quality_mode {
-        0 | 1 => {
-            commands
-                .entity(camera_entity)
-                .remove::<ScreenSpaceAmbientOcclusion>();
-        }
-        2 => {
-            commands
-                .entity(camera_entity)
-                .insert(ScreenSpaceAmbientOcclusion {
-                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Low,
-                    constant_object_thickness: 0.25,
-                });
-        }
-        _ => {
-            commands
-                .entity(camera_entity)
-                .insert(ScreenSpaceAmbientOcclusion {
-                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
-                    constant_object_thickness: 0.25,
-                });
-        }
-    }
+    let _ = settings;
+    // IMPORTANT:
+    // SSAO forces Bevy's prepass path. Our atlas cutout is implemented in the
+    // custom material shader, but the prepass doesn't apply the same atlas alpha
+    // clip, which writes full-quad depth for cutout meshes (leaves/tallgrass/etc.).
+    // Result: hole pixels show clear gray instead of geometry behind.
+    //
+    // Until we add a dedicated cutout-aware prepass shader path, keep SSAO disabled.
+    commands
+        .entity(camera_entity)
+        .remove::<ScreenSpaceAmbientOcclusion>();
 }

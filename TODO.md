@@ -2,6 +2,8 @@
 
 - ✅ proper options menu which saves in toml format
 - ✅ metadata stuff -> hovering over items in inventory and showing tooltips
+- better logging -> more info and more warnings using tracing
+
 
 - Bugfixes:
     - ✅ block outline for water -> should not be there
@@ -84,7 +86,7 @@
     - better timing analysis support -->
 
 - Shipping:
-    - tested windows support
+    - tested windows support -> checked it, works
     - bake assets into binary -> whole project single executable + accounts + options files 
 
 - Ideas:

@@ -57,6 +57,7 @@ struct AtlasLightingUniform {
     water_controls: vec4<f32>,
     water_extra: vec4<f32>,
     debug_flags: vec4<f32>,
+    grass_overlay_info: vec4<f32>,
     reflection_view_proj: mat4x4<f32>,
 }
 
@@ -305,7 +306,6 @@ fn fragment(
     let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
     let cutout_pass = pass_mode_valid && pass_mode > 1.5;
     let shader_debug_view = i32(round(lighting_uniform.debug_flags.x));
-    let cutout_blend_enabled = lighting_uniform.debug_flags.z > 0.5;
     let fixed_debug_state = lighting_uniform.debug_flags.w > 0.5;
 
     let packed_uv = in.uv;
@@ -341,8 +341,26 @@ fn fragment(
     // Manual texel fetch keeps alpha-cutout stable across quality pipeline switches.
     let atlas_sample = atlas_texel_from_repeating(uv_local, tile_origin);
     let atlas_rgb = atlas_sample.rgb;
-    pbr_input.material.base_color *= atlas_sample;
     let atlas_alpha = atlas_sample.a;
+    let grass_base_origin = lighting_uniform.grass_overlay_info.xy;
+    let grass_overlay_origin = lighting_uniform.grass_overlay_info.zw;
+    let grass_info_valid =
+        grass_base_origin.x == grass_base_origin.x
+        && grass_base_origin.y == grass_base_origin.y
+        && grass_overlay_origin.x == grass_overlay_origin.x
+        && grass_overlay_origin.y == grass_overlay_origin.y;
+    let origin_eps = vec2<f32>(0.5 / ATLAS_COLUMNS, 0.5 / ATLAS_ROWS);
+    let is_grass_side =
+        grass_info_valid && all(abs(tile_origin - grass_base_origin) <= origin_eps);
+    if is_grass_side {
+        let overlay_sample = atlas_texel_from_repeating(uv_local, grass_overlay_origin);
+        let overlay_mask = overlay_sample.a;
+        let shade = clamp(pbr_input.material.base_color.a, 0.0, 1.0);
+        let tinted = mix(vec3<f32>(1.0, 1.0, 1.0), clamp(vertex_tint_rgb, vec3<f32>(0.0), vec3<f32>(1.0)), overlay_mask);
+        pbr_input.material.base_color = vec4(atlas_rgb * tinted * shade, atlas_alpha);
+    } else {
+        pbr_input.material.base_color *= atlas_sample;
+    }
 
     if transparent_pass {
         // Keep water/lava blend, but still punch fully transparent texels.
@@ -350,9 +368,10 @@ fn fragment(
             discard;
         }
     } else {
-        // Hard cutout for foliage/glass/cross meshes and opaque block passes.
-        // Use a NaN-safe comparison: invalid alpha should be discarded too.
-        if !(atlas_alpha >= 0.5) {
+        // For all non-transparent passes force binary cutout.
+        // This keeps foliage/cutout stable even if runtime pass flags or material state
+        // are temporarily out of sync after quality switches.
+        if !(atlas_alpha >= 0.99) {
             discard;
         }
     }
@@ -376,6 +395,23 @@ fn fragment(
         } else if shader_debug_view == 5 {
             let depth_norm = clamp(abs(in.position.w) / max(lighting_uniform.ambient_and_fog.w, 1.0), 0.0, 1.0);
             debug_rgb = vec3<f32>(depth_norm, depth_norm, depth_norm);
+        } else if shader_debug_view == 6 {
+            // Pass flag diagnostics:
+            // R = cutout, G = transparent, B = opaque fallback
+            let opaque_flag = select(0.0, 1.0, !(transparent_pass || cutout_pass));
+            debug_rgb = vec3<f32>(
+                select(0.0, 1.0, cutout_pass),
+                select(0.0, 1.0, transparent_pass),
+                opaque_flag,
+            );
+        } else if shader_debug_view == 7 {
+            // Alpha diagnostics:
+            // R = strict cutout keep bit (alpha >= 0.99),
+            // G = raw sampled alpha,
+            // B = pass_mode (normalized).
+            let keep = select(0.0, 1.0, atlas_alpha >= 0.99);
+            let pass_n = clamp(pass_mode * 0.5, 0.0, 1.0);
+            debug_rgb = vec3<f32>(keep, atlas_alpha, pass_n);
         }
         var debug_out: FragmentOutput;
         debug_out.color = vec4(debug_rgb, 1.0);
@@ -386,9 +422,9 @@ fn fragment(
     // Stage 2: Pass-specific alpha handling.
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
     // to avoid backend/material-mode differences on alpha-mask handling.
-    if transparent_pass || (cutout_pass && cutout_blend_enabled) {
+    if transparent_pass {
         pbr_input.material.base_color.a = atlas_alpha;
-        // Keep std alpha handling for blended passes (water/cutout blend debug).
+        // Keep std alpha handling for transparent passes.
         pbr_input.material.base_color =
             alpha_discard(pbr_input.material, pbr_input.material.base_color);
     } else {

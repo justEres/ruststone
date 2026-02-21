@@ -6,9 +6,6 @@ pub struct Player;
 #[derive(Component)]
 pub struct PlayerCamera;
 
-#[derive(Component)]
-pub struct WaterPassCamera;
-
 #[derive(Component, Default)]
 pub struct Velocity(pub Vec3);
 
