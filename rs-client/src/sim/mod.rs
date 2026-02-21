@@ -122,15 +122,15 @@ impl Default for DebugUiState {
     fn default() -> Self {
         Self {
             open: false,
-            show_prediction: true,
-            show_performance: true,
-            show_render: true,
-            render_show_layers: true,
-            render_show_lighting: true,
-            render_show_water: true,
-            render_show_misc: true,
-            perf_show_schedules: true,
-            perf_show_render_stats: true,
+            show_prediction: false,
+            show_performance: false,
+            show_render: false,
+            render_show_layers: false,
+            render_show_lighting: false,
+            render_show_water: false,
+            render_show_misc: false,
+            perf_show_schedules: false,
+            perf_show_render_stats: false,
         }
     }
 }

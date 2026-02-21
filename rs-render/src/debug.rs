@@ -3,13 +3,10 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
-use crate::chunk::{
-    ChunkRenderAssets, ChunkStore, ChunkSubmeshGroup, DepthSortBaseLocal, MaterialGroup,
-    snapshot_for_chunk,
-};
+use crate::chunk::{ChunkRenderAssets, ChunkStore, snapshot_for_chunk};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
-use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
+use bevy::prelude::{ChildOf, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
@@ -148,19 +145,10 @@ pub struct RenderDebugSettings {
     // Shader debug output mode:
     // 0 off, 1 pass id, 2 atlas rgb, 3 atlas alpha, 4 vertex tint, 5 linear depth
     pub cutout_debug_mode: u8,
-    // Forces a stable debug render state for isolating ordering/alpha issues:
-    // - cutout uses opaque material state + shader discard
-    // - cutout blend toggle ignored
-    // - fog/color grading/waves/reflections are neutralized in uniforms
-    pub fixed_debug_render_state: bool,
-    pub cutout_use_blend: bool,
-    pub cutout_manual_depth_sort: bool,
-    pub cutout_depth_sort_strength: f32,
     pub show_layer_entities: bool,
     pub show_layer_chunks_opaque: bool,
     pub show_layer_chunks_cutout: bool,
     pub show_layer_chunks_transparent: bool,
-    pub leaf_depth_layer_faces: bool,
     pub force_remesh: bool,
     pub material_rebuild_nonce: u32,
 }
@@ -232,15 +220,10 @@ impl Default for RenderDebugSettings {
             water_reflection_resolution_scale: 1.0,
             water_reflection_sky_fill: 0.55,
             cutout_debug_mode: 0,
-            fixed_debug_render_state: false,
-            cutout_use_blend: false,
-            cutout_manual_depth_sort: true,
-            cutout_depth_sort_strength: 0.8,
             show_layer_entities: true,
             show_layer_chunks_opaque: true,
             show_layer_chunks_cutout: true,
             show_layer_chunks_transparent: true,
-            leaf_depth_layer_faces: true,
             force_remesh: false,
             material_rebuild_nonce: 0,
         }
@@ -250,7 +233,6 @@ impl Default for RenderDebugSettings {
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct MeshingToggleState {
     pub last_use_greedy: bool,
-    pub last_leaf_depth_layer_faces: bool,
     pub last_voxel_ao_enabled: bool,
     pub last_voxel_ao_cutout: bool,
     pub last_voxel_ao_strength: f32,
@@ -260,7 +242,6 @@ impl Default for MeshingToggleState {
     fn default() -> Self {
         Self {
             last_use_greedy: true,
-            last_leaf_depth_layer_faces: true,
             last_voxel_ao_enabled: true,
             last_voxel_ao_cutout: true,
             last_voxel_ao_strength: 1.0,
@@ -370,7 +351,6 @@ pub fn remesh_on_meshing_toggle(
     assets: Res<ChunkRenderAssets>,
 ) {
     if settings.use_greedy_meshing == state.last_use_greedy
-        && settings.leaf_depth_layer_faces == state.last_leaf_depth_layer_faces
         && settings.voxel_ao_enabled == state.last_voxel_ao_enabled
         && settings.voxel_ao_cutout == state.last_voxel_ao_cutout
         && (settings.voxel_ao_strength - state.last_voxel_ao_strength).abs() < 0.001
@@ -379,7 +359,6 @@ pub fn remesh_on_meshing_toggle(
         return;
     }
     state.last_use_greedy = settings.use_greedy_meshing;
-    state.last_leaf_depth_layer_faces = settings.leaf_depth_layer_faces;
     state.last_voxel_ao_enabled = settings.voxel_ao_enabled;
     state.last_voxel_ao_cutout = settings.voxel_ao_cutout;
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
@@ -391,7 +370,7 @@ pub fn remesh_on_meshing_toggle(
             chunk_key: key,
             snapshot,
             use_greedy: settings.use_greedy_meshing,
-            leaf_depth_layer_faces: settings.leaf_depth_layer_faces,
+            leaf_depth_layer_faces: true,
             voxel_ao_enabled: settings.voxel_ao_enabled,
             voxel_ao_strength: settings.voxel_ao_strength,
             voxel_ao_cutout: settings.voxel_ao_cutout,
@@ -418,66 +397,6 @@ pub fn refresh_render_state_on_mode_change(
         settings.force_remesh = true;
     }
     *last_mode = Some(mode);
-}
-
-pub fn manual_cutout_depth_sort(
-    settings: Res<RenderDebugSettings>,
-    camera: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut cutout_meshes: Query<
-        (
-            &ChunkSubmeshGroup,
-            &mut Transform,
-            &DepthSortBaseLocal,
-            &GlobalTransform,
-        ),
-        With<Mesh3d>,
-    >,
-) {
-    let Ok(camera_transform) = camera.single() else {
-        return;
-    };
-    let view_dir = *camera_transform.forward();
-    let cam_pos = camera_transform.translation();
-
-    let mut min_depth = f32::INFINITY;
-    let mut max_depth = f32::NEG_INFINITY;
-    for (group, _, _, world_tf) in &cutout_meshes {
-        if !matches!(
-            group.0,
-            MaterialGroup::Cutout | MaterialGroup::CutoutCulled
-        ) {
-            continue;
-        }
-        let depth = (world_tf.translation() - cam_pos).dot(view_dir);
-        min_depth = min_depth.min(depth);
-        max_depth = max_depth.max(depth);
-    }
-
-    if !min_depth.is_finite() || !max_depth.is_finite() {
-        return;
-    }
-
-    let depth_range = (max_depth - min_depth).max(0.0001);
-    for (group, mut local_tf, base_local, world_tf) in &mut cutout_meshes {
-        if !matches!(
-            group.0,
-            MaterialGroup::Cutout | MaterialGroup::CutoutCulled
-        ) {
-            continue;
-        }
-
-        if !settings.cutout_use_blend || !settings.cutout_manual_depth_sort {
-            local_tf.translation = base_local.0;
-            continue;
-        }
-
-        // Blend-transparent leaf/cutout meshes can interpenetrate and sort poorly.
-        // Apply a small camera-relative bias to stabilize ordering between submeshes.
-        let depth = (world_tf.translation() - cam_pos).dot(view_dir);
-        let t = (depth - min_depth) / depth_range; // 0..1
-        let sort_bias = (t - 0.5) * settings.cutout_depth_sort_strength;
-        local_tf.translation = base_local.0 + view_dir * sort_bias;
-    }
 }
 
 pub fn gather_render_stats(
