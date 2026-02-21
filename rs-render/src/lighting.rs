@@ -114,22 +114,26 @@ pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
 }
 
 fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
-    if settings.cutout_use_blend {
-        AlphaMode::Blend
-    } else {
-        AlphaMode::Opaque
-    }
+    let _ = settings;
+    // Cutout uses explicit alpha discard in shader and must write depth.
+    AlphaMode::Opaque
 }
 
 pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
 ) -> AtlasLightingUniform {
+    let fixed_debug = settings.fixed_debug_render_state;
     let az = settings.sun_azimuth_deg.to_radians();
     let el = settings.sun_elevation_deg.to_radians();
     let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
         .normalize_or_zero();
-    let quality_mode = settings.shader_quality_mode.clamp(0, 3) as f32;
+    let quality_mode = if fixed_debug {
+        0.0
+    } else {
+        settings.shader_quality_mode.clamp(0, 3) as f32
+    };
+    let cutout_blend_enabled = false;
     AtlasLightingUniform {
         sun_dir_and_strength: Vec4::new(
             sun_dir.x,
@@ -139,9 +143,9 @@ pub fn lighting_uniform_for_mode(
         ),
         ambient_and_fog: Vec4::new(
             settings.ambient_strength,
-            settings.fog_density,
-            settings.fog_start,
-            settings.fog_end,
+            if fixed_debug { 0.0 } else { settings.fog_density },
+            if fixed_debug { 10_000.0 } else { settings.fog_start },
+            if fixed_debug { 10_001.0 } else { settings.fog_end },
         ),
         quality_and_water: Vec4::new(
             quality_mode,
@@ -150,21 +154,43 @@ pub fn lighting_uniform_for_mode(
             pass_mode,
         ),
         color_grading: Vec4::new(
-            settings.color_saturation,
-            settings.color_contrast,
-            settings.color_brightness,
-            settings.color_gamma,
+            if fixed_debug {
+                1.0
+            } else {
+                settings.color_saturation
+            },
+            if fixed_debug {
+                1.0
+            } else {
+                settings.color_contrast
+            },
+            if fixed_debug {
+                0.0
+            } else {
+                settings.color_brightness
+            },
+            if fixed_debug { 1.0 } else { settings.color_gamma },
         ),
         water_effects: Vec4::new(
-            if settings.water_reflections_enabled && settings.water_terrain_ssr {
+            if fixed_debug {
+                0.0
+            } else if settings.water_reflections_enabled && settings.water_terrain_ssr {
                 2.0
             } else if settings.water_reflections_enabled {
                 1.0
             } else {
                 0.0
             },
-            settings.water_wave_strength,
-            settings.water_wave_speed,
+            if fixed_debug {
+                0.0
+            } else {
+                settings.water_wave_strength
+            },
+            if fixed_debug {
+                0.0
+            } else {
+                settings.water_wave_speed
+            },
             0.0,
         ),
         water_controls: Vec4::new(
@@ -178,16 +204,32 @@ pub fn lighting_uniform_for_mode(
             },
         ),
         water_extra: Vec4::new(
-            settings.water_wave_detail_strength,
-            settings.water_wave_detail_scale,
-            settings.water_wave_detail_speed,
-            settings.water_reflection_edge_fade,
+            if fixed_debug {
+                0.0
+            } else {
+                settings.water_wave_detail_strength
+            },
+            if fixed_debug {
+                1.0
+            } else {
+                settings.water_wave_detail_scale
+            },
+            if fixed_debug {
+                0.0
+            } else {
+                settings.water_wave_detail_speed
+            },
+            if fixed_debug {
+                0.01
+            } else {
+                settings.water_reflection_edge_fade
+            },
         ),
         debug_flags: Vec4::new(
             settings.cutout_debug_mode as f32,
             settings.water_reflection_sky_fill,
-            if settings.cutout_use_blend { 1.0 } else { 0.0 },
-            0.0,
+            if cutout_blend_enabled { 1.0 } else { 0.0 },
+            if fixed_debug { 1.0 } else { 0.0 },
         ),
         reflection_view_proj: Mat4::IDENTITY,
     }
@@ -206,13 +248,14 @@ pub fn apply_lighting_quality(
     )>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut ambient: ResMut<AmbientLight>,
-    mut last_material_key: Local<Option<(u8, bool, bool, u32)>>,
+    mut last_material_key: Local<Option<(u8, bool, bool, bool, u32)>>,
 ) {
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
     let material_key = (
         settings.shader_quality_mode,
         settings.enable_pbr_terrain_lighting,
         settings.cutout_use_blend,
+        settings.fixed_debug_render_state,
         settings.material_rebuild_nonce,
     );
     let recreate_materials = last_material_key
@@ -412,7 +455,10 @@ pub fn update_water_animation(
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
 ) {
     let t = time.elapsed_secs_wrapped();
-    let reflection_mode = if settings.water_reflections_enabled && settings.water_terrain_ssr {
+    let fixed_debug = settings.fixed_debug_render_state;
+    let reflection_mode = if fixed_debug {
+        0.0
+    } else if settings.water_reflections_enabled && settings.water_terrain_ssr {
         2.0
     } else if settings.water_reflections_enabled {
         1.0
@@ -426,6 +472,7 @@ pub fn update_water_animation(
         (Mat4::IDENTITY, DEFAULT_WATER_PLANE_Y)
     };
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
+    let cutout_blend_enabled = settings.cutout_use_blend && !fixed_debug;
 
     for (handle, pass_mode, force_unlit, alpha_mode) in [
         (&assets.opaque_material, 0.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Opaque),
@@ -452,8 +499,16 @@ pub fn update_water_animation(
             mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
             mat.extension.lighting.water_effects = Vec4::new(
                 reflection_mode,
-                settings.water_wave_strength,
-                settings.water_wave_speed,
+                if fixed_debug {
+                    0.0
+                } else {
+                    settings.water_wave_strength
+                },
+                if fixed_debug {
+                    0.0
+                } else {
+                    settings.water_wave_speed
+                },
                 t,
             );
             mat.extension.lighting.water_controls =
@@ -468,17 +523,33 @@ pub fn update_water_animation(
                     },
                 );
             mat.extension.lighting.water_extra = Vec4::new(
-                settings.water_wave_detail_strength,
-                settings.water_wave_detail_scale,
-                settings.water_wave_detail_speed,
-                settings.water_reflection_edge_fade,
+                if fixed_debug {
+                    0.0
+                } else {
+                    settings.water_wave_detail_strength
+                },
+                if fixed_debug {
+                    1.0
+                } else {
+                    settings.water_wave_detail_scale
+                },
+                if fixed_debug {
+                    0.0
+                } else {
+                    settings.water_wave_detail_speed
+                },
+                if fixed_debug {
+                    0.01
+                } else {
+                    settings.water_reflection_edge_fade
+                },
             );
             mat.extension.lighting.debug_flags =
                 Vec4::new(
                     settings.cutout_debug_mode as f32,
                     settings.water_reflection_sky_fill,
-                    if settings.cutout_use_blend { 1.0 } else { 0.0 },
-                    0.0,
+                    if cutout_blend_enabled { 1.0 } else { 0.0 },
+                    if fixed_debug { 1.0 } else { 0.0 },
                 );
             mat.extension.lighting.reflection_view_proj = reflection_view_proj;
         }

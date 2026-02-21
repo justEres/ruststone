@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -330,11 +331,7 @@ impl FromWorld for ChunkRenderAssets {
         };
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
         let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
-        let cutout_alpha_mode = if settings.cutout_use_blend {
-            AlphaMode::Blend
-        } else {
-            AlphaMode::Opaque
-        };
+        let cutout_alpha_mode = AlphaMode::Opaque;
 
         let opaque_material = materials.add(ChunkAtlasMaterial {
             base: StandardMaterial {
@@ -479,6 +476,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         };
         let mut rgba = rgba;
         apply_default_foliage_tint(texture_name, &mut rgba);
+        normalize_overlay_mask_texture(texture_name, &mut rgba);
 
         let atlas_buf = atlas.get_or_insert_with(|| {
             ImageBuffer::from_pixel(
@@ -500,6 +498,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
     let atlas = atlas.unwrap_or_else(|| {
         ImageBuffer::from_pixel(ATLAS_COLUMNS * 16, ATLAS_ROWS * 16, Rgba([0, 0, 0, 0]))
     });
+    dump_atlas_debug_images(&atlas);
     let mut model_resolver = BlockModelResolver::new(default_model_roots());
     let mapping = Arc::new(build_block_texture_mapping(
         &name_to_index,
@@ -532,6 +531,20 @@ fn apply_default_foliage_tint(texture_name: &str, img: &mut ImageBuffer<Rgba<u8>
         p.0[0] = ((u16::from(p.0[0]) * u16::from(tint[0])) / 255) as u8;
         p.0[1] = ((u16::from(p.0[1]) * u16::from(tint[1])) / 255) as u8;
         p.0[2] = ((u16::from(p.0[2]) * u16::from(tint[2])) / 255) as u8;
+    }
+}
+
+fn normalize_overlay_mask_texture(texture_name: &str, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    if !texture_name.ends_with("_overlay.png") {
+        return;
+    }
+    // Some packs encode overlay mask in RGB while alpha is fully opaque.
+    // Convert to canonical mask: white RGB + mask alpha.
+    for p in img.pixels_mut() {
+        let [r, g, b, a] = p.0;
+        let luma = ((u16::from(r) + u16::from(g) + u16::from(b)) / 3) as u8;
+        let mask = if a == 255 { luma } else { a };
+        p.0 = [255, 255, 255, mask];
     }
 }
 
@@ -591,6 +604,24 @@ fn bevy_image_from_rgba(img: DynamicImage) -> Image {
     );
     image.data = Some(data);
     image
+}
+
+fn dump_atlas_debug_images(atlas: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    let out_dir = PathBuf::from("rs-client/assets/debug");
+    if fs::create_dir_all(&out_dir).is_err() {
+        return;
+    }
+
+    let atlas_path = out_dir.join("atlas_dump.png");
+    let _ = DynamicImage::ImageRgba8(atlas.clone()).save(&atlas_path);
+
+    let mut alpha_img = ImageBuffer::from_pixel(atlas.width(), atlas.height(), Rgba([0, 0, 0, 255]));
+    for (src, dst) in atlas.pixels().zip(alpha_img.pixels_mut()) {
+        let a = src.0[3];
+        *dst = Rgba([a, a, a, 255]);
+    }
+    let alpha_path = out_dir.join("atlas_alpha.png");
+    let _ = DynamicImage::ImageRgba8(alpha_img).save(&alpha_path);
 }
 
 pub fn create_reflection_target_image(width: u32, height: u32) -> Image {
@@ -932,6 +963,7 @@ fn build_chunk_mesh_greedy(
                             snapshot,
                             chunk_x,
                             chunk_z,
+                            texture_mapping,
                             face,
                             axis as i32,
                             base_y,
@@ -954,6 +986,7 @@ fn add_greedy_quad(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
+    texture_mapping: &AtlasBlockMapping,
     face: Face,
     axis: i32,
     base_y: i32,
@@ -1035,7 +1068,11 @@ fn add_greedy_quad(
             .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
         data.uvs_b.push(tile_origin);
     }
-    let base_color = tint_color_untargeted(block_id, tint);
+    let base_color = if is_grass_side_face(block_id, face) {
+        [1.0, 1.0, 1.0, 1.0]
+    } else {
+        tint_color_untargeted(block_id, tint)
+    };
     let (bx, by, bz) = match face {
         Face::PosY | Face::NegY => (quad.x as i32, base_y + axis, quad.y as i32),
         Face::PosX | Face::NegX => (axis, base_y + quad.y as i32, quad.x as i32),
@@ -1061,6 +1098,39 @@ fn add_greedy_quad(
         base_index + 3,
         base_index + 2,
     ]);
+
+    if is_grass_side_face(block_id, face) {
+        if let Some(overlay_index) = texture_mapping.texture_index_by_name("grass_side_overlay.png")
+        {
+            let overlay_base = data.positions.len() as u32;
+            let normal_vec = Vec3::new(normal[0], normal[1], normal[2]);
+            let overlay_offset = normal_vec * 0.0015;
+            for vert in verts {
+                data.push_pos([
+                    vert[0] + overlay_offset.x,
+                    vert[1] + overlay_offset.y,
+                    vert[2] + overlay_offset.z,
+                ]);
+                data.normals.push(normal);
+            }
+            let overlay_origin = atlas_tile_origin(overlay_index);
+            let base_uvs = uv_for_texture();
+            for uv in base_uvs {
+                data.uvs
+                    .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
+                data.uvs_b.push(overlay_origin);
+            }
+            data.colors.extend_from_slice(&[color, color, color, color]);
+            data.indices.extend_from_slice(&[
+                overlay_base,
+                overlay_base + 2,
+                overlay_base + 1,
+                overlay_base,
+                overlay_base + 3,
+                overlay_base + 2,
+            ]);
+        }
+    }
 }
 
 fn greedy_mesh_binary_plane(mut data: [u32; 16], size: u32) -> Vec<GreedyQuad> {
@@ -1210,17 +1280,21 @@ fn add_block_faces(
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
-        let base_color = tint_color(
-            block_id,
-            tint,
-            snapshot,
-            chunk_x,
-            chunk_z,
-            x,
-            y,
-            z,
-            biome_tints,
-        );
+        let base_color = if is_grass_side_face(block_id, face) {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            tint_color(
+                block_id,
+                tint,
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z,
+                biome_tints,
+            )
+        };
         for vert in verts {
             let shade = if should_apply_prebaked_shade(block_id) {
                 face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert)
@@ -1242,7 +1316,65 @@ fn add_block_faces(
             base_index + 3,
             base_index + 2,
         ]);
+
+        if is_grass_side_face(block_id, face) {
+            if let Some(overlay_index) = texture_mapping.texture_index_by_name("grass_side_overlay.png")
+            {
+                let overlay_base = data.positions.len() as u32;
+                let normal_vec = Vec3::new(normal[0], normal[1], normal[2]);
+                let overlay_offset = normal_vec * 0.0015;
+                let overlay_color = tint_color(
+                    block_id,
+                    tint,
+                    snapshot,
+                    chunk_x,
+                    chunk_z,
+                    x,
+                    y,
+                    z,
+                    biome_tints,
+                );
+                for vert in verts {
+                    data.push_pos([
+                        vert[0] + x as f32 + overlay_offset.x,
+                        vert[1] + y as f32 + overlay_offset.y,
+                        vert[2] + z as f32 + overlay_offset.z,
+                    ]);
+                    data.normals.push(normal);
+                }
+                let uvs = uv_for_texture();
+                data.uvs.extend_from_slice(&uvs);
+                let overlay_origin = atlas_tile_origin(overlay_index);
+                data.uvs_b.extend_from_slice(&[overlay_origin; 4]);
+                for vert in verts {
+                    let shade = if should_apply_prebaked_shade(block_id) {
+                        face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert)
+                    } else {
+                        1.0
+                    };
+                    data.colors.push([
+                        overlay_color[0] * shade,
+                        overlay_color[1] * shade,
+                        overlay_color[2] * shade,
+                        overlay_color[3],
+                    ]);
+                }
+                data.indices.extend_from_slice(&[
+                    overlay_base,
+                    overlay_base + 2,
+                    overlay_base + 1,
+                    overlay_base,
+                    overlay_base + 3,
+                    overlay_base + 2,
+                ]);
+            }
+        }
     }
+}
+
+fn is_grass_side_face(block_state: u16, face: Face) -> bool {
+    block_type(block_state) == 2
+        && !matches!(face, Face::PosY | Face::NegY)
 }
 
 #[allow(clippy::too_many_arguments)]

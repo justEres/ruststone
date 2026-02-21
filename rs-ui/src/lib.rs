@@ -380,12 +380,12 @@ fn connect_ui(
                                 "Leaf depth layer faces",
                             )
                             .changed();
-                        options_changed |= ui
-                            .checkbox(
+                        ui.add_enabled_ui(false, |ui| {
+                            ui.checkbox(
                                 &mut render_debug.cutout_use_blend,
-                                "Cutout blend alpha",
-                            )
-                            .changed();
+                                "Cutout blend alpha (disabled)",
+                            );
+                        });
                         options_changed |= ui
                             .checkbox(
                                 &mut render_debug.cutout_manual_depth_sort,
@@ -401,6 +401,7 @@ fn connect_ui(
                                 .text("Cutout depth sort strength"),
                             )
                             .changed();
+                        ui.small("Cutout blend is ignored while fixed debug render state is enabled.");
                         if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
                             options_changed = true;
                             if let Ok(mut window) = window_query.get_single_mut() {
@@ -657,6 +658,41 @@ fn connect_ui(
                             .changed();
                     });
                 state.options_section_layers = layers_section.fully_open();
+
+                let diagnostics_section = egui::CollapsingHeader::new("Diagnostics")
+                    .default_open(state.options_section_diagnostics)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.fixed_debug_render_state,
+                                "Fixed debug render state",
+                            )
+                            .changed();
+
+                        let mut selected_debug_mode = render_debug.cutout_debug_mode;
+                        egui::ComboBox::from_label("Shader debug view")
+                            .selected_text(match selected_debug_mode {
+                                1 => "Pass id",
+                                2 => "Atlas rgb",
+                                3 => "Atlas alpha",
+                                4 => "Vertex tint",
+                                5 => "Linear depth",
+                                _ => "Off",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut selected_debug_mode, 0, "Off");
+                                ui.selectable_value(&mut selected_debug_mode, 1, "Pass id");
+                                ui.selectable_value(&mut selected_debug_mode, 2, "Atlas rgb");
+                                ui.selectable_value(&mut selected_debug_mode, 3, "Atlas alpha");
+                                ui.selectable_value(&mut selected_debug_mode, 4, "Vertex tint");
+                                ui.selectable_value(&mut selected_debug_mode, 5, "Linear depth");
+                            });
+                        if selected_debug_mode != render_debug.cutout_debug_mode {
+                            render_debug.cutout_debug_mode = selected_debug_mode;
+                            options_changed = true;
+                        }
+                    });
+                state.options_section_diagnostics = diagnostics_section.fully_open();
 
                 let system_section = egui::CollapsingHeader::new("System")
                     .default_open(state.options_section_system)
@@ -922,6 +958,7 @@ pub struct ConnectUiState {
     pub options_section_lighting: bool,
     pub options_section_water: bool,
     pub options_section_layers: bool,
+    pub options_section_diagnostics: bool,
     pub options_section_system: bool,
 }
 impl Default for ConnectUiState {
@@ -945,6 +982,7 @@ impl Default for ConnectUiState {
             options_section_lighting: true,
             options_section_water: true,
             options_section_layers: false,
+            options_section_diagnostics: false,
             options_section_system: true,
         }
     }
@@ -1004,6 +1042,8 @@ struct ClientOptionsFile {
     pub water_reflection_sky_fill: f32,
     pub leaf_depth_layer_faces: bool,
     pub cutout_use_blend: bool,
+    pub fixed_debug_render_state: bool,
+    pub cutout_debug_mode: u8,
     pub cutout_manual_depth_sort: bool,
     pub cutout_depth_sort_strength: f32,
     pub show_layer_entities: bool,
@@ -1067,6 +1107,8 @@ impl Default for ClientOptionsFile {
             water_reflection_sky_fill: render.water_reflection_sky_fill,
             leaf_depth_layer_faces: render.leaf_depth_layer_faces,
             cutout_use_blend: render.cutout_use_blend,
+            fixed_debug_render_state: render.fixed_debug_render_state,
+            cutout_debug_mode: render.cutout_debug_mode,
             cutout_manual_depth_sort: render.cutout_manual_depth_sort,
             cutout_depth_sort_strength: render.cutout_depth_sort_strength,
             show_layer_entities: render.show_layer_entities,
@@ -1130,6 +1172,8 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_reflection_sky_fill: render.water_reflection_sky_fill,
         leaf_depth_layer_faces: render.leaf_depth_layer_faces,
         cutout_use_blend: render.cutout_use_blend,
+        fixed_debug_render_state: render.fixed_debug_render_state,
+        cutout_debug_mode: render.cutout_debug_mode,
         cutout_manual_depth_sort: render.cutout_manual_depth_sort,
         cutout_depth_sort_strength: render.cutout_depth_sort_strength,
         show_layer_entities: render.show_layer_entities,
@@ -1214,7 +1258,10 @@ fn apply_options(
         options.water_reflection_resolution_scale.clamp(0.5, 3.0);
     render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
     render.leaf_depth_layer_faces = options.leaf_depth_layer_faces;
-    render.cutout_use_blend = options.cutout_use_blend;
+    // Keep cutout in depth-writing mode until blend sorting path is stabilized.
+    render.cutout_use_blend = false;
+    render.fixed_debug_render_state = options.fixed_debug_render_state;
+    render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 5);
     render.cutout_manual_depth_sort = options.cutout_manual_depth_sort;
     render.cutout_depth_sort_strength = options.cutout_depth_sort_strength.clamp(0.0, 2.5);
     render.show_layer_entities = options.show_layer_entities;

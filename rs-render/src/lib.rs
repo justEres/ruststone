@@ -20,7 +20,8 @@ mod world;
 
 pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
-    ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
+    ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WaterPassCamera,
+    WorldRoot,
 };
 pub use debug::{AntiAliasingMode, RenderDebugSettings};
 pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
@@ -48,6 +49,7 @@ impl Plugin for RenderPlugin {
         .add_systems(
             Update,
             (
+                camera::sync_water_pass_camera.after(debug::apply_render_debug_settings),
                 input::apply_cursor_lock,
                 debug::apply_render_debug_settings,
                 lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),

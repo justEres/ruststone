@@ -98,6 +98,7 @@ pub fn input_collect_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut motion_events: EventReader<MouseMotion>,
     mut input: ResMut<CurrentInput>,
+    perspective: Res<CameraPerspectiveState>,
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
@@ -145,6 +146,13 @@ pub fn input_collect_system(
     }
     if keys.pressed(KeyCode::KeyA) {
         input.0.strafe -= 1.0;
+    }
+
+    if matches!(perspective.mode, CameraPerspectiveMode::ThirdPersonFront) {
+        // Front-facing third-person camera is rotated 180deg around the player.
+        // Map movement to camera-relative controls for this view.
+        input.0.forward = -input.0.forward;
+        input.0.strafe = -input.0.strafe;
     }
 
     input.0.jump = keys.pressed(KeyCode::Space);
@@ -382,20 +390,26 @@ pub fn camera_perspective_toggle_system(
     keys: Res<ButtonInput<KeyCode>>,
     ui_state: Res<UiState>,
     mut perspective: ResMut<CameraPerspectiveState>,
+    mut alt_hold: ResMut<CameraPerspectiveAltHold>,
 ) {
-    if ui_state.chat_open || ui_state.inventory_open {
+    if ui_state.chat_open || ui_state.inventory_open || ui_state.paused {
         return;
     }
 
-    if !keys.just_pressed(KeyCode::F5) {
+    let alt_pressed = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if alt_pressed || !keys.just_pressed(KeyCode::F5) {
         return;
     }
 
-    perspective.mode = match perspective.mode {
+    let cycle = |mode| match mode {
         CameraPerspectiveMode::FirstPerson => CameraPerspectiveMode::ThirdPersonBack,
         CameraPerspectiveMode::ThirdPersonBack => CameraPerspectiveMode::ThirdPersonFront,
         CameraPerspectiveMode::ThirdPersonFront => CameraPerspectiveMode::FirstPerson,
     };
+    perspective.mode = cycle(perspective.mode);
+    if let Some(saved) = alt_hold.saved_mode {
+        alt_hold.saved_mode = Some(cycle(saved));
+    }
 }
 
 pub fn camera_perspective_alt_hold_system(
@@ -404,7 +418,7 @@ pub fn camera_perspective_alt_hold_system(
     mut perspective: ResMut<CameraPerspectiveState>,
     mut alt_hold: ResMut<CameraPerspectiveAltHold>,
 ) {
-    if ui_state.chat_open || ui_state.inventory_open {
+    if ui_state.chat_open || ui_state.inventory_open || ui_state.paused {
         alt_hold.saved_mode = None;
         return;
     }
