@@ -374,34 +374,6 @@ fn connect_ui(
                         options_changed |= ui
                             .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
                             .changed();
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.leaf_depth_layer_faces,
-                                "Leaf depth layer faces",
-                            )
-                            .changed();
-                        ui.add_enabled_ui(false, |ui| {
-                            ui.checkbox(
-                                &mut render_debug.cutout_use_blend,
-                                "Cutout blend alpha (disabled)",
-                            );
-                        });
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.cutout_manual_depth_sort,
-                                "Manual cutout depth sort",
-                            )
-                            .changed();
-                        options_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut render_debug.cutout_depth_sort_strength,
-                                    0.0..=2.5,
-                                )
-                                .text("Cutout depth sort strength"),
-                            )
-                            .changed();
-                        ui.small("Cutout blend is ignored while fixed debug render state is enabled.");
                         if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
                             options_changed = true;
                             if let Ok(mut window) = window_query.get_single_mut() {
@@ -677,13 +649,6 @@ fn connect_ui(
                 let diagnostics_section = egui::CollapsingHeader::new("Diagnostics")
                     .default_open(state.options_section_diagnostics)
                     .show(ui, |ui| {
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.fixed_debug_render_state,
-                                "Fixed debug render state",
-                            )
-                            .changed();
-
                         let mut selected_debug_mode = render_debug.cutout_debug_mode;
                         egui::ComboBox::from_label("Shader debug view")
                             .selected_text(match selected_debug_mode {
@@ -716,6 +681,16 @@ fn connect_ui(
                 let system_section = egui::CollapsingHeader::new("System")
                     .default_open(state.options_section_system)
                     .show(ui, |ui| {
+                        if ui.button("Reset All Settings To Default").clicked() {
+                            *render_debug = RenderDebugSettings::default();
+                            state.vsync_enabled = false;
+                            if let Ok(mut window) = window_query.get_single_mut() {
+                                window.present_mode = PresentMode::AutoNoVsync;
+                            }
+                            state.options_dirty = true;
+                            options_changed = true;
+                        }
+                        ui.add_space(8.0);
                         if ui.button("Visual Settings...").clicked() {
                             state.visual_settings_open = !state.visual_settings_open;
                         }
@@ -997,12 +972,12 @@ impl Default for ConnectUiState {
             options_path: DEFAULT_OPTIONS_PATH.to_string(),
             options_status: String::new(),
             visual_settings_open: false,
-            options_section_general: true,
-            options_section_lighting: true,
-            options_section_water: true,
+            options_section_general: false,
+            options_section_lighting: false,
+            options_section_water: false,
             options_section_layers: false,
             options_section_diagnostics: false,
-            options_section_system: true,
+            options_section_system: false,
         }
     }
 }
@@ -1062,12 +1037,7 @@ struct ClientOptionsFile {
     pub water_reflection_overscan: f32,
     pub water_reflection_resolution_scale: f32,
     pub water_reflection_sky_fill: f32,
-    pub leaf_depth_layer_faces: bool,
-    pub cutout_use_blend: bool,
-    pub fixed_debug_render_state: bool,
     pub cutout_debug_mode: u8,
-    pub cutout_manual_depth_sort: bool,
-    pub cutout_depth_sort_strength: f32,
     pub show_layer_entities: bool,
     pub show_layer_chunks_opaque: bool,
     pub show_layer_chunks_cutout: bool,
@@ -1130,12 +1100,7 @@ impl Default for ClientOptionsFile {
             water_reflection_overscan: render.water_reflection_overscan,
             water_reflection_resolution_scale: render.water_reflection_resolution_scale,
             water_reflection_sky_fill: render.water_reflection_sky_fill,
-            leaf_depth_layer_faces: render.leaf_depth_layer_faces,
-            cutout_use_blend: render.cutout_use_blend,
-            fixed_debug_render_state: render.fixed_debug_render_state,
             cutout_debug_mode: render.cutout_debug_mode,
-            cutout_manual_depth_sort: render.cutout_manual_depth_sort,
-            cutout_depth_sort_strength: render.cutout_depth_sort_strength,
             show_layer_entities: render.show_layer_entities,
             show_layer_chunks_opaque: render.show_layer_chunks_opaque,
             show_layer_chunks_cutout: render.show_layer_chunks_cutout,
@@ -1198,12 +1163,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_reflection_overscan: render.water_reflection_overscan,
         water_reflection_resolution_scale: render.water_reflection_resolution_scale,
         water_reflection_sky_fill: render.water_reflection_sky_fill,
-        leaf_depth_layer_faces: render.leaf_depth_layer_faces,
-        cutout_use_blend: render.cutout_use_blend,
-        fixed_debug_render_state: render.fixed_debug_render_state,
         cutout_debug_mode: render.cutout_debug_mode,
-        cutout_manual_depth_sort: render.cutout_manual_depth_sort,
-        cutout_depth_sort_strength: render.cutout_depth_sort_strength,
         show_layer_entities: render.show_layer_entities,
         show_layer_chunks_opaque: render.show_layer_chunks_opaque,
         show_layer_chunks_cutout: render.show_layer_chunks_cutout,
@@ -1288,13 +1248,7 @@ fn apply_options(
     render.water_reflection_resolution_scale =
         options.water_reflection_resolution_scale.clamp(0.5, 3.0);
     render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
-    render.leaf_depth_layer_faces = options.leaf_depth_layer_faces;
-    // Keep cutout in depth-writing mode until blend sorting path is stabilized.
-    render.cutout_use_blend = false;
-    render.fixed_debug_render_state = options.fixed_debug_render_state;
     render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 7);
-    render.cutout_manual_depth_sort = options.cutout_manual_depth_sort;
-    render.cutout_depth_sort_strength = options.cutout_depth_sort_strength.clamp(0.0, 2.5);
     render.show_layer_entities = options.show_layer_entities;
     render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;
     render.show_layer_chunks_cutout = options.show_layer_chunks_cutout;

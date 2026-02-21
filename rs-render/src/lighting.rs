@@ -125,7 +125,7 @@ pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
 ) -> AtlasLightingUniform {
-    let fixed_debug = settings.fixed_debug_render_state;
+    let fixed_debug = false;
     let az = settings.sun_azimuth_deg.to_radians();
     let el = settings.sun_elevation_deg.to_radians();
     let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
@@ -135,7 +135,6 @@ pub fn lighting_uniform_for_mode(
     } else {
         settings.shader_quality_mode.clamp(0, 3) as f32
     };
-    let cutout_blend_enabled = false;
     AtlasLightingUniform {
         sun_dir_and_strength: Vec4::new(
             sun_dir.x,
@@ -228,14 +227,10 @@ pub fn lighting_uniform_for_mode(
             },
         ),
         debug_flags: Vec4::new(
-            if fixed_debug {
-                settings.cutout_debug_mode as f32
-            } else {
-                0.0
-            },
+            settings.cutout_debug_mode as f32,
             settings.water_reflection_sky_fill,
-            if cutout_blend_enabled { 1.0 } else { 0.0 },
-            if fixed_debug { 1.0 } else { 0.0 },
+            0.0,
+            0.0,
         ),
         grass_overlay_info: Vec4::new(f32::NAN, f32::NAN, f32::NAN, f32::NAN),
         reflection_view_proj: Mat4::IDENTITY,
@@ -255,7 +250,7 @@ pub fn apply_lighting_quality(
     )>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut ambient: ResMut<AmbientLight>,
-    mut last_material_key: Local<Option<(u8, bool, bool, bool, u32)>>,
+    mut last_material_key: Local<Option<(u8, bool, u32)>>,
 ) {
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
     let grass_overlay_info = assets.grass_overlay_info;
@@ -267,8 +262,6 @@ pub fn apply_lighting_quality(
     let material_key = (
         settings.shader_quality_mode,
         settings.enable_pbr_terrain_lighting,
-        settings.cutout_use_blend,
-        settings.fixed_debug_render_state,
         settings.material_rebuild_nonce,
     );
     let recreate_materials = last_material_key
@@ -468,7 +461,7 @@ pub fn update_water_animation(
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
 ) {
     let t = time.elapsed_secs_wrapped();
-    let fixed_debug = settings.fixed_debug_render_state;
+    let fixed_debug = false;
     let reflection_mode = if fixed_debug {
         0.0
     } else if settings.water_reflections_enabled && settings.water_terrain_ssr {
@@ -485,7 +478,6 @@ pub fn update_water_animation(
         (Mat4::IDENTITY, DEFAULT_WATER_PLANE_Y)
     };
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
-    let cutout_blend_enabled = settings.cutout_use_blend && !fixed_debug;
 
     for (handle, pass_mode, force_unlit, alpha_mode) in [
         (&assets.opaque_material, 0.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Opaque),
@@ -559,14 +551,10 @@ pub fn update_water_animation(
             );
             mat.extension.lighting.debug_flags =
                 Vec4::new(
-                    if fixed_debug {
-                        settings.cutout_debug_mode as f32
-                    } else {
-                        0.0
-                    },
+                    settings.cutout_debug_mode as f32,
                     settings.water_reflection_sky_fill,
-                    if cutout_blend_enabled { 1.0 } else { 0.0 },
-                    if fixed_debug { 1.0 } else { 0.0 },
+                    0.0,
+                    0.0,
                 );
             mat.extension.lighting.grass_overlay_info = assets.grass_overlay_info;
             mat.extension.lighting.reflection_view_proj = reflection_view_proj;

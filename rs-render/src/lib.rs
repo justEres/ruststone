@@ -61,7 +61,6 @@ impl Plugin for RenderPlugin {
                 debug::refresh_render_state_on_mode_change
                     .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
-                debug::manual_cutout_depth_sort.after(debug::apply_render_debug_settings),
                 enqueue_chunk_meshes,
             ),
         )
@@ -129,7 +128,7 @@ fn enqueue_chunk_meshes(
             chunk_key: key,
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
-            leaf_depth_layer_faces: render_debug.leaf_depth_layer_faces,
+            leaf_depth_layer_faces: true,
             voxel_ao_enabled: render_debug.voxel_ao_enabled,
             voxel_ao_strength: render_debug.voxel_ao_strength,
             voxel_ao_cutout: render_debug.voxel_ao_cutout,
@@ -247,19 +246,10 @@ fn apply_mesh_results(
                     let handle = meshes.add(mesh);
                     commands
                         .entity(submesh.entity)
-                        .insert((
-                            Mesh3d(handle.clone()),
-                            mesh_layers.clone(),
-                            chunk::ChunkSubmeshGroup(group),
-                            chunk::DepthSortBaseLocal(Vec3::ZERO),
-                        ));
+                        .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
                     submesh.mesh = handle;
                 }
-                commands.entity(submesh.entity).insert((
-                    mesh_layers.clone(),
-                    chunk::ChunkSubmeshGroup(group),
-                    chunk::DepthSortBaseLocal(Vec3::ZERO),
-                ));
+                commands.entity(submesh.entity).insert(mesh_layers.clone());
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
                     let half = (max - min) * 0.5;
@@ -277,8 +267,6 @@ fn apply_mesh_results(
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material),
                         mesh_layers,
-                        chunk::ChunkSubmeshGroup(group),
-                        chunk::DepthSortBaseLocal(Vec3::ZERO),
                         Transform::default(),
                         GlobalTransform::default(),
                         Visibility::Inherited,

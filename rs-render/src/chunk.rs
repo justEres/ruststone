@@ -248,12 +248,6 @@ pub enum MaterialGroup {
     Transparent,
 }
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct ChunkSubmeshGroup(pub MaterialGroup);
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct DepthSortBaseLocal(pub Vec3);
-
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,

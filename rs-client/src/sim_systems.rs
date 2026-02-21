@@ -1696,24 +1696,17 @@ pub fn debug_overlay_system(
                         "Binary greedy meshing",
                     );
                     ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
-                    ui.checkbox(
-                        &mut render_debug.leaf_depth_layer_faces,
-                        "Leaf depth layer faces",
-                    );
-                    ui.checkbox(
-                        &mut render_debug.cutout_use_blend,
-                        "Cutout blend alpha",
-                    );
-                    ui.checkbox(
-                        &mut render_debug.cutout_manual_depth_sort,
-                        "Manual cutout depth sort",
-                    );
+                    ui.checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO");
+                    ui.checkbox(&mut render_debug.voxel_ao_cutout, "Voxel AO on cutout");
                     ui.add(
-                        egui::Slider::new(&mut render_debug.cutout_depth_sort_strength, 0.0..=2.5)
-                            .text("Cutout depth sort strength"),
+                        egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
+                            .text("Voxel AO strength"),
                     );
                     if ui.button("Force remesh chunks").clicked() {
                         render_debug.force_remesh = true;
+                    }
+                    if ui.button("Reset Debug/Render Settings").clicked() {
+                        *render_debug = RenderDebugSettings::default();
                     }
                     if ui.button("Rebuild render materials").clicked() {
                         render_debug.material_rebuild_nonce =
@@ -1738,20 +1731,26 @@ pub fn debug_overlay_system(
                 let mut cutout_mode = render_debug.cutout_debug_mode as i32;
                 egui::ComboBox::from_label("Cutout debug")
                     .selected_text(match cutout_mode {
-                        1 => "Atlas RGB",
-                        2 => "Vertex tint",
+                        1 => "Pass id",
+                        2 => "Atlas RGB",
                         3 => "Atlas alpha",
-                        4 => "Pass mode",
+                        4 => "Vertex tint",
+                        5 => "Linear depth",
+                        6 => "Pass flags",
+                        7 => "Alpha + pass",
                         _ => "Off",
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut cutout_mode, 0, "Off");
-                        ui.selectable_value(&mut cutout_mode, 1, "Atlas RGB");
-                        ui.selectable_value(&mut cutout_mode, 2, "Vertex tint");
+                        ui.selectable_value(&mut cutout_mode, 1, "Pass id");
+                        ui.selectable_value(&mut cutout_mode, 2, "Atlas rgb");
                         ui.selectable_value(&mut cutout_mode, 3, "Atlas alpha");
-                        ui.selectable_value(&mut cutout_mode, 4, "Pass mode");
+                        ui.selectable_value(&mut cutout_mode, 4, "Vertex tint");
+                        ui.selectable_value(&mut cutout_mode, 5, "Linear depth");
+                        ui.selectable_value(&mut cutout_mode, 6, "Pass flags");
+                        ui.selectable_value(&mut cutout_mode, 7, "Alpha + pass");
                     });
-                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 4) as u8;
+                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 7) as u8;
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
