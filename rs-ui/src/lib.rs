@@ -486,6 +486,21 @@ fn connect_ui(
                             )
                             .changed();
                         options_changed |= ui
+                            .checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.voxel_ao_cutout,
+                                "Voxel AO on cutout blocks",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
+                                    .text("Voxel AO strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
                             .add(
                                 egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
                                     .text("Fog density"),
@@ -1029,6 +1044,9 @@ struct ClientOptionsFile {
     pub color_contrast: f32,
     pub color_brightness: f32,
     pub color_gamma: f32,
+    pub voxel_ao_enabled: bool,
+    pub voxel_ao_strength: f32,
+    pub voxel_ao_cutout: bool,
     pub water_reflections_enabled: bool,
     pub water_terrain_ssr: bool,
     pub water_reflection_strength: f32,
@@ -1094,6 +1112,9 @@ impl Default for ClientOptionsFile {
             color_contrast: render.color_contrast,
             color_brightness: render.color_brightness,
             color_gamma: render.color_gamma,
+            voxel_ao_enabled: render.voxel_ao_enabled,
+            voxel_ao_strength: render.voxel_ao_strength,
+            voxel_ao_cutout: render.voxel_ao_cutout,
             water_reflections_enabled: render.water_reflections_enabled,
             water_terrain_ssr: render.water_terrain_ssr,
             water_reflection_strength: render.water_reflection_strength,
@@ -1159,6 +1180,9 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         color_contrast: render.color_contrast,
         color_brightness: render.color_brightness,
         color_gamma: render.color_gamma,
+        voxel_ao_enabled: render.voxel_ao_enabled,
+        voxel_ao_strength: render.voxel_ao_strength,
+        voxel_ao_cutout: render.voxel_ao_cutout,
         water_reflections_enabled: render.water_reflections_enabled,
         water_terrain_ssr: render.water_terrain_ssr,
         water_reflection_strength: render.water_reflection_strength,
@@ -1244,6 +1268,9 @@ fn apply_options(
     render.color_contrast = options.color_contrast.clamp(0.0, 2.0);
     render.color_brightness = options.color_brightness.clamp(-0.5, 0.5);
     render.color_gamma = options.color_gamma.clamp(0.2, 2.5);
+    render.voxel_ao_enabled = options.voxel_ao_enabled;
+    render.voxel_ao_strength = options.voxel_ao_strength.clamp(0.0, 1.0);
+    render.voxel_ao_cutout = options.voxel_ao_cutout;
     render.water_reflections_enabled = options.water_reflections_enabled;
     render.water_terrain_ssr = options.water_terrain_ssr;
     render.water_reflection_strength = options.water_reflection_strength.clamp(0.0, 3.0);

@@ -177,6 +177,9 @@ impl ChunkColumnSnapshot {
         &self,
         use_greedy: bool,
         leaf_depth_layer_faces: bool,
+        voxel_ao_enabled: bool,
+        voxel_ao_strength: f32,
+        voxel_ao_cutout: bool,
         texture_mapping: &AtlasBlockMapping,
         biome_tints: &BiomeTintResolver,
     ) -> MeshBatch {
@@ -186,6 +189,9 @@ impl ChunkColumnSnapshot {
                 self.center_key.0,
                 self.center_key.1,
                 leaf_depth_layer_faces,
+                voxel_ao_enabled,
+                voxel_ao_strength,
+                voxel_ao_cutout,
                 texture_mapping,
                 biome_tints,
             )
@@ -195,6 +201,9 @@ impl ChunkColumnSnapshot {
                 self.center_key.0,
                 self.center_key.1,
                 leaf_depth_layer_faces,
+                voxel_ao_enabled,
+                voxel_ao_strength,
+                voxel_ao_cutout,
                 texture_mapping,
                 biome_tints,
             )
@@ -788,6 +797,9 @@ fn build_chunk_mesh_culled(
     chunk_x: i32,
     chunk_z: i32,
     leaf_depth_layer_faces: bool,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -835,6 +847,9 @@ fn build_chunk_mesh_culled(
                         texture_mapping,
                         biome_tints,
                         leaf_depth_layer_faces,
+                        voxel_ao_enabled,
+                        voxel_ao_strength,
+                        voxel_ao_cutout,
                         chunk_x,
                         chunk_z,
                         x,
@@ -871,6 +886,9 @@ fn build_chunk_mesh_greedy(
     chunk_x: i32,
     chunk_z: i32,
     leaf_depth_layer_faces: bool,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -982,21 +1000,24 @@ fn build_chunk_mesh_greedy(
                     let quads = greedy_mesh_binary_plane(data, 16);
                     for quad in quads {
                         let tint = biome_tints.tint_for_biome(key.tint_key);
-                        add_greedy_quad(
-                            &mut batch,
-                            snapshot,
-                            chunk_x,
-                            chunk_z,
-                            face,
-                            axis as i32,
-                            base_y,
-                            quad,
-                            key.texture_index,
-                            key.block_id,
-                            tint,
-                        );
-                    }
+                    add_greedy_quad(
+                        &mut batch,
+                        snapshot,
+                        chunk_x,
+                        chunk_z,
+                        face,
+                        axis as i32,
+                        base_y,
+                        quad,
+                        key.texture_index,
+                        key.block_id,
+                        tint,
+                        voxel_ao_enabled,
+                        voxel_ao_strength,
+                        voxel_ao_cutout,
+                    );
                 }
+            }
             }
         }
     }
@@ -1016,6 +1037,9 @@ fn add_greedy_quad(
     texture_index: u16,
     block_id: u16,
     tint: BiomeTint,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
 ) {
     let data = batch.data_for(block_id);
     let base_index = data.positions.len() as u32;
@@ -1091,35 +1115,52 @@ fn add_greedy_quad(
         data.uvs_b.push(tile_origin);
     }
     let base_color = tint_color_untargeted(block_id, tint);
-    let (bx, by, bz) = match face {
-        Face::PosY | Face::NegY => (quad.x as i32, base_y + axis, quad.y as i32),
-        Face::PosX | Face::NegX => (axis, base_y + quad.y as i32, quad.x as i32),
-        Face::PosZ | Face::NegZ => (quad.x as i32, base_y + quad.y as i32, axis),
-    };
-    let shade = if should_apply_prebaked_shade(block_id) {
-        face_light_factor(snapshot, chunk_x, chunk_z, bx, by, bz, face)
+    let shades = greedy_face_corner_shades(
+        snapshot,
+        chunk_x,
+        chunk_z,
+        face,
+        axis,
+        base_y,
+        &quad,
+        block_id,
+        voxel_ao_enabled,
+        voxel_ao_strength,
+        voxel_ao_cutout,
+    );
+    for shade in shades {
+        if is_grass_side_face(block_id, face) {
+            data.colors.push([base_color[0], base_color[1], base_color[2], shade]);
+        } else {
+            data.colors.push([
+                base_color[0] * shade,
+                base_color[1] * shade,
+                base_color[2] * shade,
+                base_color[3],
+            ]);
+        }
+    }
+
+    let use_alt_diag = (shades[0] + shades[2]) > (shades[1] + shades[3]);
+    if use_alt_diag {
+        data.indices.extend_from_slice(&[
+            base_index,
+            base_index + 3,
+            base_index + 1,
+            base_index + 1,
+            base_index + 3,
+            base_index + 2,
+        ]);
     } else {
-        1.0
-    };
-    let color = if is_grass_side_face(block_id, face) {
-        [base_color[0], base_color[1], base_color[2], shade]
-    } else {
-        [
-            base_color[0] * shade,
-            base_color[1] * shade,
-            base_color[2] * shade,
-            base_color[3],
-        ]
-    };
-    data.colors.extend_from_slice(&[color, color, color, color]);
-    data.indices.extend_from_slice(&[
-        base_index,
-        base_index + 2,
-        base_index + 1,
-        base_index,
-        base_index + 3,
-        base_index + 2,
-    ]);
+        data.indices.extend_from_slice(&[
+            base_index,
+            base_index + 2,
+            base_index + 1,
+            base_index,
+            base_index + 3,
+            base_index + 2,
+        ]);
+    }
 
 }
 
@@ -1164,6 +1205,9 @@ fn add_block_faces(
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
     leaf_depth_layer_faces: bool,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -1282,11 +1326,20 @@ fn add_block_faces(
             biome_tints,
         );
         for vert in verts {
-            let shade = if should_apply_prebaked_shade(block_id) {
-                face_vertex_shade(snapshot, chunk_x, chunk_z, x, y, z, face, vert)
-            } else {
-                1.0
-            };
+            let shade = compute_vertex_shade(
+                snapshot,
+                chunk_x,
+                chunk_z,
+                x,
+                y,
+                z,
+                face,
+                vert,
+                block_id,
+                voxel_ao_enabled,
+                voxel_ao_strength,
+                voxel_ao_cutout,
+            );
             if is_grass_side_face(block_id, face) {
                 data.colors.push([base_color[0], base_color[1], base_color[2], shade]);
             } else {
@@ -2147,7 +2200,16 @@ fn light_factor_from_level(level: f32) -> f32 {
     (0.18 + (level / 15.0) * 0.82).clamp(0.0, 1.0)
 }
 
-fn face_vertex_shade(
+fn can_apply_vertex_shading(block_id: u16, voxel_ao_cutout: bool) -> bool {
+    match render_group_for_block(block_id) {
+        MaterialGroup::Opaque => true,
+        MaterialGroup::Cutout | MaterialGroup::CutoutCulled => voxel_ao_cutout,
+        MaterialGroup::Transparent => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_vertex_shade(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
@@ -2156,7 +2218,33 @@ fn face_vertex_shade(
     z: i32,
     face: Face,
     vertex: [f32; 3],
+    block_id: u16,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
 ) -> f32 {
+    if !can_apply_vertex_shading(block_id, voxel_ao_cutout) {
+        return 1.0;
+    }
+    let (ao, light) = face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
+    if voxel_ao_enabled {
+        let s = voxel_ao_strength.clamp(0.0, 1.0);
+        light * (1.0 - s + ao * s)
+    } else {
+        light
+    }
+}
+
+fn face_vertex_light_ao(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    vertex: [f32; 3],
+) -> (f32, f32) {
     let (nx, ny, nz, axis_a, axis_b) = match face {
         Face::PosX => (1, 0, 0, 1usize, 2usize), // y,z
         Face::NegX => (-1, 0, 0, 1usize, 2usize),
@@ -2197,7 +2285,85 @@ fn face_vertex_shade(
         + f32::from(l3.block.max(l3.sky)))
         * 0.25;
     let light = light_factor_from_level(level);
-    ao * light
+    (ao, light)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn greedy_face_corner_shades(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    face: Face,
+    axis: i32,
+    base_y: i32,
+    quad: &GreedyQuad,
+    block_id: u16,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
+) -> [f32; 4] {
+    let x0 = quad.x as i32;
+    let x1 = quad.x as i32 + quad.w as i32 - 1;
+    let y0 = base_y + quad.y as i32;
+    let y1 = base_y + quad.y as i32 + quad.h as i32 - 1;
+    let z0 = quad.y as i32;
+    let z1 = quad.y as i32 + quad.h as i32 - 1;
+
+    let sample = |sx: i32, sy: i32, sz: i32, vx: f32, vy: f32, vz: f32| {
+        compute_vertex_shade(
+            snapshot,
+            chunk_x,
+            chunk_z,
+            sx,
+            sy,
+            sz,
+            face,
+            [vx, vy, vz],
+            block_id,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
+        )
+    };
+
+    match face {
+        Face::PosY => [
+            sample(x0, base_y + axis, z0, 0.0, 1.0, 0.0),
+            sample(x1, base_y + axis, z0, 1.0, 1.0, 0.0),
+            sample(x1, base_y + axis, z1, 1.0, 1.0, 1.0),
+            sample(x0, base_y + axis, z1, 0.0, 1.0, 1.0),
+        ],
+        Face::NegY => [
+            sample(x0, base_y + axis, z1, 0.0, 0.0, 1.0),
+            sample(x1, base_y + axis, z1, 1.0, 0.0, 1.0),
+            sample(x1, base_y + axis, z0, 1.0, 0.0, 0.0),
+            sample(x0, base_y + axis, z0, 0.0, 0.0, 0.0),
+        ],
+        Face::PosX => [
+            sample(axis, y0, x0, 1.0, 0.0, 0.0),
+            sample(axis, y0, x1, 1.0, 0.0, 1.0),
+            sample(axis, y1, x1, 1.0, 1.0, 1.0),
+            sample(axis, y1, x0, 1.0, 1.0, 0.0),
+        ],
+        Face::NegX => [
+            sample(axis, y0, x1, 0.0, 0.0, 1.0),
+            sample(axis, y0, x0, 0.0, 0.0, 0.0),
+            sample(axis, y1, x0, 0.0, 1.0, 0.0),
+            sample(axis, y1, x1, 0.0, 1.0, 1.0),
+        ],
+        Face::PosZ => [
+            sample(x1, y0, axis, 1.0, 0.0, 1.0),
+            sample(x0, y0, axis, 0.0, 0.0, 1.0),
+            sample(x0, y1, axis, 0.0, 1.0, 1.0),
+            sample(x1, y1, axis, 1.0, 1.0, 1.0),
+        ],
+        Face::NegZ => [
+            sample(x0, y0, axis, 0.0, 0.0, 0.0),
+            sample(x1, y0, axis, 1.0, 0.0, 0.0),
+            sample(x1, y1, axis, 1.0, 1.0, 0.0),
+            sample(x0, y1, axis, 0.0, 1.0, 0.0),
+        ],
+    }
 }
 
 fn face_light_factor(
