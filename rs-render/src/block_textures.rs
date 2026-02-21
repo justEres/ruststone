@@ -55,6 +55,11 @@ impl AtlasBlockMapping {
         let by_name = |name: &str| -> Option<u16> { self.name_to_index.get(name).copied() };
 
         let override_name: Option<&'static str> = match block_id {
+            2 => Some(match face {
+                Face::PosY => "grass_top.png",
+                Face::NegY => "dirt.png",
+                _ => "grass_side.png",
+            }),
             5 => Some(match meta & 0x7 {
                 1 => "planks_spruce.png",
                 2 => "planks_birch.png",
@@ -163,6 +168,10 @@ impl AtlasBlockMapping {
             return name;
         }
         self.texture_index(block_id, face)
+    }
+
+    pub fn texture_index_by_name(&self, name: &str) -> Option<u16> {
+        self.name_to_index.get(name).copied()
     }
 }
 

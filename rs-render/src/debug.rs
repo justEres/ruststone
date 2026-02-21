@@ -8,14 +8,9 @@ use crate::chunk::{
     snapshot_for_chunk,
 };
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
-use crate::reflection::{
-    CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
-    MAIN_RENDER_LAYER,
-};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, GlobalTransform, Mesh3d, Projection};
 use bevy::render::primitives::Aabb;
-use bevy::render::view::RenderLayers;
 use bevy::render::view::ViewVisibility;
 
 use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
@@ -147,7 +142,14 @@ pub struct RenderDebugSettings {
     pub water_reflection_overscan: f32,
     pub water_reflection_resolution_scale: f32,
     pub water_reflection_sky_fill: f32,
-    pub cutout_debug_mode: u8, // 0 off, 1 atlas, 2 vertex_tint, 3 alpha, 4 pass mode
+    // Shader debug output mode:
+    // 0 off, 1 pass id, 2 atlas rgb, 3 atlas alpha, 4 vertex tint, 5 linear depth
+    pub cutout_debug_mode: u8,
+    // Forces a stable debug render state for isolating ordering/alpha issues:
+    // - cutout uses opaque material state + shader discard
+    // - cutout blend toggle ignored
+    // - fog/color grading/waves/reflections are neutralized in uniforms
+    pub fixed_debug_render_state: bool,
     pub cutout_use_blend: bool,
     pub cutout_manual_depth_sort: bool,
     pub cutout_depth_sort_strength: f32,
@@ -224,7 +226,8 @@ impl Default for RenderDebugSettings {
             water_reflection_resolution_scale: 1.0,
             water_reflection_sky_fill: 0.55,
             cutout_debug_mode: 0,
-            cutout_use_blend: true,
+            fixed_debug_render_state: false,
+            cutout_use_blend: false,
             cutout_manual_depth_sort: true,
             cutout_depth_sort_strength: 0.8,
             show_layer_entities: true,
@@ -295,7 +298,7 @@ pub fn apply_render_debug_settings(
         Query<(Entity, &ChunkRoot, &mut Visibility)>,
         Query<(&ChildOf, &mut Visibility), With<Mesh3d>>,
     )>,
-    mut cameras: Query<(&mut Projection, &mut RenderLayers), With<PlayerCamera>>,
+    mut cameras: Query<&mut Projection, With<PlayerCamera>>,
     mut wireframe: ResMut<WireframeConfig>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
@@ -306,27 +309,10 @@ pub fn apply_render_debug_settings(
                 light.shadows_enabled = settings.shadows_enabled;
             }
         }
-        for (mut projection, mut render_layers) in &mut cameras {
+        for mut projection in &mut cameras {
             if let Projection::Perspective(persp) = &mut *projection {
                 persp.fov = settings.fov_deg.to_radians();
             }
-            let mut layers: Vec<usize> = Vec::new();
-            if settings.show_layer_entities {
-                layers.push(MAIN_RENDER_LAYER);
-            }
-            if settings.show_layer_chunks_opaque {
-                layers.push(CHUNK_OPAQUE_RENDER_LAYER);
-            }
-            if settings.show_layer_chunks_cutout {
-                layers.push(CHUNK_CUTOUT_RENDER_LAYER);
-            }
-            if settings.show_layer_chunks_transparent {
-                layers.push(CHUNK_TRANSPARENT_RENDER_LAYER);
-            }
-            if layers.is_empty() {
-                layers.push(MAIN_RENDER_LAYER);
-            }
-            *render_layers = RenderLayers::from_layers(&layers);
         }
         wireframe.global = settings.wireframe_enabled;
     }

@@ -304,10 +304,10 @@ fn fragment(
     let pass_mode_valid = pass_mode == pass_mode;
     let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
     let cutout_pass = pass_mode_valid && pass_mode > 1.5;
-    let cutout_debug_mode = i32(round(lighting_uniform.debug_flags.x));
+    let shader_debug_view = i32(round(lighting_uniform.debug_flags.x));
     let cutout_blend_enabled = lighting_uniform.debug_flags.z > 0.5;
+    let fixed_debug_state = lighting_uniform.debug_flags.w > 0.5;
 
-#ifdef VERTEX_UVS_A
     let packed_uv = in.uv;
     let tile_cell = floor(packed_uv / vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE));
     var uv_local = packed_uv - tile_cell * vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE);
@@ -343,10 +343,6 @@ fn fragment(
     let atlas_rgb = atlas_sample.rgb;
     pbr_input.material.base_color *= atlas_sample;
     let atlas_alpha = atlas_sample.a;
-#else
-    let atlas_rgb = pbr_input.material.base_color.rgb;
-    let atlas_alpha = pbr_input.material.base_color.a;
-#endif
 
     if transparent_pass {
         // Keep water/lava blend, but still punch fully transparent texels.
@@ -360,6 +356,32 @@ fn fragment(
             discard;
         }
     }
+
+#ifndef PREPASS_PIPELINE
+    if shader_debug_view != 0 {
+        var debug_rgb = vec3<f32>(1.0, 0.0, 1.0);
+        if shader_debug_view == 1 {
+            debug_rgb = select(
+                vec3<f32>(0.18, 0.18, 0.18), // opaque
+                vec3<f32>(0.20, 0.45, 1.0),  // transparent
+                transparent_pass,
+            );
+            debug_rgb = select(debug_rgb, vec3<f32>(0.2, 1.0, 0.35), cutout_pass); // cutout
+        } else if shader_debug_view == 2 {
+            debug_rgb = atlas_rgb;
+        } else if shader_debug_view == 3 {
+            debug_rgb = vec3<f32>(atlas_alpha, atlas_alpha, atlas_alpha);
+        } else if shader_debug_view == 4 {
+            debug_rgb = vertex_tint_rgb;
+        } else if shader_debug_view == 5 {
+            let depth_norm = clamp(abs(in.position.w) / max(lighting_uniform.ambient_and_fog.w, 1.0), 0.0, 1.0);
+            debug_rgb = vec3<f32>(depth_norm, depth_norm, depth_norm);
+        }
+        var debug_out: FragmentOutput;
+        debug_out.color = vec4(debug_rgb, 1.0);
+        return debug_out;
+    }
+#endif
 
     // Stage 2: Pass-specific alpha handling.
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
@@ -424,27 +446,7 @@ fn fragment(
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
     let quality_mode = lighting_uniform.quality_and_water.x;
-    if cutout_debug_mode == 4 {
-        let pass_rgb = select(
-            vec3<f32>(0.16, 0.16, 0.16), // opaque-ish
-            vec3<f32>(0.2, 0.45, 1.0),   // transparent
-            transparent_pass,
-        );
-        out.color = vec4(
-            select(pass_rgb, vec3<f32>(0.2, 1.0, 0.35), cutout_pass), // cutout
-            1.0,
-        );
-    } else if cutout_pass && cutout_debug_mode != 0 {
-        // Diagnostic view for cutout pipeline debugging:
-        // 1 = raw atlas rgb, 2 = raw vertex tint rgb, 3 = atlas alpha.
-        var debug_rgb = vec3<f32>(atlas_alpha, atlas_alpha, atlas_alpha);
-        if cutout_debug_mode == 1 {
-            debug_rgb = atlas_rgb;
-        } else if cutout_debug_mode == 2 {
-            debug_rgb = vertex_tint_rgb;
-        }
-        out.color = vec4(debug_rgb, 1.0);
-    } else if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(
             out.color,
@@ -464,7 +466,9 @@ fn fragment(
             water_scene_reflection_valid,
         );
     }
-    out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
+    if !fixed_debug_state {
+        out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
+    }
 
     // Apply in-shader post processing (fog, alpha-premultiply, and optional tonemapping/debanding).
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);

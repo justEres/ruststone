@@ -6,6 +6,7 @@ use rs_ui::{ConnectUiState, UiPlugin};
 use rs_utils::{ApplicationState, AuthMode, FromNet, ToNet};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 mod entities;
 mod entity_model;
@@ -60,7 +61,13 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-    tracing_subscriber::fmt().without_time().compact().init();
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,wgpu_hal::vulkan=error"));
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .without_time()
+        .compact()
+        .init();
 
     info!("Starting ruststone");
     let thread_count = std::thread::available_parallelism()
