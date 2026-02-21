@@ -212,16 +212,32 @@ fn resolve_texture_index(
     available: &HashMap<String, u16>,
     model_resolver: Option<&mut BlockModelResolver>,
 ) -> Option<u16> {
+    let resolve_name = |name: &str| -> Option<u16> {
+        if let Some(idx) = available.get(name) {
+            return Some(*idx);
+        }
+        None
+    };
+    let resolve_name_preferring_non_opaque = |name: &str| -> Option<u16> {
+        if let Some(non_opaque) = name.strip_suffix("_opaque.png") {
+            let candidate = format!("{non_opaque}.png");
+            if let Some(idx) = resolve_name(&candidate) {
+                return Some(idx);
+            }
+        }
+        resolve_name(name)
+    };
+
     if let Some(resolver) = model_resolver {
         if let Some(name) = resolver.face_texture_name(block_id, face) {
-            if let Some(idx) = available.get(&name) {
-                return Some(*idx);
+            if let Some(idx) = resolve_name_preferring_non_opaque(&name) {
+                return Some(idx);
             }
         }
     }
     for candidate in texture_name_candidates(block_id, face) {
-        if let Some(idx) = available.get(&candidate) {
-            return Some(*idx);
+        if let Some(idx) = resolve_name_preferring_non_opaque(&candidate) {
+            return Some(idx);
         }
     }
     None
@@ -565,14 +581,10 @@ pub fn classify_tint(block_state: u16, block_below_state: Option<u16>) -> TintCl
             }
         }
         161 => TintClass::Foliage,
-        31 => {
-            let kind = block_state_meta(block_state) & 0x3;
-            if kind == 0 {
-                TintClass::None
-            } else {
-                TintClass::Grass
-            }
-        }
+        // In 1.8 the server commonly sends grass-like variants here where biome tint
+        // should apply. Treat id 31 as grass-tinted by default to avoid gray foliage
+        // when metadata is unavailable/stripped in chunk decode paths.
+        31 => TintClass::Grass,
         175 => {
             let meta = block_state_meta(block_state);
             let lower_meta = if (meta & 0x8) != 0 {

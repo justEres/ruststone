@@ -677,6 +677,8 @@ fn connect_ui(
                                 3 => "Atlas alpha",
                                 4 => "Vertex tint",
                                 5 => "Linear depth",
+                                6 => "Pass flags",
+                                7 => "Alpha + pass",
                                 _ => "Off",
                             })
                             .show_ui(ui, |ui| {
@@ -686,6 +688,8 @@ fn connect_ui(
                                 ui.selectable_value(&mut selected_debug_mode, 3, "Atlas alpha");
                                 ui.selectable_value(&mut selected_debug_mode, 4, "Vertex tint");
                                 ui.selectable_value(&mut selected_debug_mode, 5, "Linear depth");
+                                ui.selectable_value(&mut selected_debug_mode, 6, "Pass flags");
+                                ui.selectable_value(&mut selected_debug_mode, 7, "Alpha + pass");
                             });
                         if selected_debug_mode != render_debug.cutout_debug_mode {
                             render_debug.cutout_debug_mode = selected_debug_mode;
@@ -1261,7 +1265,7 @@ fn apply_options(
     // Keep cutout in depth-writing mode until blend sorting path is stabilized.
     render.cutout_use_blend = false;
     render.fixed_debug_render_state = options.fixed_debug_render_state;
-    render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 5);
+    render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 7);
     render.cutout_manual_depth_sort = options.cutout_manual_depth_sort;
     render.cutout_depth_sort_strength = options.cutout_depth_sort_strength.clamp(0.0, 2.5);
     render.show_layer_entities = options.show_layer_entities;
