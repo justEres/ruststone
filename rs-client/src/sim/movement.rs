@@ -20,6 +20,7 @@ const SPEED_IN_AIR: f32 = 0.02;
 const WATER_MOVE_SPEED: f32 = 0.02;
 const SWIM_UP_ACCEL: f32 = 0.04;
 const SLIPPERINESS_DEFAULT: f32 = 0.6;
+const SLIPPERINESS_ICE: f32 = 0.98;
 const SNEAK_EDGE_STEP: f32 = 0.05;
 const MOVE_INPUT_DAMPING: f32 = 0.98;
 const SNEAK_INPUT_SCALE: f32 = 0.3;
@@ -125,6 +126,13 @@ impl<'a> WorldCollision<'a> {
             pos.z + PLAYER_HALF_WIDTH,
         );
         self.aabb_collides(min, max)
+    }
+
+    fn ground_slipperiness(&self, pos: Vec3) -> f32 {
+        let x = pos.x.floor() as i32;
+        let y = (pos.y - 1.0).floor() as i32;
+        let z = pos.z.floor() as i32;
+        block_slipperiness(self.block_at(x, y, z))
     }
 
     pub fn clamp_sneak_edge_velocity(&self, pos: Vec3, vel: Vec3) -> Vec3 {
@@ -736,10 +744,11 @@ pub fn simulate_tick(
 
     let move_speed = BASE_MOVE_SPEED * if sprinting { 1.3 } else { 1.0 };
 
-    let mut f4 = 0.91f32;
-    if state.on_ground {
-        f4 = SLIPPERINESS_DEFAULT * 0.91;
-    }
+    let mut f4 = if state.on_ground {
+        world.ground_slipperiness(state.pos) * 0.91
+    } else {
+        0.91
+    };
 
     let f = 0.16277136 / (f4 * f4 * f4);
     let f5 = if in_water {
@@ -788,6 +797,11 @@ pub fn simulate_tick(
     } else {
         state.vel.y += GRAVITY;
         state.vel.y *= AIR_DRAG;
+        f4 = if state.on_ground {
+            world.ground_slipperiness(state.pos) * 0.91
+        } else {
+            0.91
+        };
         state.vel.x *= f4;
         state.vel.z *= f4;
     }
@@ -825,5 +839,12 @@ fn step_toward_zero(v: f32) -> f32 {
         (v - SNEAK_EDGE_STEP).max(0.0)
     } else {
         (v + SNEAK_EDGE_STEP).min(0.0)
+    }
+}
+
+fn block_slipperiness(block_state: u16) -> f32 {
+    match block_state_id(block_state) {
+        79 | 165 | 174 => SLIPPERINESS_ICE,
+        _ => SLIPPERINESS_DEFAULT,
     }
 }
