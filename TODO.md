@@ -11,10 +11,10 @@
     - ✅ shadows are only rendering upto a certain distance. increase or make it configurable until "infinity"
     - ✅ when changing rendering mode, the transparency of leaves and so on breaks.
 
-    - Grass sides use mask for color tint to only tint the top and not the dirt part of the texture
+    - ✅ Grass sides use mask for color tint to only tint the top and not the dirt part of the texture
         -> the mask in in the texture folder
 
-    - in f5 / front perspective mode the controls are inverted. always go from cameras perspective when deciding walk direction. 
+    - ✅ in f5 / front perspective mode the controls are inverted. always go from cameras perspective when deciding walk direction. 
 
 - Animations:
     - ✅ Block breaking animation
@@ -22,8 +22,9 @@
 
 
 - Movement:
-    - sprinting still feels "different" and more sticky than original minecraft
-    - must be exactly the same as original minecraft in every aspect. Browse original source code if needed for constants and timing or logic.
+    - 🚧 sprinting still feels "different" and more sticky than original minecraft
+        - ✅ phase 1: ground friction now uses vanilla-style per-block slipperiness (ice/slime/packed ice)
+    - 🚧 must be exactly the same as original minecraft in every aspect. Browse original source code if needed for constants and timing or logic.
     - same with collision
 - Reach
     - ✅ the range i can click blocks or entitys feels further than original. keep it the same
@@ -55,6 +56,7 @@
     - proper knockback prediction -> right now players bug into blocks when receiving knockback 
     - water / swimming
     - item physics -> interpolation for falling items
+    - items on the ground dont always have a texture -> missing metadata?
     - falling blocks -> sand, gravel
 
 
