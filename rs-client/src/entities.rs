@@ -20,7 +20,10 @@ use tracing::{info, warn};
 
 use crate::entity_model::{
     BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL_TEX32, BIPED_MODEL_TEX64,
-    BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, EntityTextureCache, EntityTexturePath, spawn_model,
+    BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, COW_MODEL_TEX32, CREEPER_MODEL_TEX64, EntityTextureCache,
+    EntityTexturePath, PIG_MODEL_TEX32, QUADRUPED_BODY, QUADRUPED_HEAD,
+    QUADRUPED_LEG_BACK_LEFT, QUADRUPED_LEG_BACK_RIGHT, QUADRUPED_LEG_FRONT_LEFT,
+    QUADRUPED_LEG_FRONT_RIGHT, SHEEP_MODEL_TEX32, spawn_model,
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
@@ -266,6 +269,30 @@ pub struct RemoteBipedAnimation {
     pub swing_progress: f32,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct RemoteQuadrupedModelParts {
+    pub model_root: Entity,
+    pub head: Entity,
+    pub body: Entity,
+    pub leg_front_right: Entity,
+    pub leg_front_left: Entity,
+    pub leg_back_right: Entity,
+    pub leg_back_left: Entity,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteQuadrupedAnimation {
+    pub previous_pos: Vec3,
+    pub limb_swing: f32,
+    pub limb_swing_amount: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteQuadrupedAnimTuning {
+    pub body_pitch: f32,
+    pub leg_swing_scale: f32,
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteMotionSmoothing {
     pub target_translation: Vec3,
@@ -427,14 +454,22 @@ pub fn apply_remote_entity_events(
                     NetEntityKind::Mob(m) if mob_uses_biped_model(m) => Some(m),
                     _ => None,
                 };
+                let quadruped_mob = match kind {
+                    NetEntityKind::Mob(m) if mob_uses_quadruped_model(m) => Some(m),
+                    _ => None,
+                };
+                let uses_model_mesh = biped_mob.is_some() || quadruped_mob.is_some();
 
                 let spawn_cmd = commands.spawn((
                     Name::new(format!("RemoteEntity[{entity_id}]")),
                     Transform {
                         translation: pos + Vec3::Y * visual.y_offset,
                         rotation: entity_root_rotation(kind, yaw),
-                        scale: if biped_mob.is_some() {
-                            Vec3::ONE
+                        scale: if uses_model_mesh {
+                            match kind {
+                                NetEntityKind::Mob(mob) => mob_model_scale(mob),
+                                _ => Vec3::ONE,
+                            }
                         } else {
                             spec.scale
                         },
@@ -547,6 +582,49 @@ pub fn apply_remote_entity_events(
                                 limb_swing_amount: 0.0,
                                 swing_progress: 1.0,
                             },
+                        ));
+                    } else if let Some(mob) = quadruped_mob {
+                        let Some(texture_path) = mob_texture_path(mob) else {
+                            // Shouldn't happen since `quadruped_mob` is gated above.
+                            continue;
+                        };
+                        entity_textures.request(texture_path);
+                        let material =
+                            entity_textures.material(texture_path).unwrap_or_else(|| {
+                                materials.add(StandardMaterial {
+                                    base_color: Color::srgb(1.0, 0.0, 1.0),
+                                    alpha_mode: AlphaMode::Mask(0.5),
+                                    unlit: true,
+                                    perceptual_roughness: 1.0,
+                                    metallic: 0.0,
+                                    ..Default::default()
+                                })
+                            });
+
+                        let spawned = spawn_model(
+                            &mut commands,
+                            &mut meshes,
+                            material,
+                            mob_quadruped_model(mob),
+                            texture_path,
+                        );
+                        commands.entity(root).add_child(spawned.root);
+                        commands.entity(root).insert((
+                            RemoteQuadrupedModelParts {
+                                model_root: spawned.root,
+                                head: spawned.parts[QUADRUPED_HEAD],
+                                body: spawned.parts[QUADRUPED_BODY],
+                                leg_front_right: spawned.parts[QUADRUPED_LEG_FRONT_RIGHT],
+                                leg_front_left: spawned.parts[QUADRUPED_LEG_FRONT_LEFT],
+                                leg_back_right: spawned.parts[QUADRUPED_LEG_BACK_RIGHT],
+                                leg_back_left: spawned.parts[QUADRUPED_LEG_BACK_LEFT],
+                            },
+                            RemoteQuadrupedAnimation {
+                                previous_pos: pos,
+                                limb_swing: 0.0,
+                                limb_swing_amount: 0.0,
+                            },
+                            mob_quadruped_anim_tuning(mob),
                         ));
                     } else {
                         let mesh = meshes.add(match spec.mesh {
@@ -1960,6 +2038,75 @@ pub fn animate_remote_biped_models(
     }
 }
 
+pub fn animate_remote_quadruped_models(
+    time: Res<Time>,
+    mut roots: Query<
+        (
+            &Transform,
+            &RemoteEntityLook,
+            &RemoteQuadrupedModelParts,
+            &RemoteQuadrupedAnimTuning,
+            &mut RemoteQuadrupedAnimation,
+        ),
+        With<RemoteQuadrupedModelParts>,
+    >,
+    mut part_transforms: Query<&mut Transform, Without<RemoteQuadrupedModelParts>>,
+) {
+    let dt = time.delta_secs().max(1e-4);
+    let pose_alpha = 1.0 - (-22.0 * dt).exp();
+    let swing_alpha = 1.0 - (-12.0 * dt).exp();
+
+    for (root_transform, look, parts, tuning, mut anim) in &mut roots {
+        let pos = root_transform.translation;
+        let horizontal_delta = Vec2::new(pos.x - anim.previous_pos.x, pos.z - anim.previous_pos.z);
+        let speed = (horizontal_delta.length() / dt).min(10.0);
+        anim.previous_pos = pos;
+
+        let target_limb_swing_amount = (speed / 4.0).clamp(0.0, 1.0);
+        anim.limb_swing_amount += (target_limb_swing_amount - anim.limb_swing_amount) * swing_alpha;
+        anim.limb_swing += speed * dt * 1.3;
+
+        let head_pitch = look.pitch.clamp(-1.4, 1.4);
+        let mut head_yaw_delta = look.head_yaw - look.yaw;
+        head_yaw_delta = (head_yaw_delta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+
+        let swing_scale = 1.4 * tuning.leg_swing_scale;
+        let leg_front_right_x = (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
+        let leg_front_left_x =
+            (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos() * swing_scale * anim.limb_swing_amount;
+        let leg_back_right_x =
+            (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos() * swing_scale * anim.limb_swing_amount;
+        let leg_back_left_x = (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
+
+        let head_target = Quat::from_rotation_y(head_yaw_delta) * Quat::from_rotation_x(-head_pitch);
+        let body_target = Quat::from_rotation_x(tuning.body_pitch);
+        let leg_fr_target = Quat::from_rotation_x(leg_front_right_x);
+        let leg_fl_target = Quat::from_rotation_x(leg_front_left_x);
+        let leg_br_target = Quat::from_rotation_x(leg_back_right_x);
+        let leg_bl_target = Quat::from_rotation_x(leg_back_left_x);
+
+        if let Ok(mut t) = part_transforms.get_mut(parts.head) {
+            t.rotation = t.rotation.slerp(head_target, pose_alpha);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.body) {
+            t.rotation = t.rotation.slerp(body_target, pose_alpha);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_front_right) {
+            t.rotation = t.rotation.slerp(leg_fr_target, pose_alpha);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_front_left) {
+            t.rotation = t.rotation.slerp(leg_fl_target, pose_alpha);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_back_right) {
+            t.rotation = t.rotation.slerp(leg_br_target, pose_alpha);
+        }
+        if let Ok(mut t) = part_transforms.get_mut(parts.leg_back_left) {
+            t.rotation = t.rotation.slerp(leg_bl_target, pose_alpha);
+        }
+    }
+}
+
 fn spawn_remote_player_model(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -2779,8 +2926,8 @@ fn entity_root_rotation(kind: NetEntityKind, yaw: f32) -> Quat {
     match kind {
         // Player skin model pipeline has its own historic 180deg alignment.
         NetEntityKind::Player => player_root_rotation(yaw),
-        // Vanilla biped mob models should use yaw directly (no extra PI).
-        NetEntityKind::Mob(m) if mob_uses_biped_model(m) => Quat::from_axis_angle(Vec3::Y, yaw),
+        // Vanilla mob models use protocol yaw directly.
+        NetEntityKind::Mob(m) if mob_uses_entity_model(m) => Quat::from_axis_angle(Vec3::Y, yaw),
         _ => Quat::from_axis_angle(Vec3::Y, yaw),
     }
 }
@@ -2818,18 +2965,18 @@ fn visual_spec(kind: NetEntityKind) -> VisualSpec {
         },
         NetEntityKind::Mob(mob) => VisualSpec {
             mesh: VisualMesh::Capsule,
-            scale: if mob_uses_biped_model(mob) {
-                Vec3::ONE
+            scale: if mob_uses_entity_model(mob) {
+                mob_model_scale(mob)
             } else {
                 MOB_SCALE
             },
-            y_offset: if mob_uses_biped_model(mob) {
+            y_offset: if mob_uses_entity_model(mob) {
                 0.0
             } else {
                 MOB_Y_OFFSET
             },
-            name_y_offset: if mob_uses_biped_model(mob) {
-                2.05
+            name_y_offset: if mob_uses_entity_model(mob) {
+                mob_model_name_y_offset(mob)
             } else {
                 MOB_NAME_Y_OFFSET
             },
@@ -2994,8 +3141,78 @@ fn object_label(kind: ObjectKind) -> &'static str {
 fn mob_uses_biped_model(mob: MobKind) -> bool {
     matches!(
         mob,
-        MobKind::Zombie | MobKind::Skeleton | MobKind::PigZombie
+        MobKind::Zombie
+            | MobKind::Skeleton
+            | MobKind::PigZombie
+            | MobKind::Villager
+            | MobKind::Enderman
     )
+}
+
+fn mob_uses_quadruped_model(mob: MobKind) -> bool {
+    matches!(
+        mob,
+        MobKind::Pig
+            | MobKind::Sheep
+            | MobKind::Cow
+            | MobKind::Chicken
+            | MobKind::Wolf
+            | MobKind::Mooshroom
+            | MobKind::Ocelot
+            | MobKind::Horse
+            | MobKind::Rabbit
+            | MobKind::Creeper
+    )
+}
+
+fn mob_uses_entity_model(mob: MobKind) -> bool {
+    mob_uses_biped_model(mob) || mob_uses_quadruped_model(mob)
+}
+
+fn mob_model_scale(mob: MobKind) -> Vec3 {
+    match mob {
+        MobKind::Chicken => Vec3::splat(0.62),
+        MobKind::Rabbit => Vec3::splat(0.52),
+        MobKind::Wolf | MobKind::Ocelot => Vec3::splat(0.78),
+        MobKind::Horse => Vec3::splat(1.24),
+        MobKind::Villager => Vec3::new(0.96, 0.98, 0.96),
+        MobKind::Enderman => Vec3::new(1.06, 1.38, 1.06),
+        _ => Vec3::ONE,
+    }
+}
+
+fn mob_model_name_y_offset(mob: MobKind) -> f32 {
+    match mob {
+        MobKind::Horse => 2.0,
+        MobKind::Cow | MobKind::Mooshroom => 1.8,
+        MobKind::Creeper => 1.8,
+        MobKind::Enderman => 2.65,
+        MobKind::Pig | MobKind::Sheep | MobKind::Wolf | MobKind::Ocelot => 1.6,
+        MobKind::Chicken | MobKind::Rabbit => 1.2,
+        _ if mob_uses_biped_model(mob) => 2.05,
+        _ => 1.6,
+    }
+}
+
+fn mob_quadruped_anim_tuning(mob: MobKind) -> RemoteQuadrupedAnimTuning {
+    match mob {
+        MobKind::Creeper => RemoteQuadrupedAnimTuning {
+            body_pitch: 0.0,
+            leg_swing_scale: 0.95,
+        },
+        MobKind::Chicken | MobKind::Rabbit => RemoteQuadrupedAnimTuning {
+            body_pitch: std::f32::consts::FRAC_PI_2,
+            leg_swing_scale: 1.2,
+        },
+        MobKind::Horse => RemoteQuadrupedAnimTuning {
+            body_pitch: std::f32::consts::FRAC_PI_2,
+            leg_swing_scale: 0.82,
+        },
+        _ => RemoteQuadrupedAnimTuning {
+            body_pitch: std::f32::consts::FRAC_PI_2,
+            leg_swing_scale: 1.0,
+        },
+    }
 }
 
 fn mob_texture_path(mob: MobKind) -> Option<&'static str> {
@@ -3003,6 +3220,22 @@ fn mob_texture_path(mob: MobKind) -> Option<&'static str> {
         MobKind::Zombie => "entity/zombie/zombie.png",
         MobKind::Skeleton => "entity/skeleton/skeleton.png",
         MobKind::PigZombie => "entity/zombie_pigman.png",
+        MobKind::Villager => "entity/villager/villager.png",
+        MobKind::Enderman => "entity/enderman/enderman.png",
+        MobKind::Creeper => "entity/creeper/creeper.png",
+        MobKind::Pig => "entity/pig/pig.png",
+        MobKind::Sheep => "entity/sheep/sheep.png",
+        MobKind::Cow => "entity/cow/cow.png",
+        // Scaffolding for additional mobs that we have not mapped to concrete models yet.
+        MobKind::Chicken => "entity/chicken.png",
+        MobKind::Squid => "entity/squid.png",
+        MobKind::Wolf => "entity/wolf/wolf.png",
+        MobKind::Mooshroom => "entity/cow/mooshroom.png",
+        MobKind::SnowGolem => "entity/snow_golem.png",
+        MobKind::Ocelot => "entity/cat/ocelot.png",
+        MobKind::IronGolem => "entity/iron_golem.png",
+        MobKind::Horse => "entity/horse/horse_white.png",
+        MobKind::Rabbit => "entity/rabbit/brown.png",
         _ => return None,
     })
 }
@@ -3012,7 +3245,20 @@ fn mob_biped_model(mob: MobKind) -> &'static crate::entity_model::ModelDef {
     // If we normalize using the wrong height, only the top portion (often the head) will sample correctly.
     match mob {
         MobKind::Skeleton => &BIPED_MODEL_TEX32,
-        MobKind::Zombie | MobKind::PigZombie => &BIPED_MODEL_TEX64,
+        MobKind::Zombie | MobKind::PigZombie | MobKind::Villager => &BIPED_MODEL_TEX64,
+        MobKind::Enderman => &BIPED_MODEL_TEX32,
         _ => &BIPED_MODEL_TEX32,
+    }
+}
+
+fn mob_quadruped_model(mob: MobKind) -> &'static crate::entity_model::ModelDef {
+    match mob {
+        MobKind::Pig => &PIG_MODEL_TEX32,
+        MobKind::Sheep => &SHEEP_MODEL_TEX32,
+        MobKind::Cow | MobKind::Mooshroom | MobKind::Horse => &COW_MODEL_TEX32,
+        MobKind::Wolf | MobKind::Ocelot => &SHEEP_MODEL_TEX32,
+        MobKind::Chicken | MobKind::Rabbit => &PIG_MODEL_TEX32,
+        MobKind::Creeper => &CREEPER_MODEL_TEX64,
+        _ => &PIG_MODEL_TEX32,
     }
 }

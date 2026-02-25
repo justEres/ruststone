@@ -116,6 +116,10 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
         101 | 102 | 160 => BlockModelKind::Pane,
         50 | 75 | 76 => BlockModelKind::TorchLike,
+        27 | 28 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 139 | 157 | 171
+        | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => {
+            BlockModelKind::Custom
+        }
         _ => BlockModelKind::FullCube,
     }
 }
@@ -169,6 +173,11 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
             BlockFace::East | BlockFace::West => "crafting_table_front.png",
             _ => "crafting_table_side.png",
         },
+        60 => match face {
+            BlockFace::Up => "farmland_dry.png",
+            BlockFace::Down => "dirt.png",
+            _ => "dirt.png",
+        },
         61 | 62 => match face {
             BlockFace::Up => "furnace_top.png",
             BlockFace::Down => "stone.png",
@@ -176,6 +185,8 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
             _ => "furnace_side.png",
         },
         65 => "ladder.png",
+        66 => "rail_normal.png",
+        71 => "door_iron_lower.png",
         78 => "snow.png",
         79 => "ice.png",
         80 => "snow.png",
@@ -188,6 +199,24 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
         87 => "netherrack.png",
         88 => "soul_sand.png",
         89 => "glowstone.png",
+        107 => "planks_oak.png",
+        139 => "cobblestone.png",
+        157 => "rail_activator.png",
+        96 => "trapdoor.png",
+        193 => "door_spruce_lower.png",
+        194 => "door_birch_lower.png",
+        195 => "door_jungle_lower.png",
+        196 => "door_acacia_lower.png",
+        197 => "door_dark_oak_lower.png",
+        171 => "wool_colored_white.png",
+        27 => "rail_golden.png",
+        28 => "rail_detector.png",
+        64 => "door_wood_lower.png",
+        183 => "planks_spruce.png",
+        184 => "planks_birch.png",
+        185 => "planks_jungle.png",
+        186 => "planks_big_oak.png",
+        187 => "planks_acacia.png",
         _ => "stone.png",
     }
 }

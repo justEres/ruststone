@@ -1862,6 +1862,371 @@ fn add_custom_block(
                 }
             }
         }
+        BlockModelKind::Custom => {
+            let id = block_type(block_id);
+            match id {
+                60 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.9375, 1.0],
+                    block_id,
+                    tint,
+                ),
+                // Rails: thin top plate (including powered/detector/activator variants).
+                27 | 28 | 66 | 157 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 1.0 / 16.0, 1.0],
+                    block_id,
+                    tint,
+                ),
+                // Doors: full-height thin panel, orientation/open from lower-half metadata.
+                64 | 71 | 193 | 194 | 195 | 196 | 197 => {
+                    let meta = block_meta(block_id);
+                    let lower_meta = if (meta & 0x8) != 0 {
+                        let below = block_at(snapshot, chunk_x, chunk_z, x, y - 1, z);
+                        if block_type(below) == id {
+                            block_meta(below)
+                        } else {
+                            0
+                        }
+                    } else {
+                        meta
+                    };
+                    let facing = lower_meta & 0x3;
+                    let is_open = (lower_meta & 0x4) != 0;
+                    let t = 3.0 / 16.0;
+                    let (min, max) = if !is_open {
+                        match facing {
+                            0 => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                            1 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                            2 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                            _ => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                        }
+                    } else {
+                        match facing {
+                            0 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                            1 => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                            2 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                            _ => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                        }
+                    };
+                    add_box(
+                        batch,
+                        Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        min,
+                        max,
+                        block_id,
+                        tint,
+                    );
+                }
+                65 => {
+                    let t = 1.0 / 16.0;
+                    let (min, max) = match block_meta(block_id) & 0x7 {
+                        2 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                        3 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                        4 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                        5 => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                        _ => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                    };
+                    add_box(
+                        batch,
+                        Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        min,
+                        max,
+                        block_id,
+                        tint,
+                    );
+                }
+                // Fence gates: central panel + side posts, rotates when open.
+                107 | 183 | 184 | 185 | 186 | 187 => {
+                    let meta = block_meta(block_id);
+                    let facing = meta & 0x3;
+                    let is_open = (meta & 0x4) != 0;
+                    let x_aligned = matches!(facing, 0 | 2);
+                    let t = 0.125;
+                    let rail_min = 0.375;
+                    let rail_max = 0.625;
+
+                    let (panel_min, panel_max) = if !is_open {
+                        if x_aligned {
+                            ([0.0, 0.0, rail_min], [1.0, 1.0, rail_max])
+                        } else {
+                            ([rail_min, 0.0, 0.0], [rail_max, 1.0, 1.0])
+                        }
+                    } else if x_aligned {
+                        ([rail_min, 0.0, 0.0], [rail_max, 1.0, 1.0])
+                    } else {
+                        ([0.0, 0.0, rail_min], [1.0, 1.0, rail_max])
+                    };
+                    add_box(
+                        batch,
+                        Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        panel_min,
+                        panel_max,
+                        block_id,
+                        tint,
+                    );
+
+                    if x_aligned {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.0, 0.0, 0.4375],
+                            [t, 1.0, 0.5625],
+                            block_id,
+                            tint,
+                        );
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [1.0 - t, 0.0, 0.4375],
+                            [1.0, 1.0, 0.5625],
+                            block_id,
+                            tint,
+                        );
+                    } else {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.4375, 0.0, 0.0],
+                            [0.5625, 1.0, t],
+                            block_id,
+                            tint,
+                        );
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.4375, 0.0, 1.0 - t],
+                            [0.5625, 1.0, 1.0],
+                            block_id,
+                            tint,
+                        );
+                    }
+                }
+                // Cobblestone walls (meta 0/1 texture handled via texture mapping).
+                139 => {
+                    let connect_east = wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x + 1, y, z));
+                    let connect_west = wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x - 1, y, z));
+                    let connect_south =
+                        wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z + 1));
+                    let connect_north =
+                        wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z - 1));
+                    let has_x = connect_east || connect_west;
+                    let has_z = connect_north || connect_south;
+                    let center_tall = !has_x || !has_z;
+
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.25, 0.0, 0.25],
+                        [0.75, if center_tall { 1.0 } else { 0.8125 }, 0.75],
+                        block_id,
+                        tint,
+                    );
+                    if connect_north {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.3125, 0.0, 0.0],
+                            [0.6875, 0.8125, 0.5],
+                            block_id,
+                            tint,
+                        );
+                    }
+                    if connect_south {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.3125, 0.0, 0.5],
+                            [0.6875, 0.8125, 1.0],
+                            block_id,
+                            tint,
+                        );
+                    }
+                    if connect_west {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.0, 0.0, 0.3125],
+                            [0.5, 0.8125, 0.6875],
+                            block_id,
+                            tint,
+                        );
+                    }
+                    if connect_east {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.5, 0.0, 0.3125],
+                            [1.0, 0.8125, 0.6875],
+                            block_id,
+                            tint,
+                        );
+                    }
+                }
+                78 => {
+                    let layers = (block_meta(block_id) & 0x7) + 1;
+                    let h = (layers as f32 / 8.0).clamp(0.125, 1.0);
+                    add_box(
+                        batch,
+                        Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.0, 0.0, 0.0],
+                        [1.0, h, 1.0],
+                        block_id,
+                        tint,
+                    );
+                }
+                81 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [1.0 / 16.0, 0.0, 1.0 / 16.0],
+                    [15.0 / 16.0, 1.0, 15.0 / 16.0],
+                    block_id,
+                    tint,
+                ),
+                88 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.875, 1.0],
+                    block_id,
+                    tint,
+                ),
+                96 => {
+                    let meta = block_meta(block_id);
+                    let is_open = (meta & 0x4) != 0;
+                    let is_top = (meta & 0x8) != 0;
+                    let t = 3.0 / 16.0;
+                    let (min, max) = if is_open {
+                        match meta & 0x3 {
+                            0 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                            1 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                            2 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                            _ => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                        }
+                    } else if is_top {
+                        ([0.0, 1.0 - t, 0.0], [1.0, 1.0, 1.0])
+                    } else {
+                        ([0.0, 0.0, 0.0], [1.0, t, 1.0])
+                    };
+                    add_box(
+                        batch,
+                        Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        min,
+                        max,
+                        block_id,
+                        tint,
+                    );
+                }
+                171 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 1.0 / 16.0, 1.0],
+                    block_id,
+                    tint,
+                ),
+                _ => {}
+            }
+        }
         _ => {}
     }
 }
@@ -2034,6 +2399,7 @@ fn is_custom_block(block_id: u16) -> bool {
             | BlockModelKind::Fence
             | BlockModelKind::Pane
             | BlockModelKind::TorchLike
+            | BlockModelKind::Custom
     )
 }
 
@@ -2220,7 +2586,10 @@ fn is_ao_occluder(block_state: u16) -> bool {
     }
     !matches!(
         block_model_kind(id),
-        BlockModelKind::Cross | BlockModelKind::Pane | BlockModelKind::TorchLike
+        BlockModelKind::Cross
+            | BlockModelKind::Pane
+            | BlockModelKind::TorchLike
+            | BlockModelKind::Custom
     )
 }
 
@@ -2488,6 +2857,12 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
     ) {
         return MaterialGroup::Cutout;
     }
+    if matches!(
+        id,
+        27 | 28 | 64 | 65 | 66 | 71 | 96 | 157 | 193 | 194 | 195 | 196 | 197
+    ) {
+        return MaterialGroup::Cutout;
+    }
     MaterialGroup::Opaque
 }
 
@@ -2534,6 +2909,23 @@ fn pane_connects_to(neighbor_state: u16) -> bool {
     }
     // Panes connect to glass-family blocks and iron bars.
     if matches!(neighbor_id, 20 | 95 | 101 | 102 | 160) {
+        return true;
+    }
+    is_occluding_block(neighbor_state)
+}
+
+fn wall_connects_to(neighbor_state: u16) -> bool {
+    let neighbor_id = block_type(neighbor_state);
+    if neighbor_id == 0 || is_liquid(neighbor_state) {
+        return false;
+    }
+    if neighbor_id == 139 {
+        return true;
+    }
+    if matches!(block_model_kind(neighbor_id), BlockModelKind::Fence) {
+        return true;
+    }
+    if matches!(neighbor_id, 107 | 183 | 184 | 185 | 186 | 187) {
         return true;
     }
     is_occluding_block(neighbor_state)

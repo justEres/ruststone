@@ -161,6 +161,123 @@ impl AtlasBlockMapping {
                     _ => "double_plant_grass_bottom.png",
                 })
             }
+            60 => Some(match face {
+                Face::PosY => {
+                    if (meta & 0x7) > 0 {
+                        "farmland_wet.png"
+                    } else {
+                        "farmland_dry.png"
+                    }
+                }
+                Face::NegY => "dirt.png",
+                _ => "dirt.png",
+            }),
+            27 => Some(if (meta & 0x8) != 0 {
+                "rail_golden_powered.png"
+            } else {
+                "rail_golden.png"
+            }),
+            28 => Some(if (meta & 0x8) != 0 {
+                "rail_detector_powered.png"
+            } else {
+                "rail_detector.png"
+            }),
+            66 => Some(if (meta & 0x7) >= 6 {
+                "rail_normal_turned.png"
+            } else {
+                "rail_normal.png"
+            }),
+            157 => Some(if (meta & 0x8) != 0 {
+                "rail_activator_powered.png"
+            } else {
+                "rail_activator.png"
+            }),
+            64 | 71 | 193 | 194 | 195 | 196 | 197 => {
+                let upper = (meta & 0x8) != 0;
+                Some(match block_id {
+                    64 => {
+                        if upper {
+                            "door_wood_upper.png"
+                        } else {
+                            "door_wood_lower.png"
+                        }
+                    }
+                    71 => {
+                        if upper {
+                            "door_iron_upper.png"
+                        } else {
+                            "door_iron_lower.png"
+                        }
+                    }
+                    193 => {
+                        if upper {
+                            "door_spruce_upper.png"
+                        } else {
+                            "door_spruce_lower.png"
+                        }
+                    }
+                    194 => {
+                        if upper {
+                            "door_birch_upper.png"
+                        } else {
+                            "door_birch_lower.png"
+                        }
+                    }
+                    195 => {
+                        if upper {
+                            "door_jungle_upper.png"
+                        } else {
+                            "door_jungle_lower.png"
+                        }
+                    }
+                    196 => {
+                        if upper {
+                            "door_acacia_upper.png"
+                        } else {
+                            "door_acacia_lower.png"
+                        }
+                    }
+                    197 => {
+                        if upper {
+                            "door_dark_oak_upper.png"
+                        } else {
+                            "door_dark_oak_lower.png"
+                        }
+                    }
+                    _ => "door_wood_lower.png",
+                })
+            }
+            107 | 183 | 184 | 185 | 186 | 187 => Some(match block_id {
+                183 => "planks_spruce.png",
+                184 => "planks_birch.png",
+                185 => "planks_jungle.png",
+                186 => "planks_big_oak.png",
+                187 => "planks_acacia.png",
+                _ => "planks_oak.png",
+            }),
+            139 => Some(if (meta & 0x1) != 0 {
+                "cobblestone_mossy.png"
+            } else {
+                "cobblestone.png"
+            }),
+            171 => Some(match meta & 0xF {
+                1 => "wool_colored_orange.png",
+                2 => "wool_colored_magenta.png",
+                3 => "wool_colored_light_blue.png",
+                4 => "wool_colored_yellow.png",
+                5 => "wool_colored_lime.png",
+                6 => "wool_colored_pink.png",
+                7 => "wool_colored_gray.png",
+                8 => "wool_colored_silver.png",
+                9 => "wool_colored_cyan.png",
+                10 => "wool_colored_purple.png",
+                11 => "wool_colored_blue.png",
+                12 => "wool_colored_brown.png",
+                13 => "wool_colored_green.png",
+                14 => "wool_colored_red.png",
+                15 => "wool_colored_black.png",
+                _ => "wool_colored_white.png",
+            }),
             _ => None,
         };
 
