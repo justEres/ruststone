@@ -338,8 +338,9 @@ impl FromWorld for ChunkRenderAssets {
         let skybox_texture = world.resource::<AssetServer>().load("skybox.ktx2");
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
         let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
-        // Keep cutout in opaque queue; shader handles per-pixel discard.
-        let cutout_alpha_mode = AlphaMode::Opaque;
+        // Alpha-mask cutout keeps foliage/plant depth ordering stable while
+        // clipping transparent texels in the prepass.
+        let cutout_alpha_mode = AlphaMode::Mask(0.5);
         let grass_side_origin = texture_mapping
             .texture_index_by_name("grass_side.png")
             .map(atlas_tile_origin)
@@ -404,12 +405,11 @@ impl FromWorld for ChunkRenderAssets {
                 metallic: 0.0,
                 reflectance: 0.0,
                 perceptual_roughness: 1.0,
-                // Cutout writes depth like solid geometry while discarding transparent texels.
-                // Switchable for debugging; shader still performs cutout discard.
+                // Cutout uses binary discard in shader and alpha-mask pipeline.
                 alpha_mode: cutout_alpha_mode,
                 cull_mode: None,
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: !use_shadowed_pbr,
+                unlit: false,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -429,7 +429,7 @@ impl FromWorld for ChunkRenderAssets {
                 alpha_mode: cutout_alpha_mode,
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: !use_shadowed_pbr,
+                unlit: false,
                 ..default()
             },
             extension: AtlasTextureExtension {
@@ -1434,6 +1434,13 @@ fn add_cross_plant(
         z,
         biome_tints,
     );
+    if let Some(tint_rgb) =
+        cross_vegetation_biome_tint(block_id, snapshot, chunk_x, chunk_z, x, y, z, tint)
+    {
+        color[0] = tint_rgb[0];
+        color[1] = tint_rgb[1];
+        color[2] = tint_rgb[2];
+    }
     let shade = if should_apply_prebaked_shade(block_id) {
         block_light_factor(snapshot, chunk_x, chunk_z, x, y, z)
     } else {
@@ -1448,8 +1455,15 @@ fn add_cross_plant(
     let y0 = y as f32;
     let z0 = z as f32;
 
+    // Cross-plant quads use gently lifted normals so they don't appear unnaturally
+    // dark from top/side lighting compared to nearby terrain.
+    let cross_normal_lift = |n: Vec3| -> [f32; 3] {
+        let lifted = Vec3::new(n.x, 0.38, n.z).normalize_or_zero();
+        [lifted.x, lifted.y, lifted.z]
+    };
+
     // Plane A: (0,0,0) -> (1,1,1)
-    let normal_a = Vec3::new(1.0, 0.0, 1.0).normalize();
+    let normal_a = cross_normal_lift(Vec3::new(1.0, 0.0, 1.0));
     let a = [
         [x0 + 0.0, y0 + 0.0, z0 + 0.0],
         [x0 + 1.0, y0 + 0.0, z0 + 1.0],
@@ -1459,14 +1473,14 @@ fn add_cross_plant(
     add_double_sided_quad(
         data,
         a,
-        [normal_a.x, normal_a.y, normal_a.z],
+        normal_a,
         uvs,
         tile_origin,
         color,
     );
 
     // Plane B: (1,0,0) -> (0,1,1)
-    let normal_b = Vec3::new(-1.0, 0.0, 1.0).normalize();
+    let normal_b = cross_normal_lift(Vec3::new(-1.0, 0.0, 1.0));
     let b = [
         [x0 + 1.0, y0 + 0.0, z0 + 0.0],
         [x0 + 0.0, y0 + 0.0, z0 + 1.0],
@@ -1476,11 +1490,47 @@ fn add_cross_plant(
     add_double_sided_quad(
         data,
         b,
-        [normal_b.x, normal_b.y, normal_b.z],
+        normal_b,
         uvs,
         tile_origin,
         color,
     );
+}
+
+fn cross_vegetation_biome_tint(
+    block_state: u16,
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    tint: BiomeTint,
+) -> Option<[f32; 3]> {
+    let id = block_type(block_state);
+    match id {
+        // Saplings
+        6 => Some([tint.foliage[0], tint.foliage[1], tint.foliage[2]]),
+        // Tallgrass / fern
+        31 => Some([tint.grass[0], tint.grass[1], tint.grass[2]]),
+        // Reeds
+        83 => Some([tint.grass[0], tint.grass[1], tint.grass[2]]),
+        // Double grass / fern (upper half resolves from the lower block metadata)
+        175 => {
+            let meta = block_meta(block_state);
+            let lower_meta = if (meta & 0x8) != 0 {
+                block_meta(block_at(snapshot, chunk_x, chunk_z, x, y - 1, z))
+            } else {
+                meta
+            };
+            if matches!(lower_meta & 0x7, 2 | 3) {
+                Some([tint.grass[0], tint.grass[1], tint.grass[2]])
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 fn add_double_sided_quad(
@@ -1505,7 +1555,9 @@ fn add_double_sided_quad(
     let back_base = data.positions.len() as u32;
     for i in 0..4 {
         data.push_pos(verts[i]);
-        data.normals.push([-normal[0], -normal[1], -normal[2]]);
+        // Keep the same normal on both sides to avoid one face always receiving
+        // inverted lighting on billboard-style vegetation quads.
+        data.normals.push(normal);
         data.uvs.push(uvs[i]);
         data.uvs_b.push(tile_origin);
         data.colors.push(color);

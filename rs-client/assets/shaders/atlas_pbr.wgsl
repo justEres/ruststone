@@ -2,9 +2,11 @@
     pbr_types,
     pbr_functions,
     pbr_functions::alpha_discard,
-    pbr_fragment::pbr_input_from_standard_material,
     decal::clustered::apply_decal_base_color,
 }
+#ifndef PREPASS_PIPELINE
+#import bevy_pbr::pbr_fragment::pbr_input_from_standard_material
+#endif
 #import bevy_pbr::{
     mesh_view_bindings as view_bindings,
     prepass_utils,
@@ -19,7 +21,6 @@
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::{
     prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
 }
 #else
 #import bevy_pbr::{
@@ -369,7 +370,15 @@ fn fragment(
     vertex_output: VertexOutput,
     @builtin(front_facing) is_front: bool,
 #endif
+#ifdef PREPASS_PIPELINE
+#ifdef PREPASS_FRAGMENT
 ) -> FragmentOutput {
+#else
+) {
+#endif
+#else
+) -> FragmentOutput {
+#endif
 #ifdef MESHLET_MESH_MATERIAL_PASS
     let vertex_output = resolve_vertex_output(frag_coord);
     let is_front = true;
@@ -390,17 +399,20 @@ fn fragment(
 #endif
 
     // Stage 1: Base material and atlas sampling.
-    // Generate a PbrInput struct from the StandardMaterial bindings.
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
-    let vertex_tint_rgb = pbr_input.material.base_color.rgb;
-    let vertex_tint_alpha = pbr_input.material.base_color.a;
     let pass_mode = lighting_uniform.quality_and_water.w;
     let pass_mode_valid = pass_mode == pass_mode;
     let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
     let cutout_pass = pass_mode_valid && pass_mode > 1.5;
-    let is_water_surface = transparent_pass && vertex_tint_alpha < 0.75;
+    var is_water_surface = false;
+#ifndef PREPASS_PIPELINE
+    // Generate a PbrInput struct from the StandardMaterial bindings.
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    let vertex_tint_rgb = pbr_input.material.base_color.rgb;
+    let vertex_tint_alpha = pbr_input.material.base_color.a;
+    is_water_surface = transparent_pass && vertex_tint_alpha < 0.75;
     let shader_debug_view = i32(round(lighting_uniform.debug_flags.x));
     let fixed_debug_state = lighting_uniform.debug_flags.w > 0.5;
+#endif
 
     let packed_uv = in.uv;
     let tile_cell = floor(packed_uv / vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE));
@@ -446,6 +458,7 @@ fn fragment(
     let origin_eps = vec2<f32>(0.5 / ATLAS_COLUMNS, 0.5 / ATLAS_ROWS);
     let is_grass_side =
         grass_info_valid && all(abs(tile_origin - grass_base_origin) <= origin_eps);
+#ifndef PREPASS_PIPELINE
     if is_grass_side {
         let overlay_sample = atlas_texel_from_repeating(uv_local, grass_overlay_origin);
         let overlay_mask = overlay_sample.a;
@@ -455,6 +468,7 @@ fn fragment(
     } else {
         pbr_input.material.base_color *= atlas_sample;
     }
+#endif
 
     if transparent_pass {
         // Keep water/lava blend, but still punch fully transparent texels.
@@ -465,7 +479,7 @@ fn fragment(
         // For all non-transparent passes force binary cutout.
         // This keeps foliage/cutout stable even if runtime pass flags or material state
         // are temporarily out of sync after quality switches.
-        if !(atlas_alpha >= 0.99) {
+        if !(atlas_alpha >= 0.5) {
             discard;
         }
     }
@@ -500,12 +514,28 @@ fn fragment(
             );
         } else if shader_debug_view == 7 {
             // Alpha diagnostics:
-            // R = strict cutout keep bit (alpha >= 0.99),
+            // R = strict cutout keep bit (alpha >= 0.5),
             // G = raw sampled alpha,
             // B = pass_mode (normalized).
-            let keep = select(0.0, 1.0, atlas_alpha >= 0.99);
+            let keep = select(0.0, 1.0, atlas_alpha >= 0.5);
             let pass_n = clamp(pass_mode * 0.5, 0.0, 1.0);
             debug_rgb = vec3<f32>(keep, atlas_alpha, pass_n);
+        } else if shader_debug_view == 8 {
+            // Cutout lighting path diagnostics:
+            // Green = cutout + lit (PBR-eligible),
+            // Red = cutout + unlit flag set,
+            // Blue = non-cutout pass.
+            let cutout_lit =
+                cutout_pass
+                && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u;
+            debug_rgb = vec3<f32>(0.12, 0.32, 1.0);
+            if cutout_pass {
+                debug_rgb = select(
+                    vec3<f32>(1.0, 0.15, 0.15),
+                    vec3<f32>(0.15, 1.0, 0.25),
+                    cutout_lit,
+                );
+            }
         }
         var debug_out: FragmentOutput;
         debug_out.color = vec4(debug_rgb, 1.0);
@@ -513,6 +543,15 @@ fn fragment(
     }
 #endif
 
+#ifdef PREPASS_PIPELINE
+    // Depth/shadow prepass path: alpha discard above controls coverage.
+#ifdef PREPASS_FRAGMENT
+    var out: FragmentOutput;
+#ifdef UNCLIPPED_DEPTH_ORTHO_EMULATION
+    out.frag_depth = in.unclipped_depth;
+#endif
+#endif
+#else
     // Stage 2: Pass-specific alpha handling.
     // We do our own alpha cutout above. Keep cutout passes fully opaque after discard
     // to avoid backend/material-mode differences on alpha-mask handling.
@@ -532,10 +571,6 @@ fn fragment(
         pbr_input.material.base_color
     );
 
-#ifdef PREPASS_PIPELINE
-    // Write the gbuffer, lighting pass id, and optionally normal and motion_vector textures.
-    let out = deferred_output(in, pbr_input);
-#else
     // Stage 3: Lighting.
     // Hybrid path:
     // - Fast/Standard: cheap custom voxel lighting (no dynamic shadow sampling).
@@ -605,17 +640,29 @@ fn fragment(
 #endif
 
 #ifdef OIT_ENABLED
+#ifndef PREPASS_PIPELINE
     let alpha_mode = pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
         // The fragments will only be drawn during the oit resolve pass.
         oit_draw(in.position, out.color);
         discard;
     }
+#endif
 #endif // OIT_ENABLED
 
 #ifdef FORWARD_DECAL
+#ifndef PREPASS_PIPELINE
     out.color.a = min(forward_decal_info.alpha, out.color.a);
 #endif
+#endif
 
+#ifdef PREPASS_PIPELINE
+#ifdef PREPASS_FRAGMENT
     return out;
+#else
+    return;
+#endif
+#else
+    return out;
+#endif
 }

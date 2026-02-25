@@ -682,6 +682,7 @@ fn connect_ui(
                                 5 => "Linear depth",
                                 6 => "Pass flags",
                                 7 => "Alpha + pass",
+                                8 => "Cutout lit flags",
                                 _ => "Off",
                             })
                             .show_ui(ui, |ui| {
@@ -693,6 +694,11 @@ fn connect_ui(
                                 ui.selectable_value(&mut selected_debug_mode, 5, "Linear depth");
                                 ui.selectable_value(&mut selected_debug_mode, 6, "Pass flags");
                                 ui.selectable_value(&mut selected_debug_mode, 7, "Alpha + pass");
+                                ui.selectable_value(
+                                    &mut selected_debug_mode,
+                                    8,
+                                    "Cutout lit flags",
+                                );
                             });
                         if selected_debug_mode != render_debug.cutout_debug_mode {
                             render_debug.cutout_debug_mode = selected_debug_mode;
@@ -1282,7 +1288,7 @@ fn apply_options(
     render.water_ssr_thickness = options.water_ssr_thickness.clamp(0.02, 2.0);
     render.water_ssr_max_distance = options.water_ssr_max_distance.clamp(4.0, 400.0);
     render.water_ssr_stride = options.water_ssr_stride.clamp(0.2, 8.0);
-    render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 7);
+    render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 8);
     render.show_layer_entities = options.show_layer_entities;
     render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;
     render.show_layer_chunks_cutout = options.show_layer_chunks_cutout;
