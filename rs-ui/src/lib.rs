@@ -503,12 +503,6 @@ fn connect_ui(
                             )
                             .changed();
                         options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.water_terrain_ssr,
-                                "Dedicated terrain reflection pass",
-                            )
-                            .changed();
-                        options_changed |= ui
                             .add(
                                 egui::Slider::new(
                                     &mut render_debug.water_reflection_strength,
@@ -608,14 +602,43 @@ fn connect_ui(
                             )
                             .changed();
                         options_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_resolution_scale,
-                                    0.5..=3.0,
-                                )
-                                .text("Reflection resolution scale"),
+                            .checkbox(
+                                &mut render_debug.water_reflection_screen_space,
+                                "SSR reflections",
                             )
                             .changed();
+                        if render_debug.water_reflection_screen_space {
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut render_debug.water_ssr_steps, 4..=64)
+                                        .text("SSR ray steps"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_thickness,
+                                        0.02..=2.0,
+                                    )
+                                    .text("SSR hit thickness"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_max_distance,
+                                        4.0..=400.0,
+                                    )
+                                    .text("SSR max distance"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut render_debug.water_ssr_stride, 0.2..=8.0)
+                                        .text("SSR step stride"),
+                                )
+                                .changed();
+                        }
                     });
                 state.options_section_water = water_section.fully_open();
 
@@ -1023,7 +1046,7 @@ struct ClientOptionsFile {
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
     pub water_reflections_enabled: bool,
-    pub water_terrain_ssr: bool,
+    pub water_reflection_screen_space: bool,
     pub water_reflection_strength: f32,
     pub water_reflection_near_boost: f32,
     pub water_reflection_blue_tint: bool,
@@ -1035,8 +1058,11 @@ struct ClientOptionsFile {
     pub water_wave_detail_speed: f32,
     pub water_reflection_edge_fade: f32,
     pub water_reflection_overscan: f32,
-    pub water_reflection_resolution_scale: f32,
     pub water_reflection_sky_fill: f32,
+    pub water_ssr_steps: u8,
+    pub water_ssr_thickness: f32,
+    pub water_ssr_max_distance: f32,
+    pub water_ssr_stride: f32,
     pub cutout_debug_mode: u8,
     pub show_layer_entities: bool,
     pub show_layer_chunks_opaque: bool,
@@ -1086,7 +1112,7 @@ impl Default for ClientOptionsFile {
             voxel_ao_strength: render.voxel_ao_strength,
             voxel_ao_cutout: render.voxel_ao_cutout,
             water_reflections_enabled: render.water_reflections_enabled,
-            water_terrain_ssr: render.water_terrain_ssr,
+            water_reflection_screen_space: render.water_reflection_screen_space,
             water_reflection_strength: render.water_reflection_strength,
             water_reflection_near_boost: render.water_reflection_near_boost,
             water_reflection_blue_tint: render.water_reflection_blue_tint,
@@ -1098,8 +1124,11 @@ impl Default for ClientOptionsFile {
             water_wave_detail_speed: render.water_wave_detail_speed,
             water_reflection_edge_fade: render.water_reflection_edge_fade,
             water_reflection_overscan: render.water_reflection_overscan,
-            water_reflection_resolution_scale: render.water_reflection_resolution_scale,
             water_reflection_sky_fill: render.water_reflection_sky_fill,
+            water_ssr_steps: render.water_ssr_steps,
+            water_ssr_thickness: render.water_ssr_thickness,
+            water_ssr_max_distance: render.water_ssr_max_distance,
+            water_ssr_stride: render.water_ssr_stride,
             cutout_debug_mode: render.cutout_debug_mode,
             show_layer_entities: render.show_layer_entities,
             show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -1149,7 +1178,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         voxel_ao_strength: render.voxel_ao_strength,
         voxel_ao_cutout: render.voxel_ao_cutout,
         water_reflections_enabled: render.water_reflections_enabled,
-        water_terrain_ssr: render.water_terrain_ssr,
+        water_reflection_screen_space: render.water_reflection_screen_space,
         water_reflection_strength: render.water_reflection_strength,
         water_reflection_near_boost: render.water_reflection_near_boost,
         water_reflection_blue_tint: render.water_reflection_blue_tint,
@@ -1161,8 +1190,11 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_wave_detail_speed: render.water_wave_detail_speed,
         water_reflection_edge_fade: render.water_reflection_edge_fade,
         water_reflection_overscan: render.water_reflection_overscan,
-        water_reflection_resolution_scale: render.water_reflection_resolution_scale,
         water_reflection_sky_fill: render.water_reflection_sky_fill,
+        water_ssr_steps: render.water_ssr_steps,
+        water_ssr_thickness: render.water_ssr_thickness,
+        water_ssr_max_distance: render.water_ssr_max_distance,
+        water_ssr_stride: render.water_ssr_stride,
         cutout_debug_mode: render.cutout_debug_mode,
         show_layer_entities: render.show_layer_entities,
         show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -1232,7 +1264,7 @@ fn apply_options(
     render.voxel_ao_strength = options.voxel_ao_strength.clamp(0.0, 1.0);
     render.voxel_ao_cutout = options.voxel_ao_cutout;
     render.water_reflections_enabled = options.water_reflections_enabled;
-    render.water_terrain_ssr = options.water_terrain_ssr;
+    render.water_reflection_screen_space = options.water_reflection_screen_space;
     render.water_reflection_strength = options.water_reflection_strength.clamp(0.0, 3.0);
     render.water_reflection_near_boost = options.water_reflection_near_boost.clamp(0.0, 1.0);
     render.water_reflection_blue_tint = options.water_reflection_blue_tint;
@@ -1245,9 +1277,11 @@ fn apply_options(
     render.water_wave_detail_speed = options.water_wave_detail_speed.clamp(0.0, 4.0);
     render.water_reflection_edge_fade = options.water_reflection_edge_fade.clamp(0.01, 0.5);
     render.water_reflection_overscan = options.water_reflection_overscan.clamp(1.0, 3.0);
-    render.water_reflection_resolution_scale =
-        options.water_reflection_resolution_scale.clamp(0.5, 3.0);
     render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
+    render.water_ssr_steps = options.water_ssr_steps.clamp(4, 64);
+    render.water_ssr_thickness = options.water_ssr_thickness.clamp(0.02, 2.0);
+    render.water_ssr_max_distance = options.water_ssr_max_distance.clamp(4.0, 400.0);
+    render.water_ssr_stride = options.water_ssr_stride.clamp(0.2, 8.0);
     render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 7);
     render.show_layer_entities = options.show_layer_entities;
     render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;

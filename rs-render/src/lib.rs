@@ -41,7 +41,6 @@ impl Plugin for RenderPlugin {
         .init_resource::<chunk::ChunkRenderState>()
         .init_resource::<chunk::ChunkStore>()
         .init_resource::<chunk::ChunkRenderAssets>()
-        .init_resource::<reflection::ReflectionPassState>()
         .init_resource::<async_mesh::MeshAsyncResources>()
         .init_resource::<async_mesh::MeshInFlight>()
         .add_systems(Startup, (world::setup_world, camera::spawn_player))
@@ -55,9 +54,7 @@ impl Plugin for RenderPlugin {
                 lighting::update_material_debug_stats.after(lighting::update_water_animation),
                 lighting::apply_antialiasing.after(debug::apply_render_debug_settings),
                 lighting::apply_ssao_quality.after(lighting::apply_lighting_quality),
-                reflection::spawn_reflection_camera,
-                reflection::sync_reflection_camera.after(reflection::spawn_reflection_camera),
-                reflection::resize_reflection_target,
+                lighting::apply_depth_prepass_for_ssr.after(lighting::apply_lighting_quality),
                 debug::refresh_render_state_on_mode_change
                     .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
@@ -121,6 +118,7 @@ fn enqueue_chunk_meshes(
 
     for key in updated_keys {
         if in_flight.chunks.contains(&key) {
+            in_flight.pending_remesh.insert(key);
             continue;
         }
         let snapshot = chunk::snapshot_for_chunk(&store, key);
@@ -155,6 +153,8 @@ fn enqueue_chunk_meshes(
 fn apply_mesh_results(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    store: Res<chunk::ChunkStore>,
+    render_debug: Res<debug::RenderDebugSettings>,
     assets: Res<chunk::ChunkRenderAssets>,
     mut state: ResMut<chunk::ChunkRenderState>,
     async_mesh: Res<async_mesh::MeshAsyncResources>,
@@ -224,13 +224,11 @@ fn apply_mesh_results(
                 continue;
             }
             let mesh_layers = match group {
-                chunk::MaterialGroup::Opaque => RenderLayers::layer(
-                    reflection::CHUNK_OPAQUE_RENDER_LAYER,
-                )
-                .with(reflection::REFLECTION_RENDER_LAYER),
+                chunk::MaterialGroup::Opaque => {
+                    RenderLayers::layer(reflection::CHUNK_OPAQUE_RENDER_LAYER)
+                }
                 chunk::MaterialGroup::Cutout | chunk::MaterialGroup::CutoutCulled => {
                     RenderLayers::layer(reflection::CHUNK_CUTOUT_RENDER_LAYER)
-                        .with(reflection::REFLECTION_RENDER_LAYER)
                 }
                 chunk::MaterialGroup::Transparent => {
                     RenderLayers::layer(reflection::CHUNK_TRANSPARENT_RENDER_LAYER)
@@ -252,7 +250,7 @@ fn apply_mesh_results(
                 commands.entity(submesh.entity).insert(mesh_layers.clone());
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
-                    let half = (max - min) * 0.5;
+                    let half = (max - min) * 0.5 + Vec3::splat(0.75);
                     commands
                         .entity(submesh.entity)
                         .insert(bevy::render::primitives::Aabb {
@@ -276,7 +274,7 @@ fn apply_mesh_results(
                     .id();
                 if let Some((min, max)) = bounds {
                     let center = (min + max) * 0.5;
-                    let half = (max - min) * 0.5;
+                    let half = (max - min) * 0.5 + Vec3::splat(0.75);
                     commands
                         .entity(child)
                         .insert(bevy::render::primitives::Aabb {
@@ -307,6 +305,23 @@ fn apply_mesh_results(
         }
 
         in_flight.chunks.remove(&key);
+        if in_flight.pending_remesh.remove(&key) {
+            let snapshot = chunk::snapshot_for_chunk(&store, key);
+            let job = async_mesh::MeshJob {
+                chunk_key: key,
+                snapshot,
+                use_greedy: render_debug.use_greedy_meshing,
+                leaf_depth_layer_faces: true,
+                voxel_ao_enabled: render_debug.voxel_ao_enabled,
+                voxel_ao_strength: render_debug.voxel_ao_strength,
+                voxel_ao_cutout: render_debug.voxel_ao_cutout,
+                texture_mapping: assets.texture_mapping.clone(),
+                biome_tints: assets.biome_tints.clone(),
+            };
+            if async_mesh.job_tx.send(job).is_ok() {
+                in_flight.chunks.insert(key);
+            }
+        }
         applied += 1;
     }
 

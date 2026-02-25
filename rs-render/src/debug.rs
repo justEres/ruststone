@@ -14,6 +14,8 @@ use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
 const MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.30;
+const MANUAL_CULL_PAD_BASE: f32 = 6.0;
+const MANUAL_CULL_PAD_SHADOW_EXTRA: f32 = 12.0;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -128,7 +130,6 @@ pub struct RenderDebugSettings {
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
     pub water_reflections_enabled: bool,
-    pub water_terrain_ssr: bool,
     pub water_reflection_strength: f32,
     pub water_reflection_near_boost: f32,
     pub water_reflection_blue_tint: bool,
@@ -140,8 +141,12 @@ pub struct RenderDebugSettings {
     pub water_wave_detail_speed: f32,
     pub water_reflection_edge_fade: f32,
     pub water_reflection_overscan: f32,
-    pub water_reflection_resolution_scale: f32,
     pub water_reflection_sky_fill: f32,
+    pub water_reflection_screen_space: bool,
+    pub water_ssr_steps: u8,
+    pub water_ssr_thickness: f32,
+    pub water_ssr_max_distance: f32,
+    pub water_ssr_stride: f32,
     // Shader debug output mode:
     // 0 off, 1 pass id, 2 atlas rgb, 3 atlas alpha, 4 vertex tint, 5 linear depth
     pub cutout_debug_mode: u8,
@@ -205,7 +210,6 @@ impl Default for RenderDebugSettings {
             voxel_ao_strength: 1.0,
             voxel_ao_cutout: true,
             water_reflections_enabled: true,
-            water_terrain_ssr: false,
             water_reflection_strength: 0.85,
             water_reflection_near_boost: 0.18,
             water_reflection_blue_tint: false,
@@ -217,8 +221,12 @@ impl Default for RenderDebugSettings {
             water_wave_detail_speed: 1.7,
             water_reflection_edge_fade: 0.22,
             water_reflection_overscan: 1.30,
-            water_reflection_resolution_scale: 1.0,
             water_reflection_sky_fill: 0.55,
+            water_reflection_screen_space: false,
+            water_ssr_steps: 28,
+            water_ssr_thickness: 0.24,
+            water_ssr_max_distance: 80.0,
+            water_ssr_stride: 1.25,
             cutout_debug_mode: 0,
             show_layer_entities: true,
             show_layer_chunks_opaque: true,
@@ -481,7 +489,12 @@ pub fn manual_frustum_cull(
         // Fast path: chunk sub-meshes are unscaled, so use translation directly.
         let center = transform.translation() + Vec3::from(aabb.center);
         let half = Vec3::from(aabb.half_extents);
-        let cull_pad = 2.0;
+        let cull_pad = MANUAL_CULL_PAD_BASE
+            + if settings.shadows_enabled {
+                MANUAL_CULL_PAD_SHADOW_EXTRA
+            } else {
+                0.0
+            };
         let radius = half.length() + cull_pad;
         let to_center = center - cam_pos;
         if to_center.length_squared()
@@ -492,7 +505,7 @@ pub fn manual_frustum_cull(
             continue;
         }
         let z = to_center.dot(*forward);
-        if z < -radius - cull_pad {
+        if z < -radius - cull_pad * 2.0 {
             *visibility = Visibility::Hidden;
             continue;
         }
@@ -500,8 +513,8 @@ pub fn manual_frustum_cull(
         let y = to_center.dot(*up).abs();
         let visible = x <= z * tan_x + radius
             && y <= z * tan_y + radius
-            && z <= far + radius + cull_pad
-            && z >= near - radius - cull_pad;
+            && z <= far + radius + cull_pad * 2.0
+            && z >= near - radius - cull_pad * 2.0;
         *visibility = if visible {
             Visibility::Inherited
         } else {
