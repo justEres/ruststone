@@ -1,5 +1,6 @@
 use bevy::core_pipeline::{
     fxaa::{Fxaa, Sensitivity},
+    prepass::DepthPrepass,
     smaa::{Smaa, SmaaPreset},
 };
 use bevy::pbr::{
@@ -13,7 +14,7 @@ use bevy::render::view::Msaa;
 use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
 use crate::debug::{AntiAliasingMode, RenderDebugSettings, RenderPerfStats};
-use crate::reflection::{DEFAULT_WATER_PLANE_Y, ReflectionPassState};
+use crate::reflection::DEFAULT_WATER_PLANE_Y;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -121,6 +122,16 @@ fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
     AlphaMode::Opaque
 }
 
+fn water_reflection_mode(settings: &RenderDebugSettings, fixed_debug: bool) -> f32 {
+    if fixed_debug {
+        0.0
+    } else if settings.water_reflections_enabled && settings.water_reflection_screen_space {
+        4.0
+    } else {
+        0.0
+    }
+}
+
 pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
@@ -173,15 +184,7 @@ pub fn lighting_uniform_for_mode(
             if fixed_debug { 1.0 } else { settings.color_gamma },
         ),
         water_effects: Vec4::new(
-            if fixed_debug {
-                0.0
-            } else if settings.water_reflections_enabled && settings.water_terrain_ssr {
-                2.0
-            } else if settings.water_reflections_enabled {
-                1.0
-            } else {
-                0.0
-            },
+            water_reflection_mode(settings, fixed_debug),
             if fixed_debug {
                 0.0
             } else {
@@ -224,6 +227,28 @@ pub fn lighting_uniform_for_mode(
                 0.01
             } else {
                 settings.water_reflection_edge_fade
+            },
+        ),
+        ssr_params: Vec4::new(
+            if fixed_debug {
+                0.0
+            } else {
+                settings.water_ssr_steps.clamp(4, 64) as f32
+            },
+            if fixed_debug {
+                0.2
+            } else {
+                settings.water_ssr_thickness.clamp(0.02, 2.0)
+            },
+            if fixed_debug {
+                40.0
+            } else {
+                settings.water_ssr_max_distance.clamp(4.0, 400.0)
+            },
+            if fixed_debug {
+                1.0
+            } else {
+                settings.water_ssr_stride.clamp(0.2, 8.0)
             },
         ),
         debug_flags: Vec4::new(
@@ -289,7 +314,7 @@ pub fn apply_lighting_quality(
             },
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
-                reflection: assets.reflection_texture.clone(),
+                skybox: assets.skybox_texture.clone(),
                 lighting: make_lighting(0.0),
             },
         });
@@ -316,7 +341,7 @@ pub fn apply_lighting_quality(
             },
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
-                reflection: assets.reflection_texture.clone(),
+                skybox: assets.skybox_texture.clone(),
                 lighting: make_lighting(1.0),
             },
         });
@@ -335,7 +360,7 @@ pub fn apply_lighting_quality(
             },
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
-                reflection: assets.reflection_texture.clone(),
+                skybox: assets.skybox_texture.clone(),
                 lighting: make_lighting(2.0),
             },
         });
@@ -354,7 +379,7 @@ pub fn apply_lighting_quality(
             },
             extension: crate::chunk::AtlasTextureExtension {
                 atlas: assets.atlas.clone(),
-                reflection: assets.reflection_texture.clone(),
+                skybox: assets.skybox_texture.clone(),
                 lighting: make_lighting(2.0),
             },
         });
@@ -457,26 +482,12 @@ pub fn update_water_animation(
     time: Res<Time>,
     settings: Res<RenderDebugSettings>,
     assets: Res<ChunkRenderAssets>,
-    reflection_state: Option<Res<ReflectionPassState>>,
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
 ) {
     let t = time.elapsed_secs_wrapped();
     let fixed_debug = false;
-    let reflection_mode = if fixed_debug {
-        0.0
-    } else if settings.water_reflections_enabled && settings.water_terrain_ssr {
-        2.0
-    } else if settings.water_reflections_enabled {
-        1.0
-    } else {
-        0.0
-    };
-
-    let (reflection_view_proj, plane_y) = if let Some(reflection_state) = reflection_state {
-        (reflection_state.view_proj, reflection_state.plane_y)
-    } else {
-        (Mat4::IDENTITY, DEFAULT_WATER_PLANE_Y)
-    };
+    let reflection_mode = water_reflection_mode(&settings, fixed_debug);
+    let plane_y = DEFAULT_WATER_PLANE_Y;
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
 
     for (handle, pass_mode, force_unlit, alpha_mode) in [
@@ -557,7 +568,7 @@ pub fn update_water_animation(
                     0.0,
                 );
             mat.extension.lighting.grass_overlay_info = assets.grass_overlay_info;
-            mat.extension.lighting.reflection_view_proj = reflection_view_proj;
+            mat.extension.lighting.reflection_view_proj = Mat4::IDENTITY;
         }
     }
 }
@@ -728,4 +739,24 @@ pub fn apply_ssao_quality(
     commands
         .entity(camera_entity)
         .remove::<ScreenSpaceAmbientOcclusion>();
+}
+
+pub fn apply_depth_prepass_for_ssr(
+    settings: Res<RenderDebugSettings>,
+    camera_query: Query<(Entity, Option<&DepthPrepass>), With<crate::components::PlayerCamera>>,
+    mut commands: Commands,
+) {
+    let Ok((camera_entity, has_depth_prepass)) = camera_query.single() else {
+        return;
+    };
+    let want_depth_prepass = settings.water_reflections_enabled && settings.water_reflection_screen_space;
+    match (want_depth_prepass, has_depth_prepass.is_some()) {
+        (true, false) => {
+            commands.entity(camera_entity).insert(DepthPrepass);
+        }
+        (false, true) => {
+            commands.entity(camera_entity).remove::<DepthPrepass>();
+        }
+        _ => {}
+    }
 }

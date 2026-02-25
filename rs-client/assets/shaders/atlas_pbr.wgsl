@@ -5,6 +5,16 @@
     pbr_fragment::pbr_input_from_standard_material,
     decal::clustered::apply_decal_base_color,
 }
+#import bevy_pbr::{
+    mesh_view_bindings as view_bindings,
+    prepass_utils,
+    view_transformations::{
+        depth_ndc_to_view_z,
+        ndc_to_uv,
+        position_world_to_ndc,
+        position_world_to_view,
+    },
+}
 
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::{
@@ -27,6 +37,10 @@
 #import bevy_core_pipeline::oit::oit_draw
 #endif // OIT_ENABLED
 
+#ifdef TONEMAP_IN_SHADER
+#import bevy_core_pipeline::tonemapping::approximate_inverse_tone_mapping
+#endif
+
 #ifdef FORWARD_DECAL
 #import bevy_pbr::decal::forward::get_forward_decal_info
 #endif
@@ -45,8 +59,8 @@ const ATLAS_UV_PACK_SCALE: f32 = 1024.0;
 
 @group(2) @binding(100) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(101) var atlas_sampler: sampler;
-@group(2) @binding(103) var reflection_texture: texture_2d<f32>;
-@group(2) @binding(104) var reflection_sampler: sampler;
+@group(2) @binding(103) var skybox_texture: texture_cube<f32>;
+@group(2) @binding(104) var skybox_sampler: sampler;
 
 struct AtlasLightingUniform {
     sun_dir_and_strength: vec4<f32>,
@@ -56,6 +70,7 @@ struct AtlasLightingUniform {
     water_effects: vec4<f32>,
     water_controls: vec4<f32>,
     water_extra: vec4<f32>,
+    ssr_params: vec4<f32>,
     debug_flags: vec4<f32>,
     grass_overlay_info: vec4<f32>,
     reflection_view_proj: mat4x4<f32>,
@@ -89,11 +104,97 @@ fn safe_normalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
     return fallback;
 }
 
+fn sample_skybox_reflection(reflect_dir: vec3<f32>) -> vec3<f32> {
+    let dir = safe_normalize(reflect_dir, vec3<f32>(0.0, 1.0, 0.0));
+    return textureSampleLevel(skybox_texture, skybox_sampler, dir, 0.0).rgb;
+}
+
+fn sample_scene_reflection(uv: vec2<f32>) -> vec3<f32> {
+    var sampled = textureSampleLevel(
+        view_bindings::view_transmission_texture,
+        view_bindings::view_transmission_sampler,
+        uv,
+        0.0,
+    );
+    sampled = vec4<f32>(sampled.rgb / max(view_bindings::view.exposure, 0.0001), sampled.a);
+#ifdef TONEMAP_IN_SHADER
+    sampled = approximate_inverse_tone_mapping(sampled, view_bindings::view.color_grading);
+#endif
+    return sampled.rgb;
+}
+
+const WATER_SSR_MAX_STEPS: u32 = 64u;
+
+#ifdef DEPTH_PREPASS
+fn water_ssr_raymarch(
+    origin_world: vec3<f32>,
+    reflect_world: vec3<f32>,
+    wave: vec2<f32>,
+) -> vec4<f32> {
+    let steps = u32(clamp(round(lighting_uniform.ssr_params.x), 4.0, f32(WATER_SSR_MAX_STEPS)));
+    let thickness = clamp(lighting_uniform.ssr_params.y, 0.02, 2.0);
+    let max_distance = clamp(lighting_uniform.ssr_params.z, 4.0, 400.0);
+    let stride = clamp(lighting_uniform.ssr_params.w, 0.2, 8.0);
+    let ray_dir = safe_normalize(reflect_world, vec3<f32>(0.0, 1.0, 0.0));
+
+    var prev_uv = vec2<f32>(0.0, 0.0);
+    var prev_diff = 0.0;
+    var has_prev = false;
+
+    let jitter = fract(sin(dot(origin_world.xz + wave * 0.33, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let t0 = 0.35 + jitter * stride;
+    for (var i = 0u; i < WATER_SSR_MAX_STEPS; i = i + 1u) {
+        if i >= steps {
+            break;
+        }
+        let t = t0 + f32(i) * stride;
+        if t > max_distance {
+            break;
+        }
+
+        let sample_world = origin_world + ray_dir * t;
+        let sample_ndc = position_world_to_ndc(sample_world);
+        if sample_ndc.z <= 0.0001 || sample_ndc.z >= 0.9999 {
+            continue;
+        }
+
+        let uv = ndc_to_uv(sample_ndc.xy);
+        if any(uv < vec2<f32>(0.0, 0.0)) || any(uv > vec2<f32>(1.0, 1.0)) {
+            break;
+        }
+
+        let frag_xy = uv * view_bindings::view.viewport.zw + view_bindings::view.viewport.xy;
+        let scene_ndc_depth = prepass_utils::prepass_depth(vec4<f32>(frag_xy, 0.0, 0.0), 0u);
+        if scene_ndc_depth <= 0.0001 {
+            continue;
+        }
+
+        let scene_view_z = depth_ndc_to_view_z(scene_ndc_depth);
+        let ray_view_z = position_world_to_view(sample_world).z;
+        let diff = ray_view_z - scene_view_z;
+
+        if has_prev && prev_diff > thickness && diff <= thickness {
+            let denom = max(prev_diff - diff, 0.0001);
+            let a = clamp((prev_diff - thickness) / denom, 0.0, 1.0);
+            let hit_uv = mix(prev_uv, uv, a);
+            let hit_color = sample_scene_reflection(hit_uv);
+            return vec4<f32>(hit_color, 1.0);
+        }
+
+        prev_uv = uv;
+        prev_diff = diff;
+        has_prev = true;
+    }
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+}
+#endif
+
 fn apply_voxel_lighting(
     base: vec4<f32>,
     normal: vec3<f32>,
     view_z: f32,
     view_dir: vec3<f32>,
+    is_water_surface: bool,
     water_scene_reflection: vec3<f32>,
     water_scene_reflection_valid: f32,
 ) -> vec4<f32> {
@@ -123,7 +224,7 @@ fn apply_voxel_lighting(
 
     let pass_mode = lighting_uniform.quality_and_water.w;
     let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
-    if transparent_pass && quality_mode >= 2.0 {
+    if transparent_pass && is_water_surface && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
         let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
@@ -135,8 +236,7 @@ fn apply_voxel_lighting(
             let blue_tint_strength = clamp(lighting_uniform.water_controls.w, 0.0, 1.0);
             let sun_dir_reflect = safe_normalize(-sun_dir, vec3(0.0, 1.0, 0.0));
             let reflected = reflect(-view_dir, normal);
-            let sky_blend = clamp(reflected.y * 0.5 + 0.5, 0.0, 1.0);
-            let sky = mix(vec3(0.64, 0.73, 0.86), vec3(0.39, 0.56, 0.88), sky_blend);
+            let sky = sample_skybox_reflection(reflected);
             let terrain_enabled = lighting_uniform.water_effects.x > 1.5;
             let terrain = vec3(0.32, 0.39, 0.27);
             let terrain_blend_val =
@@ -145,11 +245,7 @@ fn apply_voxel_lighting(
             let env_reflection_base = mix(sky, terrain, terrain_blend);
             let sky_fill = clamp(lighting_uniform.debug_flags.y, 0.0, 1.0);
             let env_reflection_fallback = mix(env_reflection_base, sky, sky_fill);
-            let env_reflection = mix(
-                env_reflection_fallback,
-                water_scene_reflection,
-                water_scene_reflection_valid * select(0.0, 1.0, terrain_enabled),
-            );
+            let env_reflection = mix(env_reflection_fallback, water_scene_reflection, water_scene_reflection_valid);
             let sun_glint = pow(max(dot(reflected, sun_dir_reflect), 0.0), 96.0) * 0.65;
             let refl_strength = select(0.82, 0.94, terrain_enabled);
             let boost = 0.25 + user_strength * 1.45;
@@ -185,6 +281,7 @@ fn apply_fancy_post_lighting(
     normal: vec3<f32>,
     view_z: f32,
     view_dir: vec3<f32>,
+    is_water_surface: bool,
     water_scene_reflection: vec3<f32>,
     water_scene_reflection_valid: f32,
 ) -> vec4<f32> {
@@ -198,7 +295,7 @@ fn apply_fancy_post_lighting(
 
     let pass_mode = lighting_uniform.quality_and_water.w;
     let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
-    if transparent_pass && quality_mode >= 2.0 {
+    if transparent_pass && is_water_surface && quality_mode >= 2.0 {
         let absorption = lighting_uniform.quality_and_water.y;
         let fresnel_boost = lighting_uniform.quality_and_water.z;
         let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 5.0);
@@ -210,8 +307,7 @@ fn apply_fancy_post_lighting(
             let blue_tint_strength = clamp(lighting_uniform.water_controls.w, 0.0, 1.0);
             let sun_dir = safe_normalize(lighting_uniform.sun_dir_and_strength.xyz, vec3(0.0, 1.0, 0.0));
             let reflected = reflect(-view_dir, normal);
-            let sky_blend = clamp(reflected.y * 0.5 + 0.5, 0.0, 1.0);
-            let sky = mix(vec3(0.64, 0.73, 0.86), vec3(0.39, 0.56, 0.88), sky_blend);
+            let sky = sample_skybox_reflection(reflected);
             let terrain_enabled = lighting_uniform.water_effects.x > 1.5;
             let terrain = vec3(0.32, 0.39, 0.27);
             let terrain_blend_val =
@@ -220,11 +316,7 @@ fn apply_fancy_post_lighting(
             let env_reflection_base = mix(sky, terrain, terrain_blend);
             let sky_fill = clamp(lighting_uniform.debug_flags.y, 0.0, 1.0);
             let env_reflection_fallback = mix(env_reflection_base, sky, sky_fill);
-            let env_reflection = mix(
-                env_reflection_fallback,
-                water_scene_reflection,
-                water_scene_reflection_valid * select(0.0, 1.0, terrain_enabled),
-            );
+            let env_reflection = mix(env_reflection_fallback, water_scene_reflection, water_scene_reflection_valid);
             let sun_glint = pow(max(dot(reflected, safe_normalize(-sun_dir, vec3(0.0, 1.0, 0.0))), 0.0), 96.0) * 0.65;
             let refl_strength = select(0.82, 0.94, terrain_enabled);
             let boost = 0.25 + user_strength * 1.45;
@@ -301,10 +393,12 @@ fn fragment(
     // Generate a PbrInput struct from the StandardMaterial bindings.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     let vertex_tint_rgb = pbr_input.material.base_color.rgb;
+    let vertex_tint_alpha = pbr_input.material.base_color.a;
     let pass_mode = lighting_uniform.quality_and_water.w;
     let pass_mode_valid = pass_mode == pass_mode;
     let transparent_pass = pass_mode_valid && pass_mode > 0.5 && pass_mode < 1.5;
     let cutout_pass = pass_mode_valid && pass_mode > 1.5;
+    let is_water_surface = transparent_pass && vertex_tint_alpha < 0.75;
     let shader_debug_view = i32(round(lighting_uniform.debug_flags.x));
     let fixed_debug_state = lighting_uniform.debug_flags.w > 0.5;
 
@@ -313,7 +407,7 @@ fn fragment(
     var uv_local = packed_uv - tile_cell * vec2<f32>(ATLAS_UV_PACK_SCALE, ATLAS_UV_PACK_SCALE);
     var tile_origin = tile_cell / vec2<f32>(ATLAS_COLUMNS, ATLAS_ROWS);
     var water_wave = vec2<f32>(0.0, 0.0);
-    if transparent_pass {
+    if is_water_surface {
         let t = lighting_uniform.water_effects.w * lighting_uniform.water_effects.z;
         let amp = lighting_uniform.water_effects.y;
         let detail_amp = lighting_uniform.water_extra.x;
@@ -449,31 +543,29 @@ fn fragment(
     var out: FragmentOutput;
     var water_scene_reflection = vec3<f32>(0.0, 0.0, 0.0);
     var water_scene_reflection_valid = 0.0;
-    if transparent_pass && lighting_uniform.water_effects.x > 1.5 {
-        // Reflection camera is already mirrored around the water plane.
-        // Project the current world position into reflection clip space.
-        let clip = lighting_uniform.reflection_view_proj * vec4<f32>(in.world_position.xyz, 1.0);
-        if clip.w > 0.0001 {
-            let ndc = clip.xy / clip.w;
-            let uv_raw = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5))
-                + water_wave * (lighting_uniform.water_effects.y * 0.025);
-            let uv = clamp(uv_raw, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-            water_scene_reflection = textureSample(reflection_texture, reflection_sampler, uv).rgb;
-
-            let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-            let edge_fade = clamp(lighting_uniform.water_extra.w, 0.01, 0.5);
-            let edge_valid = smoothstep(0.0, edge_fade, edge);
-
-            let outside = max(vec2<f32>(0.0, 0.0), max(-uv_raw, uv_raw - vec2<f32>(1.0, 1.0)));
-            let outside_dist = max(outside.x, outside.y);
-            let oob_valid = 1.0 - smoothstep(0.0, edge_fade * 1.7, outside_dist);
-
-            water_scene_reflection_valid = edge_valid * oob_valid;
-        }
+    var reflection_normal = safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0));
+    if is_water_surface {
+        let amp = lighting_uniform.water_effects.y;
+        reflection_normal = safe_normalize(
+            reflection_normal + vec3<f32>(water_wave.x * amp * 0.28, 0.0, water_wave.y * amp * 0.28),
+            reflection_normal,
+        );
+    }
+    if is_water_surface && lighting_uniform.water_effects.x > 3.5 {
+#ifdef DEPTH_PREPASS
+            let reflect_dir = reflect(-safe_normalize(pbr_input.V, vec3<f32>(0.0, 0.0, 1.0)), reflection_normal);
+            let ssr_hit = water_ssr_raymarch(
+                in.world_position.xyz + reflection_normal * 0.08,
+                reflect_dir,
+                water_wave,
+            );
+            water_scene_reflection = ssr_hit.rgb;
+            water_scene_reflection_valid = ssr_hit.a;
+#endif
     }
     let base_normal = safe_normalize(pbr_input.N, vec3(0.0, 1.0, 0.0));
     var normal = base_normal;
-    if transparent_pass {
+    if is_water_surface {
         let amp = lighting_uniform.water_effects.y;
         normal = safe_normalize(
             base_normal + vec3<f32>(water_wave.x * amp * 0.28, 0.0, water_wave.y * amp * 0.28),
@@ -489,6 +581,7 @@ fn fragment(
             normal,
             abs(in.position.w),
             view_dir,
+            is_water_surface,
             water_scene_reflection,
             water_scene_reflection_valid,
         );
@@ -498,6 +591,7 @@ fn fragment(
             normal,
             abs(in.position.w),
             view_dir,
+            is_water_surface,
             water_scene_reflection,
             water_scene_reflection_valid,
         );

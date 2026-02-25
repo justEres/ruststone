@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, ShaderRef, ShaderType, TextureDimension, TextureFormat, TextureUsages,
+    AsBindGroup, Extent3d, ShaderRef, ShaderType, TextureDimension, TextureFormat,
 };
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
 use rs_utils::{
@@ -42,6 +42,7 @@ pub struct AtlasLightingUniform {
     pub water_effects: Vec4,
     pub water_controls: Vec4,
     pub water_extra: Vec4,
+    pub ssr_params: Vec4,
     pub debug_flags: Vec4,
     pub grass_overlay_info: Vec4,
     pub reflection_view_proj: Mat4,
@@ -52,15 +53,19 @@ pub struct AtlasTextureExtension {
     #[texture(100)]
     #[sampler(101)]
     pub atlas: Handle<Image>,
-    #[texture(103)]
+    #[texture(103, dimension = "cube")]
     #[sampler(104)]
-    pub reflection: Handle<Image>,
+    pub skybox: Handle<Image>,
     #[uniform(102)]
     pub lighting: AtlasLightingUniform,
 }
 
 impl MaterialExtension for AtlasTextureExtension {
     fn fragment_shader() -> ShaderRef {
+        ATLAS_PBR_SHADER_PATH.into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
         ATLAS_PBR_SHADER_PATH.into()
     }
 
@@ -303,7 +308,7 @@ pub struct ChunkRenderAssets {
     pub cutout_culled_material: Handle<ChunkAtlasMaterial>,
     pub transparent_material: Handle<ChunkAtlasMaterial>,
     pub atlas: Handle<Image>,
-    pub reflection_texture: Handle<Image>,
+    pub skybox_texture: Handle<Image>,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
     pub grass_overlay_info: Vec4,
@@ -330,10 +335,7 @@ impl FromWorld for ChunkRenderAssets {
             let mut images = world.resource_mut::<Assets<Image>>();
             images.add(atlas_image)
         };
-        let reflection_texture = {
-            let mut images = world.resource_mut::<Assets<Image>>();
-            images.add(create_reflection_target_image(1024, 1024))
-        };
+        let skybox_texture = world.resource::<AssetServer>().load("skybox.ktx2");
         let mut materials = world.resource_mut::<Assets<ChunkAtlasMaterial>>();
         let use_shadowed_pbr = uses_shadowed_pbr_path(&settings);
         // Keep cutout in opaque queue; shader handles per-pixel discard.
@@ -372,7 +374,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                reflection: reflection_texture.clone(),
+                skybox: skybox_texture.clone(),
                 lighting: make_lighting(0.0),
             },
         });
@@ -391,7 +393,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                reflection: reflection_texture.clone(),
+                skybox: skybox_texture.clone(),
                 lighting: make_lighting(1.0),
             },
         });
@@ -412,7 +414,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                reflection: reflection_texture.clone(),
+                skybox: skybox_texture.clone(),
                 lighting: make_lighting(2.0),
             },
         });
@@ -432,7 +434,7 @@ impl FromWorld for ChunkRenderAssets {
             },
             extension: AtlasTextureExtension {
                 atlas: atlas_handle.clone(),
-                reflection: reflection_texture.clone(),
+                skybox: skybox_texture.clone(),
                 lighting: make_lighting(2.0),
             },
         });
@@ -443,7 +445,7 @@ impl FromWorld for ChunkRenderAssets {
             cutout_culled_material,
             transparent_material,
             atlas: atlas_handle,
-            reflection_texture,
+            skybox_texture,
             texture_mapping,
             biome_tints,
             grass_overlay_info,
@@ -504,6 +506,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         let mut rgba = rgba;
         apply_default_foliage_tint(texture_name, &mut rgba);
         normalize_overlay_mask_texture(texture_name, &mut rgba);
+        force_opaque_texture_alpha(texture_name, &mut rgba);
 
         let atlas_buf = atlas.get_or_insert_with(|| {
             ImageBuffer::from_pixel(
@@ -572,6 +575,17 @@ fn normalize_overlay_mask_texture(texture_name: &str, img: &mut ImageBuffer<Rgba
         let luma = ((u16::from(r) + u16::from(g) + u16::from(b)) / 3) as u8;
         let mask = if a == 255 { luma } else { a };
         p.0 = [255, 255, 255, mask];
+    }
+}
+
+fn force_opaque_texture_alpha(texture_name: &str, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    // Keep regular ice fully opaque to avoid transparent-pass ordering/flicker issues.
+    // This matches the requested visual style for now.
+    if texture_name != "ice.png" {
+        return;
+    }
+    for p in img.pixels_mut() {
+        p.0[3] = 255;
     }
 }
 
@@ -649,23 +663,6 @@ fn dump_atlas_debug_images(atlas: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
     }
     let alpha_path = out_dir.join("atlas_alpha.png");
     let _ = DynamicImage::ImageRgba8(alpha_img).save(&alpha_path);
-}
-
-pub fn create_reflection_target_image(width: u32, height: u32) -> Image {
-    let mut image = Image::new_fill(
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &[0, 0, 0, 255],
-        TextureFormat::Bgra8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
-    image
 }
 
 fn missing_texture_image() -> DynamicImage {
@@ -1381,7 +1378,7 @@ fn tint_color(
     match classify_tint(block_id, below) {
         TintClass::Grass => tint.grass,
         TintClass::Foliage => tint.foliage,
-        TintClass::Water => tint.water,
+        TintClass::Water => [tint.water[0], tint.water[1], tint.water[2], 0.5],
         TintClass::FoliageFixed(rgb) => {
             let r = ((rgb >> 16) & 0xFF) as f32 / 255.0;
             let g = ((rgb >> 8) & 0xFF) as f32 / 255.0;
@@ -1399,7 +1396,7 @@ fn tint_color_untargeted(block_id: u16, tint: BiomeTint) -> [f32; 4] {
     match classify_tint(block_id, None) {
         TintClass::Grass => tint.grass,
         TintClass::Foliage => tint.foliage,
-        TintClass::Water => tint.water,
+        TintClass::Water => [tint.water[0], tint.water[1], tint.water[2], 0.5],
         TintClass::FoliageFixed(rgb) => [
             ((rgb >> 16) & 0xFF) as f32 / 255.0,
             ((rgb >> 8) & 0xFF) as f32 / 255.0,
@@ -2494,11 +2491,20 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16, leaf_depth_layer_faces: boo
     if block_type(neighbor_id) == 0 {
         return false;
     }
+    // Prevent coplanar z-fighting at liquid/solid interfaces:
+    // render only the non-liquid face when water/lava touches terrain.
+    if is_liquid(block_id) {
+        return true;
+    }
     if is_liquid(neighbor_id) {
         return is_liquid(block_id);
     }
+    // Cull internal faces between identical blend-transparent cubes (e.g. ice).
     let this_type = block_type(block_id);
     let neighbor_type = block_type(neighbor_id);
+    if is_transparent_block(this_type) || is_transparent_block(neighbor_type) {
+        return this_type == neighbor_type && block_id == neighbor_id;
+    }
 
     // For leaves, keep front faces on deeper leaf blocks so holes in one leaf
     // layer reveal the next layer instead of the sky.
