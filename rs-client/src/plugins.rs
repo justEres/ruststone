@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::time::Fixed;
-use std::sync::Mutex;
 use bevy_egui::EguiPrimaryContextPass;
+use std::sync::Mutex;
 
 use rs_ui::ConnectUiState;
 use rs_utils::{
@@ -151,6 +151,8 @@ impl Plugin for ClientEntityPlugin {
                     .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
                 entities::animate_remote_player_models.after(entities::smooth_remote_entity_motion),
                 entities::animate_remote_biped_models.after(entities::smooth_remote_entity_motion),
+                entities::animate_remote_quadruped_models
+                    .after(entities::smooth_remote_entity_motion),
                 entities::billboard_item_sprites.after(entities::smooth_remote_entity_motion),
             ),
         )
@@ -229,8 +231,7 @@ impl Plugin for ClientSimPlugin {
                 )
                     .chain(),
             )
-            .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system)
-            ;
+            .add_systems(EguiPrimaryContextPass, sim_systems::debug_overlay_system);
     }
 }
 
@@ -261,8 +262,7 @@ impl Plugin for ClientTimingPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                sim_systems::fixed_update_timing_start
-                    .before(sim_systems::net_event_apply_system),
+                sim_systems::fixed_update_timing_start.before(sim_systems::net_event_apply_system),
             )
             .add_systems(
                 FixedUpdate,

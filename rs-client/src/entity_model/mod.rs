@@ -6,12 +6,16 @@
 //! - Only textures are loaded at runtime (from the texture pack / skin URLs).
 
 mod biped;
+mod creeper;
 mod mesh;
+mod quadruped;
 mod textures;
 mod types;
 
 pub use biped::*;
+pub use creeper::*;
 pub use mesh::*;
+pub use quadruped::*;
 pub use textures::*;
 pub use types::*;
 

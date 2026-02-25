@@ -11,7 +11,7 @@ use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
 
 use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::movement::{WorldCollision, effective_sprint, simulate_tick};
+use crate::sim::movement::{WorldCollision, debug_block_collision_boxes, effective_sprint, simulate_tick};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::{
     CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
@@ -20,7 +20,10 @@ use crate::sim::{
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
-use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings, block_state_id};
+use rs_utils::{
+    BreakIndicator, EntityUseAction, InventoryState, PerfTimings, block_model_kind,
+    block_registry_key, block_state_id, block_state_meta,
+};
 
 use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
@@ -1579,6 +1582,20 @@ fn yaw_deg_to_cardinal(yaw_deg_mc: f32) -> (&'static str, &'static str) {
     }
 }
 
+fn block_model_kind_label(kind: rs_utils::BlockModelKind) -> &'static str {
+    match kind {
+        rs_utils::BlockModelKind::FullCube => "FullCube",
+        rs_utils::BlockModelKind::Cross => "Cross",
+        rs_utils::BlockModelKind::Slab => "Slab",
+        rs_utils::BlockModelKind::Stairs => "Stairs",
+        rs_utils::BlockModelKind::Fence => "Fence",
+        rs_utils::BlockModelKind::Pane => "Pane",
+        rs_utils::BlockModelKind::Fluid => "Fluid",
+        rs_utils::BlockModelKind::TorchLike => "TorchLike",
+        rs_utils::BlockModelKind::Custom => "Custom",
+    }
+}
+
 pub fn debug_overlay_system(
     mut contexts: EguiContexts,
     debug: Res<DebugStats>,
@@ -1592,6 +1609,9 @@ pub fn debug_overlay_system(
     render_perf: Res<RenderPerfStats>,
     sim_state: Res<SimState>,
     input: Res<CurrentInput>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    collision_map: Res<WorldCollisionMap>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
@@ -1948,6 +1968,58 @@ pub fn debug_overlay_system(
                     let (card, axis) = yaw_deg_to_cardinal(yaw_mc);
                     ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
                     ui.label(format!("facing: {} ({})", card, axis));
+
+                    if let Ok(camera_transform) = camera_query.get_single() {
+                        let origin = camera_transform.translation();
+                        let dir = *camera_transform.forward();
+                        let max_reach = if player_status.gamemode == 1 {
+                            CREATIVE_BLOCK_REACH
+                        } else {
+                            SURVIVAL_BLOCK_REACH
+                        };
+                        if let Some(hit) = raycast_block(&collision_map, origin, dir, max_reach) {
+                            let state = collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
+                            let id = block_state_id(state);
+                            let meta = block_state_meta(state);
+                            let kind = block_model_kind(id);
+                            let reg = block_registry_key(id).unwrap_or("minecraft:unknown");
+                            let world = WorldCollision::with_map(&collision_map);
+                            let boxes =
+                                debug_block_collision_boxes(&world, state, hit.block.x, hit.block.y, hit.block.z);
+
+                            ui.label(format!(
+                                "target block: {} {} {}",
+                                hit.block.x, hit.block.y, hit.block.z
+                            ));
+                            ui.label(format!(
+                                "id/state/meta: {} / {} / {}  kind: {}",
+                                id,
+                                state,
+                                meta,
+                                block_model_kind_label(kind)
+                            ));
+                            ui.label(format!("registry: {}", reg));
+                            ui.label(format!("collision boxes: {}", boxes.len()));
+                            for (idx, (min, max)) in boxes.iter().take(4).enumerate() {
+                                let size = *max - *min;
+                                ui.label(format!(
+                                    "box{} min({:.3},{:.3},{:.3}) size({:.3},{:.3},{:.3})",
+                                    idx,
+                                    min.x,
+                                    min.y,
+                                    min.z,
+                                    size.x,
+                                    size.y,
+                                    size.z
+                                ));
+                            }
+                            if boxes.len() > 4 {
+                                ui.label(format!("... {} more boxes", boxes.len() - 4));
+                            }
+                        } else {
+                            ui.label("target block: none");
+                        }
+                    }
                 }
             });
             debug_ui.show_render = render_section.fully_open();
