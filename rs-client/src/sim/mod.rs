@@ -86,6 +86,52 @@ pub struct DebugStats {
 pub struct SimReady(pub bool);
 
 #[derive(Debug, Resource, Clone, Copy)]
+pub struct CorrectionLoopGuard {
+    pub last_server_pos: Vec3,
+    pub last_server_on_ground: bool,
+    pub repeats: u32,
+    pub skip_send_ticks: u32,
+    pub force_full_pos_ticks: u32,
+    pub skip_physics_ticks: u32,
+    pub pending_ack: Option<(Vec3, f32, f32, bool)>,
+}
+
+impl Default for CorrectionLoopGuard {
+    fn default() -> Self {
+        Self {
+            last_server_pos: Vec3::ZERO,
+            last_server_on_ground: false,
+            repeats: 0,
+            skip_send_ticks: 0,
+            force_full_pos_ticks: 0,
+            skip_physics_ticks: 0,
+            pending_ack: None,
+        }
+    }
+}
+
+#[derive(Debug, Resource, Clone, Copy)]
+pub struct MovementPacketState {
+    pub initialized: bool,
+    pub last_pos: Vec3,
+    pub last_yaw_deg: f32,
+    pub last_pitch_deg: f32,
+    pub ticks_since_pos: u32,
+}
+
+impl Default for MovementPacketState {
+    fn default() -> Self {
+        Self {
+            initialized: false,
+            last_pos: Vec3::ZERO,
+            last_yaw_deg: 0.0,
+            last_pitch_deg: 0.0,
+            ticks_since_pos: 0,
+        }
+    }
+}
+
+#[derive(Debug, Resource, Clone, Copy)]
 pub struct ZoomState {
     pub active: bool,
     pub current_factor: f32,

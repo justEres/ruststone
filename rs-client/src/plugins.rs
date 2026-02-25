@@ -84,6 +84,8 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(sim::VisualCorrectionOffset::default())
             .insert_resource(sim::DebugStats::default())
             .insert_resource(sim::SimReady::default())
+            .insert_resource(sim::CorrectionLoopGuard::default())
+            .insert_resource(sim::MovementPacketState::default())
             .insert_resource(sim::DebugUiState::default())
             .insert_resource(sim::ZoomState::default())
             .insert_resource(sim::CameraPerspectiveState::default())

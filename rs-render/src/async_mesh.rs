@@ -53,6 +53,7 @@ impl FromWorld for MeshAsyncResources {
 #[derive(Resource, Default)]
 pub struct MeshInFlight {
     pub chunks: HashSet<(i32, i32)>,
+    pub pending_remesh: HashSet<(i32, i32)>,
 }
 
 pub struct MeshJob {
