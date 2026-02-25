@@ -53,6 +53,10 @@ pub struct WorldCollisionMap {
 }
 
 impl WorldCollisionMap {
+    pub fn has_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.chunks.contains_key(&(chunk_x, chunk_z))
+    }
+
     pub fn update_chunk(&mut self, chunk: ChunkData) {
         let key = (chunk.x, chunk.z);
         let entry = self

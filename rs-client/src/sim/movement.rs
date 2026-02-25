@@ -21,14 +21,15 @@ const WATER_MOVE_SPEED: f32 = 0.02;
 const SWIM_UP_ACCEL: f32 = 0.04;
 const SLIPPERINESS_DEFAULT: f32 = 0.6;
 const SLIPPERINESS_ICE: f32 = 0.98;
+const SLIPPERINESS_SLIME: f32 = 0.8;
 const SNEAK_EDGE_STEP: f32 = 0.05;
 const MOVE_INPUT_DAMPING: f32 = 0.98;
 const SNEAK_INPUT_SCALE: f32 = 0.3;
-const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
 const FLY_VERTICAL_ACCEL_MULT: f32 = 3.0;
 const FLY_HORIZONTAL_DAMPING: f32 = 0.91;
 const FLY_VERTICAL_DAMPING: f32 = 0.6;
 const FLY_SPRINT_MULT: f32 = 2.0;
+const SOUL_SAND_SLOWDOWN: f32 = 0.4;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -47,15 +48,20 @@ impl<'a> WorldCollision<'a> {
         self.map.map_or(0, |map| map.block_at(x, y, z))
     }
 
+    fn has_chunk_at_pos(&self, pos: Vec3) -> bool {
+        let chunk_x = (pos.x.floor() as i32).div_euclid(16);
+        let chunk_z = (pos.z.floor() as i32).div_euclid(16);
+        self.map.is_some_and(|map| map.has_chunk(chunk_x, chunk_z))
+    }
+
     fn is_player_in_water(&self, pos: Vec3) -> bool {
-        let x = pos.x.floor() as i32;
-        let z = pos.z.floor() as i32;
-        let y0 = (pos.y + 0.2).floor() as i32;
-        let y1 = (pos.y + 0.9).floor() as i32;
-        let y2 = (pos.y + 1.4).floor() as i32;
-        is_water_state(self.block_at(x, y0, z))
-            || is_water_state(self.block_at(x, y1, z))
-            || is_water_state(self.block_at(x, y2, z))
+        // Vanilla-like check derived from Entity#isInWater:
+        // handle material acceleration against player BB expanded down by 0.4,
+        // then contracted by epsilon.
+        let bb = player_aabb(pos)
+            .offset(Vec3::new(0.0, -0.4, 0.0))
+            .contract(0.001, 0.001, 0.001);
+        self.aabb_has_liquid(&bb)
     }
 
     fn collect_collision_boxes(&self, min: Vec3, max: Vec3) -> Vec<Aabb> {
@@ -135,6 +141,22 @@ impl<'a> WorldCollision<'a> {
         block_slipperiness(self.block_at(x, y, z))
     }
 
+    fn is_on_soul_sand(&self, pos: Vec3) -> bool {
+        let y = (pos.y - 0.2).floor() as i32;
+        let x0 = (pos.x - PLAYER_HALF_WIDTH).floor() as i32;
+        let x1 = (pos.x + PLAYER_HALF_WIDTH).floor() as i32;
+        let z0 = (pos.z - PLAYER_HALF_WIDTH).floor() as i32;
+        let z1 = (pos.z + PLAYER_HALF_WIDTH).floor() as i32;
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                if block_state_id(self.block_at(x, y, z)) == 88 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn clamp_sneak_edge_velocity(&self, pos: Vec3, vel: Vec3) -> Vec3 {
         if self.map.is_none() {
             return vel;
@@ -200,46 +222,80 @@ impl<'a> WorldCollision<'a> {
         let horizontal_blocked = original.x != x || original.z != z;
 
         if PLAYER_STEP_HEIGHT > 0.0 && (was_on_ground || stepped_down) && horizontal_blocked {
-            let start = player_aabb(pos);
-            let mut stepped = start;
+            // Port of vanilla 1.8 moveEntity step resolution branch.
+            let prev_x = x;
+            let prev_y = y;
+            let prev_z = z;
+            let prev_bb = bb;
+            let axisalignedbb = player_aabb(pos);
 
-            let step_motion = Vec3::new(original.x, PLAYER_STEP_HEIGHT, original.z);
-            boxes = self.collect_collision_boxes(
-                stepped.expanded_by_motion(step_motion).min,
-                stepped.expanded_by_motion(step_motion).max,
-            );
+            bb = axisalignedbb;
+            y = PLAYER_STEP_HEIGHT;
+            let query = bb.add_coord(Vec3::new(original.x, y, original.z));
+            boxes = self.collect_collision_boxes(query.min, query.max);
 
-            let mut up = PLAYER_STEP_HEIGHT;
+            // Candidate A
+            let mut bb_a = bb;
+            let bb_a_query = bb_a.add_coord(Vec3::new(original.x, 0.0, original.z));
+            let mut y_a = y;
             for block in &boxes {
-                up = calculate_y_offset(&stepped, block, up);
+                y_a = calculate_y_offset(&bb_a_query, block, y_a);
             }
-            stepped = stepped.offset(Vec3::new(0.0, up, 0.0));
-
-            let mut step_x = original.x;
+            bb_a = bb_a.offset(Vec3::new(0.0, y_a, 0.0));
+            let mut x_a = original.x;
             for block in &boxes {
-                step_x = calculate_x_offset(&stepped, block, step_x);
+                x_a = calculate_x_offset(&bb_a, block, x_a);
             }
-            stepped = stepped.offset(Vec3::new(step_x, 0.0, 0.0));
-
-            let mut step_z = original.z;
+            bb_a = bb_a.offset(Vec3::new(x_a, 0.0, 0.0));
+            let mut z_a = original.z;
             for block in &boxes {
-                step_z = calculate_z_offset(&stepped, block, step_z);
+                z_a = calculate_z_offset(&bb_a, block, z_a);
             }
-            stepped = stepped.offset(Vec3::new(0.0, 0.0, step_z));
+            bb_a = bb_a.offset(Vec3::new(0.0, 0.0, z_a));
 
-            let mut down = -up;
+            // Candidate B
+            let mut bb_b = bb;
+            let mut y_b = y;
             for block in &boxes {
-                down = calculate_y_offset(&stepped, block, down);
+                y_b = calculate_y_offset(&bb_b, block, y_b);
             }
-            stepped = stepped.offset(Vec3::new(0.0, down, 0.0));
+            bb_b = bb_b.offset(Vec3::new(0.0, y_b, 0.0));
+            let mut x_b = original.x;
+            for block in &boxes {
+                x_b = calculate_x_offset(&bb_b, block, x_b);
+            }
+            bb_b = bb_b.offset(Vec3::new(x_b, 0.0, 0.0));
+            let mut z_b = original.z;
+            for block in &boxes {
+                z_b = calculate_z_offset(&bb_b, block, z_b);
+            }
+            bb_b = bb_b.offset(Vec3::new(0.0, 0.0, z_b));
 
-            let step_dist_sq = step_x * step_x + step_z * step_z;
-            let flat_dist_sq = x * x + z * z;
-            if step_dist_sq > flat_dist_sq + 1.0e-6 {
-                bb = stepped;
-                x = step_x;
-                y = up + down;
-                z = step_z;
+            let dist_a = x_a * x_a + z_a * z_a;
+            let dist_b = x_b * x_b + z_b * z_b;
+
+            if dist_a > dist_b {
+                x = x_a;
+                z = z_a;
+                y = -y_a;
+                bb = bb_a;
+            } else {
+                x = x_b;
+                z = z_b;
+                y = -y_b;
+                bb = bb_b;
+            }
+
+            for block in &boxes {
+                y = calculate_y_offset(&bb, block, y);
+            }
+            bb = bb.offset(Vec3::new(0.0, y, 0.0));
+
+            if prev_x * prev_x + prev_z * prev_z >= x * x + z * z {
+                x = prev_x;
+                y = prev_y;
+                z = prev_z;
+                bb = prev_bb;
             }
         }
 
@@ -260,22 +316,9 @@ impl<'a> WorldCollision<'a> {
         }
 
         pos = aabb_feet_position(bb);
-        let mut on_ground = original.y != y && original.y < 0.0;
-        if !on_ground && original.y <= 0.0 {
-            let min = Vec3::new(
-                pos.x - PLAYER_HALF_WIDTH,
-                pos.y - 0.02,
-                pos.z - PLAYER_HALF_WIDTH,
-            );
-            let max = Vec3::new(
-                pos.x + PLAYER_HALF_WIDTH,
-                pos.y - 0.001,
-                pos.z + PLAYER_HALF_WIDTH,
-            );
-            if self.aabb_collides(min, max) {
-                on_ground = true;
-            }
-        }
+        // Vanilla semantics: on_ground is true only when vertical motion was
+        // clipped while moving downward this tick.
+        let on_ground = original.y != y && original.y < 0.0;
 
         let collided_horizontally = original.x != x || original.z != z;
         (pos, vel, on_ground, collided_horizontally)
@@ -312,6 +355,34 @@ impl Aabb {
             self.max.z.max(self.max.z + motion.z),
         );
         Self { min, max }
+    }
+
+    fn add_coord(self, delta: Vec3) -> Self {
+        let mut min = self.min;
+        let mut max = self.max;
+        if delta.x < 0.0 {
+            min.x += delta.x;
+        } else if delta.x > 0.0 {
+            max.x += delta.x;
+        }
+        if delta.y < 0.0 {
+            min.y += delta.y;
+        } else if delta.y > 0.0 {
+            max.y += delta.y;
+        }
+        if delta.z < 0.0 {
+            min.z += delta.z;
+        } else if delta.z > 0.0 {
+            max.z += delta.z;
+        }
+        Self { min, max }
+    }
+
+    fn contract(self, x: f32, y: f32, z: f32) -> Self {
+        Self {
+            min: Vec3::new(self.min.x + x, self.min.y + y, self.min.z + z),
+            max: Vec3::new(self.max.x - x, self.max.y - y, self.max.z - z),
+        }
     }
 
     fn intersects(&self, other: &Aabb) -> bool {
@@ -681,6 +752,11 @@ pub fn simulate_tick(
     let mut state = *prev;
     state.yaw = input.yaw;
     state.pitch = input.pitch;
+    if !world.has_chunk_at_pos(state.pos) {
+        state.vel = Vec3::ZERO;
+        state.on_ground = true;
+        return state;
+    }
     let sprinting = effective_sprint(input);
     let flying = input.can_fly && input.flying;
     let in_water = world.is_player_in_water(state.pos);
@@ -756,7 +832,9 @@ pub fn simulate_tick(
     } else if state.on_ground {
         move_speed * f
     } else {
-        SPEED_IN_AIR * if sprinting { 1.3 } else { 1.0 }
+        // Vanilla 1.8: airborne strafe acceleration uses jumpMovementFactor
+        // (base 0.02) and is not multiplied by sprint each tick.
+        SPEED_IN_AIR
     };
 
     move_flying(&mut state.vel, wish.x, wish.z, f5, state.yaw);
@@ -773,6 +851,12 @@ pub fn simulate_tick(
     state.pos = pos;
     state.vel = vel;
     state.on_ground = on_ground;
+
+    // Vanilla soul sand applies a strong horizontal slowdown when colliding with it.
+    if state.on_ground && world.is_on_soul_sand(state.pos) {
+        state.vel.x *= SOUL_SAND_SLOWDOWN;
+        state.vel.z *= SOUL_SAND_SLOWDOWN;
+    }
 
     if in_water {
         if input.jump {
@@ -831,7 +915,8 @@ fn move_flying(vel: &mut Vec3, strafe: f32, forward: f32, friction: f32, yaw: f3
 }
 
 pub fn effective_sprint(input: &InputState) -> bool {
-    input.sprint && !input.sneak && input.forward >= SPRINT_FORWARD_THRESHOLD
+    // `input.sprint` is treated as sprint-state (not raw key) by sim systems.
+    input.sprint && !input.sneak && input.forward > 0.0
 }
 
 fn step_toward_zero(v: f32) -> f32 {
@@ -844,7 +929,8 @@ fn step_toward_zero(v: f32) -> f32 {
 
 fn block_slipperiness(block_state: u16) -> f32 {
     match block_state_id(block_state) {
-        79 | 165 | 174 => SLIPPERINESS_ICE,
+        79 | 174 => SLIPPERINESS_ICE,
+        165 => SLIPPERINESS_SLIME,
         _ => SLIPPERINESS_DEFAULT,
     }
 }

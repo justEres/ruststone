@@ -99,6 +99,11 @@ pub fn handle_messages(
                 }
             }
             FromNetMessage::PlayerPosition(pos) => {
+                let raw_position = pos.position;
+                let raw_yaw = pos.yaw;
+                let raw_pitch = pos.pitch;
+                let raw_flags = pos.flags;
+                let raw_on_ground = pos.on_ground;
                 let mut position = sim_state.current.pos;
                 if let Some((x, y, z)) = pos.position {
                     let flags = pos.flags.unwrap_or(0);
@@ -137,7 +142,24 @@ pub fn handle_messages(
                     }
                 }
 
-                let on_ground = pos.on_ground.unwrap_or(sim_state.current.on_ground);
+                // S08 in 1.8 commonly omits on_ground; default false to avoid
+                // ground-spoof loops when server is correcting an airborne state.
+                let on_ground = pos.on_ground.unwrap_or(false);
+                println!(
+                    "[net/correction] tick={} raw_pos={:?} raw_yaw={:?} raw_pitch={:?} flags={:?} raw_on_ground={:?} -> resolved_pos=({:.4},{:.4},{:.4}) resolved_yaw={:.4}rad resolved_pitch={:.4}rad resolved_on_ground={}",
+                    sim_clock.tick,
+                    raw_position,
+                    raw_yaw,
+                    raw_pitch,
+                    raw_flags,
+                    raw_on_ground,
+                    position.x,
+                    position.y,
+                    position.z,
+                    yaw,
+                    pitch,
+                    on_ground
+                );
                 net_events.push(NetEvent::ServerPosLook {
                     pos: position,
                     yaw,
@@ -184,14 +206,13 @@ pub fn handle_messages(
                 walking_speed,
             } => {
                 // 1.8 abilities flags: 0x01 invuln, 0x02 flying, 0x04 mayfly, 0x08 creative.
-                let can_fly = (flags & 0x04) != 0 || (flags & 0x08) != 0;
-                player_status.can_fly = can_fly;
-                player_status.flying = (flags & 0x02) != 0 && can_fly;
+                // For vanilla-accurate movement/anticheat parity, gate flight by gamemode
+                // instead of trusting mayfly from plugins/server-side capability toggles.
+                let gm_allows_flight = matches!(player_status.gamemode, 1 | 3);
+                player_status.can_fly = gm_allows_flight;
+                player_status.flying = (flags & 0x02) != 0 && gm_allows_flight;
                 player_status.flying_speed = flying_speed;
                 player_status.walking_speed = walking_speed;
-                if (flags & 0x08) != 0 {
-                    player_status.gamemode = 1;
-                }
             }
             FromNetMessage::Inventory(event) => {
                 apply_inventory_message(&mut inventory_state, event);

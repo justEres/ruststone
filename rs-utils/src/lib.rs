@@ -788,7 +788,7 @@ pub enum ToNetMessage {
     Shutdown,
     ChatMessage(String),
     Respawn,
-    PlayerMove {
+    PlayerMovePosLook {
         x: f64,
         y: f64,
         z: f64,
@@ -796,7 +796,22 @@ pub enum ToNetMessage {
         pitch: f32,
         on_ground: bool,
     },
+    PlayerMovePos {
+        x: f64,
+        y: f64,
+        z: f64,
+        on_ground: bool,
+    },
+    PlayerMoveLook {
+        yaw: f32,
+        pitch: f32,
+        on_ground: bool,
+    },
+    PlayerMoveGround {
+        on_ground: bool,
+    },
     PlayerAction {
+        entity_id: i32,
         action_id: i8,
     },
     ClientAbilities {

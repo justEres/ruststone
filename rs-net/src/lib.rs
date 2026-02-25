@@ -163,7 +163,7 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 rs_protocol::protocol::packet::play::serverbound::ChatMessage { message: text },
             );
         }
-        ToNetMessage::PlayerMove {
+        ToNetMessage::PlayerMovePosLook {
             x,
             y,
             z,
@@ -182,16 +182,43 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 },
             );
         }
+        ToNetMessage::PlayerMovePos { x, y, z, on_ground } => {
+            let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::PlayerPosition {
+                x,
+                y,
+                z,
+                on_ground,
+            });
+        }
+        ToNetMessage::PlayerMoveLook {
+            yaw,
+            pitch,
+            on_ground,
+        } => {
+            let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::PlayerLook {
+                yaw,
+                pitch,
+                on_ground,
+            });
+        }
+        ToNetMessage::PlayerMoveGround { on_ground } => {
+            let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::Player {
+                on_ground,
+            });
+        }
         ToNetMessage::Respawn => {
             let _ = rs_protocol::protocol::packet::send_client_status(
                 conn,
                 rs_protocol::protocol::packet::ClientStatus::PerformRespawn,
             );
         }
-        ToNetMessage::PlayerAction { action_id } => {
+        ToNetMessage::PlayerAction {
+            entity_id,
+            action_id,
+        } => {
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::PlayerAction {
-                    entity_id: rs_protocol::protocol::VarInt(0),
+                    entity_id: rs_protocol::protocol::VarInt(entity_id),
                     action_id: rs_protocol::protocol::VarInt(action_id as i32),
                     jump_boost: rs_protocol::protocol::VarInt(0),
                 },
