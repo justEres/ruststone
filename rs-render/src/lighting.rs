@@ -116,10 +116,10 @@ pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
 
 fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
     let _ = settings;
-    // Composition-stable route:
-    // cutout renders in the opaque queue and uses explicit shader discard.
-    // This avoids alpha-mode/pipeline switching differences between quality presets.
-    AlphaMode::Opaque
+    // Use explicit alpha-mask for cutout vegetation:
+    // keeps deterministic depth ordering while clipping transparent texels in
+    // both forward and prepass paths.
+    AlphaMode::Mask(0.5)
 }
 
 fn water_reflection_mode(settings: &RenderDebugSettings, fixed_debug: bool) -> f32 {
@@ -355,7 +355,7 @@ pub fn apply_lighting_quality(
                 alpha_mode: cutout_alpha_mode,
                 cull_mode: None,
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: !use_shadowed_pbr,
+                unlit: false,
                 ..default()
             },
             extension: crate::chunk::AtlasTextureExtension {
@@ -374,7 +374,7 @@ pub fn apply_lighting_quality(
                 alpha_mode: cutout_alpha_mode,
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
                 opaque_render_method: OpaqueRendererMethod::Forward,
-                unlit: !use_shadowed_pbr,
+                unlit: false,
                 ..default()
             },
             extension: crate::chunk::AtlasTextureExtension {
@@ -410,13 +410,13 @@ pub fn apply_lighting_quality(
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
         mat.extension.lighting = make_lighting(2.0);
-        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.unlit = false;
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
         mat.extension.lighting = make_lighting(2.0);
-        mat.base.unlit = !uses_shadowed_pbr_path(&settings);
+        mat.base.unlit = false;
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
     }
@@ -495,13 +495,13 @@ pub fn update_water_animation(
         (
             &assets.cutout_material,
             2.0,
-            !uses_shadowed_pbr_path(&settings),
+            false,
             cutout_alpha_mode,
         ),
         (
             &assets.cutout_culled_material,
             2.0,
-            !uses_shadowed_pbr_path(&settings),
+            false,
             cutout_alpha_mode,
         ),
         (&assets.transparent_material, 1.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Blend),

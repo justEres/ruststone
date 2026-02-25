@@ -13,17 +13,16 @@ use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::movement::{WorldCollision, effective_sprint, simulate_tick};
 use crate::sim::predict::PredictionBuffer;
-use crate::sim::reconcile::reconcile;
 use crate::sim::{
-    CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CurrentInput,
-    DebugStats, DebugUiState, LocalArmSwing, PredictedFrame, SimClock, SimRenderState, SimState,
-    VisualCorrectionOffset, ZoomState,
+    CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
+    CurrentInput, DebugStats, DebugUiState, LocalArmSwing, MovementPacketState, PredictedFrame,
+    SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
 use rs_utils::{BreakIndicator, EntityUseAction, InventoryState, PerfTimings, block_state_id};
 
-use crate::entities::RemoteEntity;
+use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use crate::timing::Timing;
@@ -78,6 +77,16 @@ const SURVIVAL_BLOCK_REACH: f32 = 4.5;
 const CREATIVE_BLOCK_REACH: f32 = 5.0;
 const SURVIVAL_ENTITY_REACH: f32 = 3.0;
 const CREATIVE_ENTITY_REACH: f32 = 5.0;
+
+fn wrap_degrees(mut deg: f32) -> f32 {
+    while deg <= -180.0 {
+        deg += 360.0;
+    }
+    while deg > 180.0 {
+        deg -= 360.0;
+    }
+    deg
+}
 
 fn client_abilities_flags(player_status: &rs_utils::PlayerStatus) -> u8 {
     let mut flags = 0u8;
@@ -443,14 +452,19 @@ pub fn fixed_sim_tick_system(
     mut latency: ResMut<LatencyEstimate>,
     mut action_state: ResMut<ActionState>,
     mut player_status: ResMut<rs_utils::PlayerStatus>,
+    mut correction_guard: ResMut<CorrectionLoopGuard>,
+    mut move_pkt_state: ResMut<MovementPacketState>,
     collision_map: Res<WorldCollisionMap>,
     app_state: Res<AppState>,
     to_net: Res<ToNet>,
+    remote_entities: Res<RemoteEntityRegistry>,
     sim_ready: Res<crate::sim::SimReady>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
     if !matches!(app_state.0, ApplicationState::Connected) || !sim_ready.0 {
+        move_pkt_state.initialized = false;
+        move_pkt_state.ticks_since_pos = 0;
         action_state.jump_was_pressed = false;
         action_state.fly_toggle_timer = 0;
         timings.fixed_tick_ms = timer.ms();
@@ -459,6 +473,14 @@ pub fn fixed_sim_tick_system(
     let world = WorldCollision::with_map(&collision_map);
     let tick = sim_clock.tick;
     let mut input_snapshot = input.0;
+
+    let gamemode_allows_flight = matches!(player_status.gamemode, 1 | 3);
+    if !gamemode_allows_flight {
+        player_status.can_fly = false;
+        player_status.flying = false;
+        action_state.fly_toggle_timer = 0;
+    }
+
     let jump_pressed = input_snapshot.jump && !action_state.jump_was_pressed;
     action_state.jump_was_pressed = input_snapshot.jump;
 
@@ -493,8 +515,38 @@ pub fn fixed_sim_tick_system(
     input_snapshot.can_fly = player_status.can_fly;
     input_snapshot.flying = player_status.flying;
     input_snapshot.flying_speed = player_status.flying_speed;
+
+    // Vanilla-like sprint state latching:
+    // - start requires strong forward input and movement
+    // - while already sprinting, keep sprint as long as sprint key is held and moving forward
+    // This avoids rapid sprint state flapping around sprint-jumps.
+    let horizontal_speed_sq =
+        sim_state.current.vel.x * sim_state.current.vel.x + sim_state.current.vel.z * sim_state.current.vel.z;
+    let can_start_sprint = input_snapshot.sprint
+        && !input_snapshot.sneak
+        && input_snapshot.forward >= 0.8
+        && horizontal_speed_sq > 1.0e-5;
+    let can_keep_sprint = action_state.sprinting
+        && input_snapshot.sprint
+        && !input_snapshot.sneak
+        && input_snapshot.forward > 0.0;
+    let sprinting_state = can_start_sprint || can_keep_sprint;
+    input_snapshot.sprint = sprinting_state;
+
     sim_render.previous = sim_state.current;
-    let next_state = simulate_tick(&sim_state.current, &input_snapshot, &world);
+    let mut next_state = if correction_guard.skip_physics_ticks > 0 {
+        correction_guard.skip_physics_ticks = correction_guard.skip_physics_ticks.saturating_sub(1);
+        let mut state = sim_state.current;
+        // During correction settle, pin once to the last authoritative server pose.
+        state.pos = correction_guard.last_server_pos;
+        state.on_ground = correction_guard.last_server_on_ground;
+        state.yaw = input_snapshot.yaw;
+        state.pitch = input_snapshot.pitch;
+        state.vel = Vec3::ZERO;
+        state
+    } else {
+        simulate_tick(&sim_state.current, &input_snapshot, &world)
+    };
 
     history.0.push(PredictedFrame {
         tick,
@@ -516,31 +568,130 @@ pub fn fixed_sim_tick_system(
     input.0.jump = false;
 
     if matches!(app_state.0, ApplicationState::Connected) {
+        if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) = correction_guard.pending_ack.take() {
+            let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                x: ack_pos.x as f64,
+                y: ack_pos.y as f64,
+                z: ack_pos.z as f64,
+                yaw: ack_yaw,
+                pitch: ack_pitch,
+                on_ground: ack_on_ground,
+            });
+            latency.last_sent = Some(Instant::now());
+            timings.fixed_tick_ms = timer.ms();
+            return;
+        }
+        if correction_guard.skip_send_ticks > 0 {
+            correction_guard.skip_send_ticks = correction_guard.skip_send_ticks.saturating_sub(1);
+            timings.fixed_tick_ms = timer.ms();
+            return;
+        }
         let current_sneak = input_snapshot.sneak;
         let current_sprint = effective_sprint(&input_snapshot);
 
         if current_sneak != action_state.sneaking {
             let action_id = if current_sneak { 0 } else { 1 };
-            let _ = to_net.0.send(ToNetMessage::PlayerAction { action_id });
+            if let Some(entity_id) = remote_entities.local_entity_id {
+                let _ = to_net
+                    .0
+                    .send(ToNetMessage::PlayerAction { entity_id, action_id });
+            }
             action_state.sneaking = current_sneak;
         }
         if current_sprint != action_state.sprinting {
             let action_id = if current_sprint { 3 } else { 4 };
-            let _ = to_net.0.send(ToNetMessage::PlayerAction { action_id });
+            if let Some(entity_id) = remote_entities.local_entity_id {
+                let _ = to_net
+                    .0
+                    .send(ToNetMessage::PlayerAction { entity_id, action_id });
+            }
             action_state.sprinting = current_sprint;
         }
 
         let pos = sim_state.current.pos;
-        let yaw = (std::f32::consts::PI - sim_state.current.yaw).to_degrees();
-        let pitch = -sim_state.current.pitch.to_degrees();
-        let _ = to_net.0.send(ToNetMessage::PlayerMove {
-            x: pos.x as f64,
-            y: pos.y as f64,
-            z: pos.z as f64,
-            yaw,
-            pitch,
-            on_ground: sim_state.current.on_ground,
-        });
+        let mut yaw = wrap_degrees((std::f32::consts::PI - sim_state.current.yaw).to_degrees());
+        let mut pitch = -sim_state.current.pitch.to_degrees();
+        if !yaw.is_finite() {
+            yaw = 0.0;
+        }
+        if !pitch.is_finite() {
+            pitch = 0.0;
+        }
+        pitch = pitch.clamp(-90.0, 90.0);
+        let on_ground = sim_state.current.on_ground;
+
+        const POS_DELTA_SQ_EPS: f32 = 0.0009; // Vanilla-style 9e-4 threshold.
+
+        correction_guard.force_full_pos_ticks = 0;
+
+        let moved = if move_pkt_state.initialized {
+            pos.distance_squared(move_pkt_state.last_pos) > POS_DELTA_SQ_EPS
+                || move_pkt_state.ticks_since_pos >= 20
+        } else {
+            true
+        };
+        let rotated = if move_pkt_state.initialized {
+            (yaw - move_pkt_state.last_yaw_deg).abs() > 0.001
+                || (pitch - move_pkt_state.last_pitch_deg).abs() > 0.001
+        } else {
+            true
+        };
+
+        let kind = if moved && rotated {
+            let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                x: pos.x as f64,
+                y: pos.y as f64,
+                z: pos.z as f64,
+                yaw,
+                pitch,
+                on_ground,
+            });
+            "poslook"
+        } else if moved {
+            let _ = to_net.0.send(ToNetMessage::PlayerMovePos {
+                x: pos.x as f64,
+                y: pos.y as f64,
+                z: pos.z as f64,
+                on_ground,
+            });
+            "pos"
+        } else if rotated {
+            let _ = to_net.0.send(ToNetMessage::PlayerMoveLook {
+                yaw,
+                pitch,
+                on_ground,
+            });
+            "look"
+        } else {
+            let _ = to_net.0.send(ToNetMessage::PlayerMoveGround { on_ground });
+            "ground"
+        };
+        if correction_guard.repeats > 0 {
+            println!(
+                "[net/move] tick={} kind={} pos=({:.4},{:.4},{:.4}) yaw={:.3} pitch={:.3} on_ground={} gm={} can_fly={} flying={}",
+                tick,
+                kind,
+                pos.x,
+                pos.y,
+                pos.z,
+                yaw,
+                pitch,
+                on_ground,
+                player_status.gamemode,
+                player_status.can_fly,
+                player_status.flying
+            );
+        }
+
+        if moved {
+            move_pkt_state.last_pos = pos;
+            move_pkt_state.ticks_since_pos = 0;
+        } else {
+            move_pkt_state.ticks_since_pos = move_pkt_state.ticks_since_pos.saturating_add(1);
+        }
+        move_pkt_state.last_yaw_deg = yaw;
+        move_pkt_state.last_pitch_deg = pitch;
+        move_pkt_state.initialized = true;
         latency.last_sent = Some(Instant::now());
     }
     timings.fixed_tick_ms = timer.ms();
@@ -563,14 +714,12 @@ pub fn net_event_apply_system(
     mut visual_offset: ResMut<VisualCorrectionOffset>,
     mut debug: ResMut<DebugStats>,
     mut latency: ResMut<LatencyEstimate>,
-    collision_map: Res<WorldCollisionMap>,
-    sim_clock: Res<SimClock>,
+    mut correction_guard: ResMut<CorrectionLoopGuard>,
+    mut move_pkt_state: ResMut<MovementPacketState>,
     mut sim_ready: ResMut<crate::sim::SimReady>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
-    let world = WorldCollision::with_map(&collision_map);
-    const FORCE_TELEPORT_DISTANCE: f32 = 8.0;
     for event in net_events.drain() {
         let (pos, yaw, pitch, on_ground, recv_instant) = match event {
             crate::net::events::NetEvent::ServerPosLook {
@@ -592,54 +741,50 @@ pub fn net_event_apply_system(
             debug.one_way_ticks = latency.one_way_ticks;
         }
 
-        let client_tick = sim_clock.tick;
-        let server_tick = client_tick.saturating_sub(latency.one_way_ticks);
-
         let server_state = crate::sim::PlayerSimState {
             pos,
-            vel: sim_state.current.vel,
+            vel: Vec3::ZERO,
             on_ground,
             yaw,
             pitch,
         };
 
-        // Large server position jumps (respawn/teleport) should snap immediately.
-        if (server_state.pos - sim_state.current.pos).length() >= FORCE_TELEPORT_DISTANCE {
-            sim_render.previous = server_state;
-            sim_state.current = server_state;
-            history.0 = PredictionHistory::default().0;
-            visual_offset.0 = Vec3::ZERO;
-            sim_ready.0 = true;
-            debug.last_correction = 0.0;
-            debug.last_replay = 0;
-            continue;
-        }
+        let repeated_same_correction = pos.distance_squared(correction_guard.last_server_pos) <= 1.0e-6
+            && on_ground == correction_guard.last_server_on_ground;
+        correction_guard.repeats = if repeated_same_correction {
+            correction_guard.repeats.saturating_add(1)
+        } else {
+            0
+        };
+        correction_guard.last_server_pos = pos;
+        correction_guard.last_server_on_ground = on_ground;
+        correction_guard.force_full_pos_ticks = 0;
+        // Do not pause physics here: repeated correction bursts can otherwise
+        // freeze the player in-air. We rely on authoritative snap + ACK.
+        correction_guard.skip_physics_ticks = 0;
 
-        if history.0.latest_tick().is_none() {
-            sim_render.previous = server_state;
-            sim_state.current = server_state;
-            visual_offset.0 = Vec3::ZERO;
-            sim_ready.0 = true;
-            continue;
-        }
+        // Queue one correction ACK for the next fixed send tick (avoid duplicate C03s/frame).
+        let resolved_yaw_deg = wrap_degrees((std::f32::consts::PI - yaw).to_degrees());
+        let resolved_pitch_deg = (-pitch.to_degrees()).clamp(-90.0, 90.0);
+        let ack_yaw_deg = resolved_yaw_deg;
+        let ack_pitch_deg = resolved_pitch_deg;
+        correction_guard.pending_ack = Some((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
-        if let Some(result) = reconcile(
-            &mut history.0,
-            &world,
-            server_tick,
-            server_state,
-            client_tick.saturating_sub(1),
-            &mut sim_state.current,
-        ) {
-            sim_render.previous = sim_state.current;
-            debug.last_correction = result.correction.length();
-            debug.last_replay = result.replayed_ticks;
-            if result.hard_teleport {
-                visual_offset.0 = Vec3::ZERO;
-            } else {
-                visual_offset.0 += result.correction;
-            }
-        }
+        // Server correction packets are authoritative; snap to them directly.
+        sim_render.previous = server_state;
+        sim_state.current = server_state;
+        history.0 = PredictionHistory::default().0;
+        visual_offset.0 = Vec3::ZERO;
+        sim_ready.0 = true;
+        move_pkt_state.initialized = true;
+        move_pkt_state.last_pos = pos;
+        move_pkt_state.last_yaw_deg = ack_yaw_deg;
+        move_pkt_state.last_pitch_deg = ack_pitch_deg;
+        move_pkt_state.ticks_since_pos = 0;
+        correction_guard.skip_send_ticks = 0;
+
+        debug.last_correction = 0.0;
+        debug.last_replay = 0;
     }
     timings.net_apply_ms = timer.ms();
 }
@@ -1603,9 +1748,30 @@ pub fn debug_overlay_system(
                         "Water reflections",
                     );
                     ui.checkbox(
-                        &mut render_debug.water_terrain_ssr,
-                        "Dedicated terrain reflection pass",
+                        &mut render_debug.water_reflection_screen_space,
+                        "Screen-space SSR raymarch",
                     );
+                    if render_debug.water_reflection_screen_space {
+                        ui.add(
+                            egui::Slider::new(&mut render_debug.water_ssr_steps, 4..=64)
+                                .text("SSR ray steps"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut render_debug.water_ssr_thickness, 0.02..=2.0)
+                                .text("SSR hit thickness"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut render_debug.water_ssr_max_distance,
+                                4.0..=400.0,
+                            )
+                            .text("SSR max distance"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut render_debug.water_ssr_stride, 0.2..=8.0)
+                                .text("SSR step stride"),
+                        );
+                    }
                     ui.add(
                         egui::Slider::new(&mut render_debug.water_reflection_strength, 0.0..=3.0)
                             .text("Water reflection strength"),
@@ -1659,13 +1825,6 @@ pub fn debug_overlay_system(
                     ui.add(
                         egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
                             .text("Reflection overscan"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_resolution_scale,
-                            0.5..=3.0,
-                        )
-                        .text("Reflection resolution"),
                     );
                 });
                 debug_ui.render_show_water = water_section.fully_open();
@@ -1738,6 +1897,7 @@ pub fn debug_overlay_system(
                         5 => "Linear depth",
                         6 => "Pass flags",
                         7 => "Alpha + pass",
+                        8 => "Cutout lit flags",
                         _ => "Off",
                     })
                     .show_ui(ui, |ui| {
@@ -1749,8 +1909,9 @@ pub fn debug_overlay_system(
                         ui.selectable_value(&mut cutout_mode, 5, "Linear depth");
                         ui.selectable_value(&mut cutout_mode, 6, "Pass flags");
                         ui.selectable_value(&mut cutout_mode, 7, "Alpha + pass");
+                        ui.selectable_value(&mut cutout_mode, 8, "Cutout lit flags");
                     });
-                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 7) as u8;
+                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 8) as u8;
                 ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
                 ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
                 ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
@@ -1962,6 +2123,7 @@ pub fn debug_overlay_system(
                 }
             }
         });
+
     let elapsed_ms = timer.ms();
     timings.debug_ui_ms = elapsed_ms;
 }
