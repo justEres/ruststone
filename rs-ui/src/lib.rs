@@ -15,8 +15,8 @@ use rs_render::{
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
-    PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState, item_max_durability, item_name,
-    item_texture_candidates,
+    InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
+    item_max_durability, item_name, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -83,6 +83,16 @@ fn connect_ui(
             }
         }
         state.options_loaded = true;
+    }
+
+    if matches!(app_state.0, ApplicationState::Connected)
+        && inventory_state
+            .open_window
+            .as_ref()
+            .is_some_and(|window| window.id != 0)
+    {
+        ui_state.inventory_open = true;
+        ui_state.chat_open = false;
     }
 
     if keys.just_pressed(KeyCode::Escape) && ui_state.chat_open {
@@ -289,27 +299,41 @@ fn connect_ui(
             });
     }
 
-    if ui_state.chat_open {
-        egui::Window::new("Chat").vscroll(true).show(ctx, |ui| {
-            for msg in chat.0.iter() {
-                ui.label(msg);
-            }
-
-            let response = ui.text_edit_singleline(&mut chat.1);
-            response.request_focus();
-
-            if response.has_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                && !chat.1.is_empty()
-            {
-                to_net
-                    .0
-                    .send(ToNetMessage::ChatMessage(chat.1.clone()))
-                    .unwrap();
-                chat.1.clear();
-                response.request_focus();
-            }
-        });
+    if matches!(app_state.0, ApplicationState::Connected) {
+        let panel_width = (ctx.screen_rect().width() * 0.45).clamp(280.0, 520.0);
+        let visible_lines = if ui_state.chat_open { 16 } else { 8 };
+        egui::Area::new(egui::Id::new("chat_overlay"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -16.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let frame = egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(96))
+                    .inner_margin(egui::Margin::same(8))
+                    .corner_radius(4.0);
+                frame.show(ui, |ui| {
+                    ui.set_width(panel_width);
+                    let start = chat.0.len().saturating_sub(visible_lines);
+                    for msg in chat.0.iter().skip(start) {
+                        draw_chat_message(ui, msg);
+                    }
+                    if ui_state.chat_open {
+                        ui.add_space(4.0);
+                        let response = ui.add_sized(
+                            [panel_width - 8.0, 22.0],
+                            egui::TextEdit::singleline(&mut chat.1).hint_text("Type message..."),
+                        );
+                        response.request_focus();
+                        if response.has_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            && !chat.1.is_empty()
+                        {
+                            let _ = to_net.0.send(ToNetMessage::ChatMessage(chat.1.clone()));
+                            chat.1.clear();
+                            response.request_focus();
+                        }
+                    }
+                });
+            });
     }
 
     if matches!(app_state.0, ApplicationState::Connected) && player_status.dead {
@@ -1569,6 +1593,34 @@ fn draw_inventory_grid(
     inventory_state: &mut InventoryState,
     item_icons: &mut ItemIconCache,
 ) {
+    if let Some(window) = inventory_state
+        .open_window
+        .clone()
+        .filter(|window| window.id != 0)
+    {
+        draw_container_inventory_grid(
+            ctx,
+            ui,
+            to_net,
+            keys,
+            inventory_state,
+            item_icons,
+            &window,
+        );
+        return;
+    }
+
+    draw_player_inventory_grid(ctx, ui, to_net, keys, inventory_state, item_icons);
+}
+
+fn draw_player_inventory_grid(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    to_net: &ToNet,
+    keys: &ButtonInput<KeyCode>,
+    inventory_state: &mut InventoryState,
+    item_icons: &mut ItemIconCache,
+) {
     ui.label("Survival Inventory");
     ui.add_space(4.0);
     let mut hovered_any_slot = false;
@@ -1599,6 +1651,8 @@ fn draw_inventory_grid(
                 }
                 handle_inventory_slot_interaction(
                     response,
+                    0,
+                    0,
                     slot as i16,
                     keys,
                     to_net,
@@ -1634,6 +1688,8 @@ fn draw_inventory_grid(
                     }
                     handle_inventory_slot_interaction(
                         response,
+                        0,
+                        0,
                         slot as i16,
                         keys,
                         to_net,
@@ -1670,7 +1726,15 @@ fn draw_inventory_grid(
                     hovered_any_slot = true;
                     hovered_item = item;
                 }
-                handle_inventory_slot_interaction(response, slot, keys, to_net, inventory_state);
+                handle_inventory_slot_interaction(
+                    response,
+                    0,
+                    0,
+                    slot,
+                    keys,
+                    to_net,
+                    inventory_state,
+                );
             }
             ui.end_row();
         });
@@ -1679,15 +1743,267 @@ fn draw_inventory_grid(
     let clicked_secondary = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
     if !hovered_any_slot && ui.rect_contains_pointer(ui.max_rect()) {
         if clicked_primary {
-            send_inventory_click(-999, 0, 0, to_net, inventory_state);
+            send_inventory_click(0, 0, -999, 0, 0, to_net, inventory_state);
         } else if clicked_secondary {
-            send_inventory_click(-999, 1, 0, to_net, inventory_state);
+            send_inventory_click(0, 0, -999, 1, 0, to_net, inventory_state);
         }
     }
 
     if let Some(stack) = hovered_item.as_ref() {
         draw_inventory_item_tooltip(ctx, stack);
     }
+}
+
+fn draw_container_inventory_grid(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    to_net: &ToNet,
+    keys: &ButtonInput<KeyCode>,
+    inventory_state: &mut InventoryState,
+    item_icons: &mut ItemIconCache,
+    window: &InventoryWindowInfo,
+) {
+    let unique_slots = container_unique_slot_count(inventory_state, window);
+    let cols = container_layout_columns(&window.kind, unique_slots);
+    let rows = if unique_slots == 0 {
+        0
+    } else {
+        unique_slots.div_ceil(cols)
+    };
+
+    ui.label(format!("{} ({})", window.title, window.kind));
+    ui.add_space(4.0);
+    let mut hovered_any_slot = false;
+    let mut hovered_item: Option<InventoryItemStack> = None;
+
+    if rows > 0 {
+        egui::Grid::new(format!("container_grid_{}", window.id))
+            .spacing(egui::Vec2::new(
+                INVENTORY_SLOT_SPACING,
+                INVENTORY_SLOT_SPACING,
+            ))
+            .show(ui, |ui| {
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let slot = row * cols + col;
+                        if slot >= unique_slots {
+                            ui.allocate_exact_size(
+                                egui::Vec2::splat(INVENTORY_SLOT_SIZE),
+                                egui::Sense::hover(),
+                            );
+                            continue;
+                        }
+                        let item = inventory_state
+                            .window_slots
+                            .get(&window.id)
+                            .and_then(|slots| slots.get(slot))
+                            .cloned()
+                            .flatten();
+                        let response = draw_slot(
+                            ctx,
+                            item_icons,
+                            ui,
+                            item.as_ref(),
+                            false,
+                            INVENTORY_SLOT_SIZE,
+                            true,
+                        );
+                        if response.hovered() {
+                            hovered_any_slot = true;
+                            hovered_item = item;
+                        }
+                        handle_inventory_slot_interaction(
+                            response,
+                            window.id,
+                            unique_slots,
+                            slot as i16,
+                            keys,
+                            to_net,
+                            inventory_state,
+                        );
+                    }
+                    ui.end_row();
+                }
+            });
+    }
+
+    ui.add_space(8.0);
+    ui.label("Inventory");
+    ui.add_space(4.0);
+    egui::Grid::new(format!("container_player_main_grid_{}", window.id))
+        .spacing(egui::Vec2::new(
+            INVENTORY_SLOT_SPACING,
+            INVENTORY_SLOT_SPACING,
+        ))
+        .show(ui, |ui| {
+            for row in 0..3usize {
+                for col in 0..9usize {
+                    let player_offset = row * 9 + col;
+                    let slot = unique_slots + player_offset;
+                    let item = container_player_slot_item(inventory_state, window.id, unique_slots, player_offset);
+                    let response = draw_slot(
+                        ctx,
+                        item_icons,
+                        ui,
+                        item.as_ref(),
+                        false,
+                        INVENTORY_SLOT_SIZE,
+                        true,
+                    );
+                    if response.hovered() {
+                        hovered_any_slot = true;
+                        hovered_item = item;
+                    }
+                    handle_inventory_slot_interaction(
+                        response,
+                        window.id,
+                        unique_slots,
+                        slot as i16,
+                        keys,
+                        to_net,
+                        inventory_state,
+                    );
+                }
+                ui.end_row();
+            }
+        });
+
+    ui.add_space(8.0);
+    ui.label("Hotbar");
+    ui.add_space(4.0);
+    egui::Grid::new(format!("container_player_hotbar_grid_{}", window.id))
+        .spacing(egui::Vec2::new(
+            INVENTORY_SLOT_SPACING,
+            INVENTORY_SLOT_SPACING,
+        ))
+        .show(ui, |ui| {
+            for hotbar_idx in 0..9usize {
+                let player_offset = 27 + hotbar_idx;
+                let slot = unique_slots + player_offset;
+                let item = container_player_slot_item(inventory_state, window.id, unique_slots, player_offset);
+                let selected = inventory_state.selected_hotbar_slot as usize == hotbar_idx;
+                let response = draw_slot(
+                    ctx,
+                    item_icons,
+                    ui,
+                    item.as_ref(),
+                    selected,
+                    INVENTORY_SLOT_SIZE,
+                    true,
+                );
+                if response.hovered() {
+                    hovered_any_slot = true;
+                    hovered_item = item;
+                }
+                handle_inventory_slot_interaction(
+                    response,
+                    window.id,
+                    unique_slots,
+                    slot as i16,
+                    keys,
+                    to_net,
+                    inventory_state,
+                );
+            }
+            ui.end_row();
+        });
+
+    let clicked_primary = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
+    let clicked_secondary = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
+    if !hovered_any_slot && ui.rect_contains_pointer(ui.max_rect()) {
+        if clicked_primary {
+            send_inventory_click(window.id, unique_slots, -999, 0, 0, to_net, inventory_state);
+        } else if clicked_secondary {
+            send_inventory_click(window.id, unique_slots, -999, 1, 0, to_net, inventory_state);
+        }
+    }
+
+    if let Some(stack) = hovered_item.as_ref() {
+        draw_inventory_item_tooltip(ctx, stack);
+    }
+}
+
+fn container_unique_slot_count(inventory_state: &InventoryState, window: &InventoryWindowInfo) -> usize {
+    let declared = window.slot_count as usize;
+    let actual_len = inventory_state
+        .window_slots
+        .get(&window.id)
+        .map_or(0, std::vec::Vec::len);
+
+    if declared > 0 {
+        declared
+    } else {
+        actual_len.saturating_sub(36)
+    }
+}
+
+fn container_layout_columns(kind: &str, unique_slots: usize) -> usize {
+    let normalized = kind.to_ascii_lowercase();
+    if normalized.contains("furnace") || normalized.contains("anvil") {
+        return 3;
+    }
+    if normalized.contains("hopper") {
+        return 5;
+    }
+    if normalized.contains("beacon") {
+        return 1;
+    }
+    if normalized.contains("brewing") {
+        return 4;
+    }
+    if normalized.contains("enchant") {
+        return 2;
+    }
+    if normalized.contains("dispenser")
+        || normalized.contains("dropper")
+        || normalized.contains("chest")
+        || normalized.contains("container")
+        || normalized == "type_0"
+        || normalized == "type_3"
+        || normalized == "type_10"
+    {
+        return 9;
+    }
+    if normalized == "type_2" || normalized == "type_8" {
+        return 3;
+    }
+    if normalized == "type_9" {
+        return 5;
+    }
+    if unique_slots.is_multiple_of(9) {
+        9
+    } else if unique_slots.is_multiple_of(5) {
+        5
+    } else if unique_slots.is_multiple_of(3) {
+        3
+    } else {
+        unique_slots.clamp(1, 9)
+    }
+}
+
+fn container_player_slot_item(
+    inventory_state: &InventoryState,
+    window_id: u8,
+    unique_slots: usize,
+    player_offset: usize,
+) -> Option<InventoryItemStack> {
+    let window_idx = unique_slots + player_offset;
+    if let Some(item) = inventory_state
+        .window_slots
+        .get(&window_id)
+        .and_then(|slots| slots.get(window_idx))
+        .cloned()
+        .flatten()
+    {
+        return Some(item);
+    }
+
+    let player_slot = if player_offset < 27 {
+        9 + player_offset
+    } else {
+        36 + (player_offset - 27)
+    };
+    inventory_state.player_slots.get(player_slot).cloned().flatten()
 }
 
 fn draw_slot(
@@ -1767,6 +2083,113 @@ fn draw_inventory_item_tooltip(ctx: &egui::Context, stack: &InventoryItemStack) 
                 draw_item_tooltip(ui, stack);
             });
         });
+}
+
+fn draw_chat_message(ui: &mut egui::Ui, msg: &str) {
+    let segments = parse_legacy_chat_segments(msg);
+    ui.horizontal_wrapped(|ui| {
+        for segment in segments {
+            let mut rich = egui::RichText::new(segment.text).color(segment.color);
+            if segment.bold {
+                rich = rich.strong();
+            }
+            if segment.italic {
+                rich = rich.italics();
+            }
+            if segment.underlined {
+                rich = rich.underline();
+            }
+            if segment.strikethrough {
+                rich = rich.strikethrough();
+            }
+            ui.label(rich);
+        }
+    });
+}
+
+#[derive(Clone)]
+struct ChatSegment {
+    text: String,
+    color: egui::Color32,
+    bold: bool,
+    italic: bool,
+    underlined: bool,
+    strikethrough: bool,
+}
+
+fn parse_legacy_chat_segments(msg: &str) -> Vec<ChatSegment> {
+    let mut out = Vec::new();
+    let mut buf = String::new();
+    let mut color = egui::Color32::from_rgb(230, 230, 230);
+    let mut bold = false;
+    let mut italic = false;
+    let mut underlined = false;
+    let mut strikethrough = false;
+
+    let mut chars = msg.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '§' {
+            buf.push(ch);
+            continue;
+        }
+        let Some(code) = chars.next() else {
+            buf.push(ch);
+            break;
+        };
+        if !buf.is_empty() {
+            out.push(ChatSegment {
+                text: std::mem::take(&mut buf),
+                color,
+                bold,
+                italic,
+                underlined,
+                strikethrough,
+            });
+        }
+        match code.to_ascii_lowercase() {
+            '0' => color = egui::Color32::from_rgb(0, 0, 0),
+            '1' => color = egui::Color32::from_rgb(0, 0, 170),
+            '2' => color = egui::Color32::from_rgb(0, 170, 0),
+            '3' => color = egui::Color32::from_rgb(0, 170, 170),
+            '4' => color = egui::Color32::from_rgb(170, 0, 0),
+            '5' => color = egui::Color32::from_rgb(170, 0, 170),
+            '6' => color = egui::Color32::from_rgb(255, 170, 0),
+            '7' => color = egui::Color32::from_rgb(170, 170, 170),
+            '8' => color = egui::Color32::from_rgb(85, 85, 85),
+            '9' => color = egui::Color32::from_rgb(85, 85, 255),
+            'a' => color = egui::Color32::from_rgb(85, 255, 85),
+            'b' => color = egui::Color32::from_rgb(85, 255, 255),
+            'c' => color = egui::Color32::from_rgb(255, 85, 85),
+            'd' => color = egui::Color32::from_rgb(255, 85, 255),
+            'e' => color = egui::Color32::from_rgb(255, 255, 85),
+            'f' => color = egui::Color32::from_rgb(255, 255, 255),
+            'k' => {}
+            'l' => bold = true,
+            'm' => strikethrough = true,
+            'n' => underlined = true,
+            'o' => italic = true,
+            'r' => {
+                color = egui::Color32::from_rgb(230, 230, 230);
+                bold = false;
+                italic = false;
+                underlined = false;
+                strikethrough = false;
+            }
+            _ => {}
+        }
+    }
+
+    if !buf.is_empty() || out.is_empty() {
+        out.push(ChatSegment {
+            text: buf,
+            color,
+            bold,
+            italic,
+            underlined,
+            strikethrough,
+        });
+    }
+    out
 }
 
 fn draw_item_tooltip(ui: &mut egui::Ui, stack: &InventoryItemStack) {
@@ -1958,6 +2381,8 @@ fn draw_inventory_cursor_item(
 
 fn handle_inventory_slot_interaction(
     response: egui::Response,
+    window_id: u8,
+    window_unique_slots: usize,
     slot: i16,
     keys: &ButtonInput<KeyCode>,
     to_net: &ToNet,
@@ -1968,50 +2393,138 @@ fn handle_inventory_slot_interaction(
 
     if response.hovered() {
         if keys.just_pressed(KeyCode::Digit1) {
-            send_inventory_click(slot, 0, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                0,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit2) {
-            send_inventory_click(slot, 1, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                1,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit3) {
-            send_inventory_click(slot, 2, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                2,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit4) {
-            send_inventory_click(slot, 3, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                3,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit5) {
-            send_inventory_click(slot, 4, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                4,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit6) {
-            send_inventory_click(slot, 5, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                5,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit7) {
-            send_inventory_click(slot, 6, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                6,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit8) {
-            send_inventory_click(slot, 7, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                7,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::Digit9) {
-            send_inventory_click(slot, 8, 2, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                8,
+                2,
+                to_net,
+                inventory_state,
+            );
             return;
         }
         if keys.just_pressed(KeyCode::KeyQ) {
             let button = if ctrl_pressed { 1 } else { 0 };
-            send_inventory_click(slot, button, 4, to_net, inventory_state);
+            send_inventory_click(
+                window_id,
+                window_unique_slots,
+                slot,
+                button,
+                4,
+                to_net,
+                inventory_state,
+            );
             return;
         }
     }
 
     if response.double_clicked_by(egui::PointerButton::Primary) {
-        send_inventory_click(slot, 0, 6, to_net, inventory_state);
+        send_inventory_click(
+            window_id,
+            window_unique_slots,
+            slot,
+            0,
+            6,
+            to_net,
+            inventory_state,
+        );
         return;
     }
 
@@ -2026,21 +2539,32 @@ fn handle_inventory_slot_interaction(
         return;
     };
     let mode = if shift_pressed { 1 } else { 0 };
-    send_inventory_click(slot, button, mode, to_net, inventory_state);
+    send_inventory_click(
+        window_id,
+        window_unique_slots,
+        slot,
+        button,
+        mode,
+        to_net,
+        inventory_state,
+    );
 }
 
 fn send_inventory_click(
+    window_id: u8,
+    window_unique_slots: usize,
     slot: i16,
     button: u8,
     mode: u8,
     to_net: &ToNet,
     inventory_state: &mut InventoryState,
 ) {
-    let clicked_item = inventory_state.apply_local_click_player_window(slot, button, mode);
+    let clicked_item =
+        inventory_state.apply_local_click_window(window_id, window_unique_slots, slot, button, mode);
     let action_number = inventory_state.next_action_number;
     inventory_state.next_action_number = inventory_state.next_action_number.wrapping_add(1);
     let _ = to_net.0.send(ToNetMessage::ClickWindow {
-        id: 0,
+        id: window_id,
         slot,
         button,
         mode,
@@ -2111,8 +2635,7 @@ impl ItemIconCache {
 }
 
 fn texturepack_textures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../rs-client/assets/texturepack/assets/minecraft/textures")
+    rs_utils::texturepack_textures_root()
 }
 
 fn load_color_image(path: &Path) -> Option<egui::ColorImage> {

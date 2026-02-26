@@ -692,6 +692,16 @@ fn append_block_collision_boxes(
             }
         }
         BlockModelKind::Custom => match block_id {
+            54 | 130 | 146 => {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [1.0 / 16.0, 0.0, 1.0 / 16.0],
+                    [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0],
+                    out,
+                );
+            }
             27 | 28 | 66 | 157 => {
                 append_box(
                     block_x,
@@ -1064,7 +1074,10 @@ pub fn simulate_tick(
     }
 
     if !in_water && state.on_ground && input.jump {
-        state.vel.y = JUMP_VEL;
+        let jump_boost = input
+            .jump_boost_amplifier
+            .map_or(0.0, |amp| 0.1 * (f32::from(amp) + 1.0));
+        state.vel.y = JUMP_VEL + jump_boost;
         state.on_ground = false;
         if sprinting {
             let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
@@ -1087,7 +1100,8 @@ pub fn simulate_tick(
         wish.z *= SNEAK_INPUT_SCALE;
     }
 
-    let move_speed = BASE_MOVE_SPEED * if sprinting { 1.3 } else { 1.0 };
+    let move_speed =
+        BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
 
     let mut f4 = if state.on_ground {
         world.ground_slipperiness(state.pos) * 0.91

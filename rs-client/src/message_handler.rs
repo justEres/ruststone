@@ -50,6 +50,8 @@ pub fn handle_messages(
                 player_status.flying = false;
                 player_status.flying_speed = 0.05;
                 player_status.walking_speed = 0.1;
+                player_status.speed_effect_amplifier = None;
+                player_status.jump_boost_amplifier = None;
                 sim_clock.tick = 0;
                 sim_ready.0 = false;
                 history.0 = PredictionHistory::default().0;
@@ -65,6 +67,8 @@ pub fn handle_messages(
                 player_status.gamemode = 0;
                 player_status.can_fly = false;
                 player_status.flying = false;
+                player_status.speed_effect_amplifier = None;
+                player_status.jump_boost_amplifier = None;
             }
             FromNetMessage::ChatMessage(msg) => {
                 chat.0.push_back(msg);
@@ -213,6 +217,33 @@ pub fn handle_messages(
                 player_status.flying = (flags & 0x02) != 0 && gm_allows_flight;
                 player_status.flying_speed = flying_speed;
                 player_status.walking_speed = walking_speed;
+            }
+            FromNetMessage::PotionEffect {
+                entity_id,
+                effect_id,
+                amplifier,
+                duration_ticks: _duration_ticks,
+            } => {
+                if remote_entity_registry.local_entity_id == Some(entity_id) {
+                    let amp = amplifier.max(0) as u8;
+                    match effect_id {
+                        1 => player_status.speed_effect_amplifier = Some(amp),
+                        8 => player_status.jump_boost_amplifier = Some(amp),
+                        _ => {}
+                    }
+                }
+            }
+            FromNetMessage::PotionEffectRemove {
+                entity_id,
+                effect_id,
+            } => {
+                if remote_entity_registry.local_entity_id == Some(entity_id) {
+                    match effect_id {
+                        1 => player_status.speed_effect_amplifier = None,
+                        8 => player_status.jump_boost_amplifier = None,
+                        _ => {}
+                    }
+                }
             }
             FromNetMessage::Inventory(event) => {
                 apply_inventory_message(&mut inventory_state, event);
