@@ -54,7 +54,9 @@
         - smelting
         - enchanting
         - anvil
-    - correct block rendering in inventory (isometric) and hand (3d)
+    - 🚧 correct block rendering in inventory (isometric) and hand (3d)
+        - ✅ local debug item browser (`F8`) renders block items from blockstate/model quads (rails/ladders/doors now use non-cube geometry)
+        - ⬜ refine UV/parity details and switch from debug browser to production inventory icons
 
 
 - creative mode

@@ -3,9 +3,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rs_utils::block_registry_key;
+use rs_utils::ruststone_assets_root;
 use serde::Deserialize;
 
 use crate::block_textures::Face;
+
+#[derive(Debug, Clone)]
+pub struct IconQuad {
+    pub vertices: [[f32; 3]; 4],
+    pub uv: [[f32; 2]; 4],
+    pub texture_path: String,
+}
 
 #[derive(Default)]
 pub struct BlockModelResolver {
@@ -31,6 +39,40 @@ impl BlockModelResolver {
         self.face_cache
             .get(&block_id)
             .and_then(|faces| faces[face.index()].clone())
+    }
+
+    pub fn icon_quads(&mut self, block_id: u16) -> Option<Vec<IconQuad>> {
+        let Some(registry_key) = block_registry_key(block_id) else {
+            return None;
+        };
+        let name = registry_key
+            .strip_prefix("minecraft:")
+            .unwrap_or(registry_key);
+        let blockstate = self.load_blockstate(name)?;
+        let model_name = pick_model_name(&blockstate)?;
+        let model = self.resolve_model(&model_name, 0)?;
+
+        let mut quads = Vec::new();
+        for el in &model.elements {
+            let Some(faces) = &el.faces else {
+                continue;
+            };
+            for (dir, face) in faces {
+                let Some(texture_path) = resolve_texture_ref_map(&model.textures, &face.texture, 0)
+                else {
+                    continue;
+                };
+                let Some(vertices) = face_vertices(el.from, el.to, dir.as_str()) else {
+                    continue;
+                };
+                quads.push(IconQuad {
+                    vertices,
+                    uv: face_uvs(face),
+                    texture_path: append_png(texture_path),
+                });
+            }
+        }
+        Some(quads)
     }
 
     fn resolve_block_face_textures(&mut self, block_id: u16) -> [Option<String>; 6] {
@@ -100,6 +142,27 @@ impl BlockModelResolver {
         let parsed = serde_json::from_str::<BlockstateFile>(&raw).ok()?;
         self.blockstates.insert(key.to_string(), parsed.clone());
         Some(parsed)
+    }
+
+    fn resolve_model(&mut self, key: &str, depth: usize) -> Option<ResolvedModel> {
+        if depth > 24 {
+            return None;
+        }
+        let model = self.load_model(key)?.clone();
+        let mut out = if let Some(parent) = model.parent.as_deref() {
+            self.resolve_model(parent, depth + 1)?
+        } else {
+            ResolvedModel::default()
+        };
+        if let Some(textures) = model.textures {
+            for (k, v) in textures {
+                out.textures.insert(k, v);
+            }
+        }
+        if let Some(elements) = model.elements {
+            out.elements = elements;
+        }
+        Some(out)
     }
 
     fn load_model(&mut self, key: &str) -> Option<&ModelFile> {
@@ -188,6 +251,67 @@ fn resolve_texture_ref(model: &ModelFile, tex_ref: &str, depth: usize) -> Option
         return Some(path.to_string());
     }
     Some(tex_ref.to_string())
+}
+
+fn resolve_texture_ref_map(
+    textures: &HashMap<String, String>,
+    tex_ref: &str,
+    depth: usize,
+) -> Option<String> {
+    if depth > 24 {
+        return None;
+    }
+    if let Some(key) = tex_ref.strip_prefix('#') {
+        let next = textures.get(key)?.clone();
+        return resolve_texture_ref_map(textures, &next, depth + 1);
+    }
+    if let Some(path) = tex_ref.strip_prefix("minecraft:") {
+        return Some(path.to_string());
+    }
+    Some(tex_ref.to_string())
+}
+
+fn face_vertices(from: [f32; 3], to: [f32; 3], dir: &str) -> Option<[[f32; 3]; 4]> {
+    let (x0, y0, z0) = (from[0] / 16.0, from[1] / 16.0, from[2] / 16.0);
+    let (x1, y1, z1) = (to[0] / 16.0, to[1] / 16.0, to[2] / 16.0);
+    let verts = match dir {
+        "up" => [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]],
+        "down" => [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]],
+        "north" => [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
+        "south" => [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+        "west" => [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+        "east" => [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]],
+        _ => return None,
+    };
+    Some(verts)
+}
+
+fn face_uvs(face: &ModelFace) -> [[f32; 2]; 4] {
+    if let Some([u0, v0, u1, v1]) = face.uv {
+        // Convert to 0..1 UVs.
+        let mut uv = [
+            [u0 / 16.0, v0 / 16.0],
+            [u1 / 16.0, v0 / 16.0],
+            [u1 / 16.0, v1 / 16.0],
+            [u0 / 16.0, v1 / 16.0],
+        ];
+        rotate_uvs(&mut uv, face.rotation.unwrap_or(0));
+        return uv;
+    }
+    let mut uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    rotate_uvs(&mut uv, face.rotation.unwrap_or(0));
+    uv
+}
+
+fn rotate_uvs(uv: &mut [[f32; 2]; 4], rotation: i32) {
+    let turns = ((rotation / 90) % 4 + 4) % 4;
+    for _ in 0..turns {
+        let old = *uv;
+        uv[0] = old[3];
+        uv[1] = old[0];
+        uv[2] = old[1];
+        uv[3] = old[2];
+    }
 }
 
 fn model_face_texture_from_elements(model: &ModelFile, face: Face) -> Option<String> {
@@ -309,13 +433,24 @@ struct ModelElement {
 #[derive(Debug, Clone, Deserialize)]
 struct ModelFace {
     texture: String,
+    #[serde(default)]
+    uv: Option<[f32; 4]>,
+    #[serde(default)]
+    rotation: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ResolvedModel {
+    textures: HashMap<String, String>,
+    elements: Vec<ModelElement>,
 }
 
 pub fn default_model_roots() -> Vec<PathBuf> {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    vec![
-        repo_root.join("rs-client/assets/texturepack/assets"),
-        repo_root.join("MavenMCP-1.8.9/src/main/resources/assets"),
-        repo_root.join("leafish/resources/assets"),
-    ]
+    let mut roots = vec![ruststone_assets_root().join("texturepack/assets")];
+    let fallback_repo = repo_root.join("rs-client/assets/texturepack/assets");
+    if !roots.iter().any(|p| p == &fallback_repo) {
+        roots.push(fallback_repo);
+    }
+    roots
 }

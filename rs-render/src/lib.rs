@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
 use bevy::prelude::*;
-use bevy::render::view::VisibilitySystems;
 use bevy::render::view::RenderLayers;
+use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
 
 mod async_mesh;
@@ -18,6 +18,7 @@ mod lighting;
 mod reflection;
 mod world;
 
+pub use block_models::{BlockModelResolver, IconQuad, default_model_roots};
 pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
