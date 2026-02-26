@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crossbeam::channel::{Receiver, Sender, unbounded};
-use rs_utils::{InventoryItemStack, item_texture_candidates};
+use rs_utils::{InventoryItemStack, item_texture_candidates, texturepack_textures_root};
 use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -217,8 +217,7 @@ fn item_texture_worker(request_rx: Receiver<ItemTexKey>, result_tx: Sender<ItemT
 }
 
 fn textures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../rs-client/assets/texturepack/assets/minecraft/textures")
+    texturepack_textures_root()
 }
 
 fn missing_texture_rgba() -> (u32, u32, Vec<u8>) {

@@ -1,8 +1,8 @@
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::fxaa::{Fxaa, Sensitivity};
 use bevy::prelude::*;
-use bevy::render::view::RenderLayers;
 use bevy::render::view::Msaa;
+use bevy::render::view::RenderLayers;
 
 use crate::components::{LookAngles, Player, PlayerCamera, Velocity};
 use crate::debug::{AntiAliasingMode, RenderDebugSettings};

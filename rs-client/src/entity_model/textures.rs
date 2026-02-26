@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crossbeam::channel::{Receiver, Sender, unbounded};
+use rs_utils::texturepack_textures_root;
 use tracing::warn;
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -125,6 +126,5 @@ fn texture_worker(request_rx: Receiver<&'static str>, result_tx: Sender<TextureR
 }
 
 fn textures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../rs-client/assets/texturepack/assets/minecraft/textures")
+    texturepack_textures_root()
 }

@@ -21,9 +21,9 @@ use tracing::{info, warn};
 use crate::entity_model::{
     BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL_TEX32, BIPED_MODEL_TEX64,
     BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, COW_MODEL_TEX32, CREEPER_MODEL_TEX64, EntityTextureCache,
-    EntityTexturePath, PIG_MODEL_TEX32, QUADRUPED_BODY, QUADRUPED_HEAD,
-    QUADRUPED_LEG_BACK_LEFT, QUADRUPED_LEG_BACK_RIGHT, QUADRUPED_LEG_FRONT_LEFT,
-    QUADRUPED_LEG_FRONT_RIGHT, SHEEP_MODEL_TEX32, spawn_model,
+    EntityTexturePath, PIG_MODEL_TEX32, QUADRUPED_BODY, QUADRUPED_HEAD, QUADRUPED_LEG_BACK_LEFT,
+    QUADRUPED_LEG_BACK_RIGHT, QUADRUPED_LEG_FRONT_LEFT, QUADRUPED_LEG_FRONT_RIGHT,
+    SHEEP_MODEL_TEX32, spawn_model,
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
@@ -2072,14 +2072,19 @@ pub fn animate_remote_quadruped_models(
             - std::f32::consts::PI;
 
         let swing_scale = 1.4 * tuning.leg_swing_scale;
-        let leg_front_right_x = (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
-        let leg_front_left_x =
-            (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos() * swing_scale * anim.limb_swing_amount;
-        let leg_back_right_x =
-            (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos() * swing_scale * anim.limb_swing_amount;
-        let leg_back_left_x = (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
+        let leg_front_right_x =
+            (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
+        let leg_front_left_x = (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos()
+            * swing_scale
+            * anim.limb_swing_amount;
+        let leg_back_right_x = (anim.limb_swing * 0.6662 + std::f32::consts::PI).cos()
+            * swing_scale
+            * anim.limb_swing_amount;
+        let leg_back_left_x =
+            (anim.limb_swing * 0.6662).cos() * swing_scale * anim.limb_swing_amount;
 
-        let head_target = Quat::from_rotation_y(head_yaw_delta) * Quat::from_rotation_x(-head_pitch);
+        let head_target =
+            Quat::from_rotation_y(head_yaw_delta) * Quat::from_rotation_x(-head_pitch);
         let body_target = Quat::from_rotation_x(tuning.body_pitch);
         let leg_fr_target = Quat::from_rotation_x(leg_front_right_x);
         let leg_fl_target = Quat::from_rotation_x(leg_front_left_x);

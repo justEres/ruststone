@@ -183,23 +183,27 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
             );
         }
         ToNetMessage::PlayerMovePos { x, y, z, on_ground } => {
-            let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::PlayerPosition {
-                x,
-                y,
-                z,
-                on_ground,
-            });
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerPosition {
+                    x,
+                    y,
+                    z,
+                    on_ground,
+                },
+            );
         }
         ToNetMessage::PlayerMoveLook {
             yaw,
             pitch,
             on_ground,
         } => {
-            let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::PlayerLook {
-                yaw,
-                pitch,
-                on_ground,
-            });
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::PlayerLook {
+                    yaw,
+                    pitch,
+                    on_ground,
+                },
+            );
         }
         ToNetMessage::PlayerMoveGround { on_ground } => {
             let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::Player {

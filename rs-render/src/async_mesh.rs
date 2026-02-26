@@ -70,16 +70,15 @@ pub struct MeshJob {
 
 impl MeshJob {
     pub fn build_mesh(self) -> MeshBatch {
-        self.snapshot
-            .build_mesh_data(
-                self.use_greedy,
-                self.leaf_depth_layer_faces,
-                self.voxel_ao_enabled,
-                self.voxel_ao_strength,
-                self.voxel_ao_cutout,
-                &self.texture_mapping,
-                &self.biome_tints,
-            )
+        self.snapshot.build_mesh_data(
+            self.use_greedy,
+            self.leaf_depth_layer_faces,
+            self.voxel_ao_enabled,
+            self.voxel_ao_strength,
+            self.voxel_ao_cutout,
+            &self.texture_mapping,
+            &self.biome_tints,
+        )
     }
 }
 

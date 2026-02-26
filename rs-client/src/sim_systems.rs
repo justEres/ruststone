@@ -11,7 +11,9 @@ use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
 
 use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
-use crate::sim::movement::{WorldCollision, debug_block_collision_boxes, effective_sprint, simulate_tick};
+use crate::sim::movement::{
+    WorldCollision, debug_block_collision_boxes, effective_sprint, simulate_tick,
+};
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::{
     CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
@@ -25,8 +27,8 @@ use rs_utils::{
     block_registry_key, block_state_id, block_state_meta,
 };
 
-use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
+use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use crate::timing::Timing;
 
@@ -528,8 +530,8 @@ pub fn fixed_sim_tick_system(
     // - start requires strong forward input and movement
     // - while already sprinting, keep sprint as long as sprint key is held and moving forward
     // This avoids rapid sprint state flapping around sprint-jumps.
-    let horizontal_speed_sq =
-        sim_state.current.vel.x * sim_state.current.vel.x + sim_state.current.vel.z * sim_state.current.vel.z;
+    let horizontal_speed_sq = sim_state.current.vel.x * sim_state.current.vel.x
+        + sim_state.current.vel.z * sim_state.current.vel.z;
     let can_start_sprint = input_snapshot.sprint
         && !input_snapshot.sneak
         && input_snapshot.forward >= 0.8
@@ -576,7 +578,9 @@ pub fn fixed_sim_tick_system(
     input.0.jump = false;
 
     if matches!(app_state.0, ApplicationState::Connected) {
-        if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) = correction_guard.pending_ack.take() {
+        if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) =
+            correction_guard.pending_ack.take()
+        {
             let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
                 x: ack_pos.x as f64,
                 y: ack_pos.y as f64,
@@ -600,18 +604,20 @@ pub fn fixed_sim_tick_system(
         if current_sneak != action_state.sneaking {
             let action_id = if current_sneak { 0 } else { 1 };
             if let Some(entity_id) = remote_entities.local_entity_id {
-                let _ = to_net
-                    .0
-                    .send(ToNetMessage::PlayerAction { entity_id, action_id });
+                let _ = to_net.0.send(ToNetMessage::PlayerAction {
+                    entity_id,
+                    action_id,
+                });
             }
             action_state.sneaking = current_sneak;
         }
         if current_sprint != action_state.sprinting {
             let action_id = if current_sprint { 3 } else { 4 };
             if let Some(entity_id) = remote_entities.local_entity_id {
-                let _ = to_net
-                    .0
-                    .send(ToNetMessage::PlayerAction { entity_id, action_id });
+                let _ = to_net.0.send(ToNetMessage::PlayerAction {
+                    entity_id,
+                    action_id,
+                });
             }
             action_state.sprinting = current_sprint;
         }
@@ -757,7 +763,8 @@ pub fn net_event_apply_system(
             pitch,
         };
 
-        let repeated_same_correction = pos.distance_squared(correction_guard.last_server_pos) <= 1.0e-6
+        let repeated_same_correction = pos.distance_squared(correction_guard.last_server_pos)
+            <= 1.0e-6
             && on_ground == correction_guard.last_server_on_ground;
         correction_guard.repeats = if repeated_same_correction {
             correction_guard.repeats.saturating_add(1)
@@ -1204,37 +1211,37 @@ fn estimate_break_time_secs(block_id: u16, held_item: Option<rs_utils::Inventory
 
 fn block_hardness(block_id: u16) -> f32 {
     match block_id {
-        0 => 0.0,            // air
-        1 | 4 => 2.0,        // stone, cobble
-        2 => 0.6,            // grass
-        3 => 0.5,            // dirt
-        5 | 17 | 162 => 2.0, // planks/log
-        12 => 0.5,           // sand
-        13 => 0.6,           // gravel
+        0 => 0.0,                                      // air
+        1 | 4 => 2.0,                                  // stone, cobble
+        2 => 0.6,                                      // grass
+        3 => 0.5,                                      // dirt
+        5 | 17 | 162 => 2.0,                           // planks/log
+        12 => 0.5,                                     // sand
+        13 => 0.6,                                     // gravel
         14 | 15 | 16 | 21 | 56 | 73 | 74 | 129 => 3.0, // ores
-        18 | 161 => 0.2,     // leaves
-        20 => 0.3,           // glass
-        24 | 45 => 0.8,      // sandstone, brick
-        49 => 50.0,          // obsidian
-        50 => 0.0,           // torch
-        54 => 2.5,           // chest
-        58 => 2.5,           // crafting
-        61 | 62 => 3.5,      // furnace
-        79 => 0.5,           // ice
-        80 => 0.2,           // snow block
-        81 => 0.4,           // cactus
-        82 => 0.6,           // clay
-        87 => 0.4,           // netherrack
-        88 => 0.5,           // soulsand
-        89 => 0.3,           // glowstone
-        95 => 0.3,           // stained glass
-        98 => 1.5,           // stone bricks
-        155 => 0.8,          // quartz block
-        159 => 0.8,          // stained hardened clay
-        171 => 0.8,          // carpet/wool-ish break feel
-        172 => 1.25,         // hardened clay
-        173 => 5.0,          // coal block
-        174 => 0.5,          // packed ice
+        18 | 161 => 0.2,                               // leaves
+        20 => 0.3,                                     // glass
+        24 | 45 => 0.8,                                // sandstone, brick
+        49 => 50.0,                                    // obsidian
+        50 => 0.0,                                     // torch
+        54 => 2.5,                                     // chest
+        58 => 2.5,                                     // crafting
+        61 | 62 => 3.5,                                // furnace
+        79 => 0.5,                                     // ice
+        80 => 0.2,                                     // snow block
+        81 => 0.4,                                     // cactus
+        82 => 0.6,                                     // clay
+        87 => 0.4,                                     // netherrack
+        88 => 0.5,                                     // soulsand
+        89 => 0.3,                                     // glowstone
+        95 => 0.3,                                     // stained glass
+        98 => 1.5,                                     // stone bricks
+        155 => 0.8,                                    // quartz block
+        159 => 0.8,                                    // stained hardened clay
+        171 => 0.8,                                    // carpet/wool-ish break feel
+        172 => 1.25,                                   // hardened clay
+        173 => 5.0,                                    // coal block
+        174 => 0.5,                                    // packed ice
         _ => 1.0,
     }
 }
@@ -1285,9 +1292,10 @@ fn tool_speed(item_id: i32) -> f32 {
 fn block_required_tool(block_id: u16) -> Option<(ToolKind, i32)> {
     match block_id {
         // Pickaxe, mostly stone/ore-like blocks.
-        1 | 4 | 14 | 15 | 16 | 21 | 22 | 24 | 41 | 42 | 45 | 48 | 57 | 61 | 62
-        | 73 | 74 | 79 | 80 | 98 | 101 | 109 | 112 | 121 | 133 | 152 | 155 | 172
-        | 173 => Some((ToolKind::Pickaxe, 0)),
+        1 | 4 | 14 | 15 | 16 | 21 | 22 | 24 | 41 | 42 | 45 | 48 | 57 | 61 | 62 | 73 | 74 | 79
+        | 80 | 98 | 101 | 109 | 112 | 121 | 133 | 152 | 155 | 172 | 173 => {
+            Some((ToolKind::Pickaxe, 0))
+        }
         // Higher harvest tiers.
         56 | 129 | 130 => Some((ToolKind::Pickaxe, 2)), // diamond/emerald/ender chest
         49 | 116 => Some((ToolKind::Pickaxe, 3)),       // obsidian/enchanting table
@@ -1507,11 +1515,7 @@ pub fn draw_chunk_debug_system(
             draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.02, 0.02, 0.02, 1.0));
             if break_indicator.active {
                 let p = break_indicator.progress.clamp(0.0, 1.0);
-                let crack_color = Color::srgb(
-                    0.32 + 0.50 * p,
-                    0.32 - 0.20 * p,
-                    0.32 - 0.20 * p,
-                );
+                let crack_color = Color::srgb(0.32 + 0.50 * p, 0.32 - 0.20 * p, 0.32 - 0.20 * p);
                 let crack_inflate = 0.008 + p * 0.010;
                 draw_aabb_lines(
                     &mut gizmos,
@@ -1664,417 +1668,463 @@ pub fn debug_overlay_system(
             let performance_section = egui::CollapsingHeader::new("Performance")
                 .default_open(debug_ui.show_performance)
                 .show(ui, |ui| {
-                ui.separator();
-                if let Some(fps) = diagnostics
-                    .get(&FrameTimeDiagnosticsPlugin::FPS)
-                    .and_then(|d| d.smoothed())
-                {
-                    ui.label(format!("fps: {:.1}", fps));
-                } else {
-                    ui.label("fps: n/a");
-                }
-                ui.label(format!("frame ms (delta): {:.2}", frame_ms));
-                ui.label(format!(
-                    "main thread ms: {:.2} {}",
-                    timings.main_thread_ms,
-                    if frame_ms > 0.0 {
-                        format!("{:.1}%", (timings.main_thread_ms / frame_ms) * 100.0)
+                    ui.separator();
+                    if let Some(fps) = diagnostics
+                        .get(&FrameTimeDiagnosticsPlugin::FPS)
+                        .and_then(|d| d.smoothed())
+                    {
+                        ui.label(format!("fps: {:.1}", fps));
                     } else {
-                        "n/a".to_string()
+                        ui.label("fps: n/a");
                     }
-                ));
-            });
+                    ui.label(format!("frame ms (delta): {:.2}", frame_ms));
+                    ui.label(format!(
+                        "main thread ms: {:.2} {}",
+                        timings.main_thread_ms,
+                        if frame_ms > 0.0 {
+                            format!("{:.1}%", (timings.main_thread_ms / frame_ms) * 100.0)
+                        } else {
+                            "n/a".to_string()
+                        }
+                    ));
+                });
             debug_ui.show_performance = performance_section.fully_open();
 
             let render_section = egui::CollapsingHeader::new("Render")
                 .default_open(debug_ui.show_render)
                 .show(ui, |ui| {
-                ui.separator();
-                let layers_section = egui::CollapsingHeader::new("Layers")
-                    .default_open(debug_ui.render_show_layers)
-                    .show(ui, |ui| {
                     ui.separator();
-                    ui.checkbox(&mut render_debug.show_layer_entities, "Layer: entities");
-                    ui.checkbox(
-                        &mut render_debug.show_layer_chunks_opaque,
-                        "Layer: chunks opaque",
-                    );
-                    ui.checkbox(
-                        &mut render_debug.show_layer_chunks_cutout,
-                        "Layer: chunks cutout",
-                    );
-                    ui.checkbox(
-                        &mut render_debug.show_layer_chunks_transparent,
-                        "Layer: chunks transparent",
-                    );
-                    ui.checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull");
-                });
-                debug_ui.render_show_layers = layers_section.fully_open();
-
-                let lighting_section = egui::CollapsingHeader::new("Lighting")
-                    .default_open(debug_ui.render_show_lighting)
-                    .show(ui, |ui| {
-                    ui.separator();
-                    ui.checkbox(&mut render_debug.enable_pbr_terrain_lighting, "Enable PBR path");
-                    ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shader_quality_mode, 0..=3)
-                            .text("Shader quality mode"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_distance_scale, 0.25..=20.0)
-                            .logarithmic(true)
-                            .text("Shadow distance"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_map_size, 256..=4096)
-                            .text("Shadow map size"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_cascades, 1..=4)
-                            .text("Shadow cascades"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_max_distance, 8.0..=400.0)
-                            .text("Shadow max distance"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut render_debug.shadow_first_cascade_far_bound,
-                            4.0..=200.0,
-                        )
-                        .text("Shadow first cascade far"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_depth_bias, 0.0..=0.2)
-                            .text("Shadow depth bias"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.shadow_normal_bias, 0.0..=2.0)
-                            .text("Shadow normal bias"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.sun_azimuth_deg, -180.0..=180.0)
-                            .text("Sun azimuth"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.sun_elevation_deg, -20.0..=89.0)
-                            .text("Sun elevation"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
-                            .text("Sun strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
-                            .text("Ambient strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.ambient_brightness, 0.0..=2.0)
-                            .text("Ambient brightness"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
-                            .text("Fog density"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.fog_start, 0.0..=500.0)
-                            .text("Fog start"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.fog_end, 1.0..=700.0)
-                            .text("Fog end"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_absorption, 0.0..=1.0)
-                            .text("Water absorption"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_fresnel, 0.0..=1.0)
-                            .text("Water fresnel"),
-                    );
-                });
-                debug_ui.render_show_lighting = lighting_section.fully_open();
-
-                let water_section = egui::CollapsingHeader::new("Water")
-                    .default_open(debug_ui.render_show_water)
-                    .show(ui, |ui| {
-                    ui.separator();
-                    ui.checkbox(
-                        &mut render_debug.water_reflections_enabled,
-                        "Water reflections",
-                    );
-                    ui.checkbox(
-                        &mut render_debug.water_reflection_screen_space,
-                        "Screen-space SSR raymarch",
-                    );
-                    if render_debug.water_reflection_screen_space {
-                        ui.add(
-                            egui::Slider::new(&mut render_debug.water_ssr_steps, 4..=64)
-                                .text("SSR ray steps"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut render_debug.water_ssr_thickness, 0.02..=2.0)
-                                .text("SSR hit thickness"),
-                        );
-                        ui.add(
-                            egui::Slider::new(
-                                &mut render_debug.water_ssr_max_distance,
-                                4.0..=400.0,
-                            )
-                            .text("SSR max distance"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut render_debug.water_ssr_stride, 0.2..=8.0)
-                                .text("SSR step stride"),
-                        );
-                    }
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_reflection_strength, 0.0..=3.0)
-                            .text("Water reflection strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_reflection_near_boost, 0.0..=1.0)
-                            .text("Near reflection boost"),
-                    );
-                    ui.checkbox(
-                        &mut render_debug.water_reflection_blue_tint,
-                        "Blue reflection tint",
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut render_debug.water_reflection_tint_strength,
-                            0.0..=2.0,
-                        )
-                        .text("Blue tint strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
-                            .text("Water wave strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
-                            .text("Water wave speed"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut render_debug.water_wave_detail_strength,
-                            0.0..=1.2,
-                        )
-                        .text("Wave detail strength"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_wave_detail_scale, 1.0..=8.0)
-                            .text("Wave detail scale"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_wave_detail_speed, 0.0..=4.0)
-                            .text("Wave detail speed"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_reflection_edge_fade, 0.02..=0.5)
-                            .text("Reflection edge fade"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_reflection_sky_fill, 0.0..=1.0)
-                            .text("Sky fallback fill"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.water_reflection_overscan, 1.0..=3.0)
-                            .text("Reflection overscan"),
-                    );
-                });
-                debug_ui.render_show_water = water_section.fully_open();
-
-                let misc_section = egui::CollapsingHeader::new("Misc")
-                    .default_open(debug_ui.render_show_misc)
-                    .show(ui, |ui| {
-                    ui.separator();
-                    let mut aa_mode = render_debug.aa_mode;
-                    egui::ComboBox::from_label("AA")
-                        .selected_text(aa_mode.label())
-                        .show_ui(ui, |ui| {
-                            for mode in rs_render::AntiAliasingMode::ALL {
-                                ui.selectable_value(&mut aa_mode, mode, mode.label());
-                            }
+                    let layers_section = egui::CollapsingHeader::new("Layers")
+                        .default_open(debug_ui.render_show_layers)
+                        .show(ui, |ui| {
+                            ui.separator();
+                            ui.checkbox(&mut render_debug.show_layer_entities, "Layer: entities");
+                            ui.checkbox(
+                                &mut render_debug.show_layer_chunks_opaque,
+                                "Layer: chunks opaque",
+                            );
+                            ui.checkbox(
+                                &mut render_debug.show_layer_chunks_cutout,
+                                "Layer: chunks cutout",
+                            );
+                            ui.checkbox(
+                                &mut render_debug.show_layer_chunks_transparent,
+                                "Layer: chunks transparent",
+                            );
+                            ui.checkbox(
+                                &mut render_debug.manual_frustum_cull,
+                                "Manual frustum cull",
+                            );
                         });
-                    if aa_mode != render_debug.aa_mode {
-                        render_debug.aa_mode = aa_mode;
-                        render_debug.fxaa_enabled = matches!(
-                            render_debug.aa_mode,
-                            rs_render::AntiAliasingMode::Fxaa
-                                | rs_render::AntiAliasingMode::Msaa4
-                                | rs_render::AntiAliasingMode::Msaa8
+                    debug_ui.render_show_layers = layers_section.fully_open();
+
+                    let lighting_section = egui::CollapsingHeader::new("Lighting")
+                        .default_open(debug_ui.render_show_lighting)
+                        .show(ui, |ui| {
+                            ui.separator();
+                            ui.checkbox(
+                                &mut render_debug.enable_pbr_terrain_lighting,
+                                "Enable PBR path",
+                            );
+                            ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shader_quality_mode, 0..=3)
+                                    .text("Shader quality mode"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.shadow_distance_scale,
+                                    0.25..=20.0,
+                                )
+                                .logarithmic(true)
+                                .text("Shadow distance"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shadow_map_size, 256..=4096)
+                                    .text("Shadow map size"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shadow_cascades, 1..=4)
+                                    .text("Shadow cascades"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.shadow_max_distance,
+                                    8.0..=400.0,
+                                )
+                                .text("Shadow max distance"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.shadow_first_cascade_far_bound,
+                                    4.0..=200.0,
+                                )
+                                .text("Shadow first cascade far"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shadow_depth_bias, 0.0..=0.2)
+                                    .text("Shadow depth bias"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shadow_normal_bias, 0.0..=2.0)
+                                    .text("Shadow normal bias"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.sun_azimuth_deg,
+                                    -180.0..=180.0,
+                                )
+                                .text("Sun azimuth"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.sun_elevation_deg,
+                                    -20.0..=89.0,
+                                )
+                                .text("Sun elevation"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
+                                    .text("Sun strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
+                                    .text("Ambient strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.ambient_brightness, 0.0..=2.0)
+                                    .text("Ambient brightness"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
+                                    .text("Fog density"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.fog_start, 0.0..=500.0)
+                                    .text("Fog start"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.fog_end, 1.0..=700.0)
+                                    .text("Fog end"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.water_absorption, 0.0..=1.0)
+                                    .text("Water absorption"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.water_fresnel, 0.0..=1.0)
+                                    .text("Water fresnel"),
+                            );
+                        });
+                    debug_ui.render_show_lighting = lighting_section.fully_open();
+
+                    let water_section = egui::CollapsingHeader::new("Water")
+                        .default_open(debug_ui.render_show_water)
+                        .show(ui, |ui| {
+                            ui.separator();
+                            ui.checkbox(
+                                &mut render_debug.water_reflections_enabled,
+                                "Water reflections",
+                            );
+                            ui.checkbox(
+                                &mut render_debug.water_reflection_screen_space,
+                                "Screen-space SSR raymarch",
+                            );
+                            if render_debug.water_reflection_screen_space {
+                                ui.add(
+                                    egui::Slider::new(&mut render_debug.water_ssr_steps, 4..=64)
+                                        .text("SSR ray steps"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_thickness,
+                                        0.02..=2.0,
+                                    )
+                                    .text("SSR hit thickness"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_max_distance,
+                                        4.0..=400.0,
+                                    )
+                                    .text("SSR max distance"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_stride,
+                                        0.2..=8.0,
+                                    )
+                                    .text("SSR step stride"),
+                                );
+                            }
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_strength,
+                                    0.0..=3.0,
+                                )
+                                .text("Water reflection strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_near_boost,
+                                    0.0..=1.0,
+                                )
+                                .text("Near reflection boost"),
+                            );
+                            ui.checkbox(
+                                &mut render_debug.water_reflection_blue_tint,
+                                "Blue reflection tint",
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_tint_strength,
+                                    0.0..=2.0,
+                                )
+                                .text("Blue tint strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
+                                    .text("Water wave strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
+                                    .text("Water wave speed"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_strength,
+                                    0.0..=1.2,
+                                )
+                                .text("Wave detail strength"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_scale,
+                                    1.0..=8.0,
+                                )
+                                .text("Wave detail scale"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_wave_detail_speed,
+                                    0.0..=4.0,
+                                )
+                                .text("Wave detail speed"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_edge_fade,
+                                    0.02..=0.5,
+                                )
+                                .text("Reflection edge fade"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_sky_fill,
+                                    0.0..=1.0,
+                                )
+                                .text("Sky fallback fill"),
+                            );
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut render_debug.water_reflection_overscan,
+                                    1.0..=3.0,
+                                )
+                                .text("Reflection overscan"),
+                            );
+                        });
+                    debug_ui.render_show_water = water_section.fully_open();
+
+                    let misc_section = egui::CollapsingHeader::new("Misc")
+                        .default_open(debug_ui.render_show_misc)
+                        .show(ui, |ui| {
+                            ui.separator();
+                            let mut aa_mode = render_debug.aa_mode;
+                            egui::ComboBox::from_label("AA")
+                                .selected_text(aa_mode.label())
+                                .show_ui(ui, |ui| {
+                                    for mode in rs_render::AntiAliasingMode::ALL {
+                                        ui.selectable_value(&mut aa_mode, mode, mode.label());
+                                    }
+                                });
+                            if aa_mode != render_debug.aa_mode {
+                                render_debug.aa_mode = aa_mode;
+                                render_debug.fxaa_enabled = matches!(
+                                    render_debug.aa_mode,
+                                    rs_render::AntiAliasingMode::Fxaa
+                                        | rs_render::AntiAliasingMode::Msaa4
+                                        | rs_render::AntiAliasingMode::Msaa8
+                                );
+                            }
+                            ui.checkbox(
+                                &mut render_debug.use_greedy_meshing,
+                                "Binary greedy meshing",
+                            );
+                            ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
+                            ui.checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO");
+                            ui.checkbox(&mut render_debug.voxel_ao_cutout, "Voxel AO on cutout");
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
+                                    .text("Voxel AO strength"),
+                            );
+                            if ui.button("Force remesh chunks").clicked() {
+                                render_debug.force_remesh = true;
+                            }
+                            if ui.button("Reset Debug/Render Settings").clicked() {
+                                *render_debug = RenderDebugSettings::default();
+                            }
+                            if ui.button("Rebuild render materials").clicked() {
+                                render_debug.material_rebuild_nonce =
+                                    render_debug.material_rebuild_nonce.wrapping_add(1);
+                            }
+                            ui.checkbox(&mut render_debug.render_held_items, "Render held items");
+                            ui.checkbox(
+                                &mut render_debug.render_first_person_arms,
+                                "First-person arms",
+                            );
+                            ui.checkbox(&mut render_debug.render_self_model, "Render self model");
+                            ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
+                            ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
+                            ui.checkbox(&mut render_debug.show_look_info, "Look info");
+                            ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
+                            ui.checkbox(
+                                &mut render_debug.show_target_block_outline,
+                                "Target block outline",
+                            );
+                        });
+                    debug_ui.render_show_misc = misc_section.fully_open();
+                    let mut cutout_mode = render_debug.cutout_debug_mode as i32;
+                    egui::ComboBox::from_label("Cutout debug")
+                        .selected_text(match cutout_mode {
+                            1 => "Pass id",
+                            2 => "Atlas RGB",
+                            3 => "Atlas alpha",
+                            4 => "Vertex tint",
+                            5 => "Linear depth",
+                            6 => "Pass flags",
+                            7 => "Alpha + pass",
+                            8 => "Cutout lit flags",
+                            _ => "Off",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut cutout_mode, 0, "Off");
+                            ui.selectable_value(&mut cutout_mode, 1, "Pass id");
+                            ui.selectable_value(&mut cutout_mode, 2, "Atlas rgb");
+                            ui.selectable_value(&mut cutout_mode, 3, "Atlas alpha");
+                            ui.selectable_value(&mut cutout_mode, 4, "Vertex tint");
+                            ui.selectable_value(&mut cutout_mode, 5, "Linear depth");
+                            ui.selectable_value(&mut cutout_mode, 6, "Pass flags");
+                            ui.selectable_value(&mut cutout_mode, 7, "Alpha + pass");
+                            ui.selectable_value(&mut cutout_mode, 8, "Cutout lit flags");
+                        });
+                    render_debug.cutout_debug_mode = cutout_mode.clamp(0, 8) as u8;
+                    ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
+                    ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
+                    ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
+                    if render_debug.frustum_fov_debug {
+                        ui.add(
+                            egui::Slider::new(&mut render_debug.frustum_fov_deg, 30.0..=140.0)
+                                .text("Frustum FOV"),
                         );
                     }
-                    ui.checkbox(
-                        &mut render_debug.use_greedy_meshing,
-                        "Binary greedy meshing",
-                    );
-                    ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
-                    ui.checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO");
-                    ui.checkbox(&mut render_debug.voxel_ao_cutout, "Voxel AO on cutout");
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
-                            .text("Voxel AO strength"),
-                    );
-                    if ui.button("Force remesh chunks").clicked() {
-                        render_debug.force_remesh = true;
+                    let mut dist = render_debug.render_distance_chunks as i32;
+                    if ui
+                        .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
+                        .changed()
+                    {
+                        render_debug.render_distance_chunks = dist;
                     }
-                    if ui.button("Reset Debug/Render Settings").clicked() {
-                        *render_debug = RenderDebugSettings::default();
+                    ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"));
+
+                    if render_debug.show_coordinates || render_debug.show_look_info {
+                        ui.separator();
                     }
-                    if ui.button("Rebuild render materials").clicked() {
-                        render_debug.material_rebuild_nonce =
-                            render_debug.material_rebuild_nonce.wrapping_add(1);
+                    if render_debug.show_coordinates {
+                        let pos = sim_state.current.pos;
+                        let block = pos.floor().as_ivec3();
+                        let chunk_x = block.x.div_euclid(16);
+                        let chunk_z = block.z.div_euclid(16);
+                        ui.label(format!("pos: {:.3} {:.3} {:.3}", pos.x, pos.y, pos.z));
+                        ui.label(format!("block: {} {} {}", block.x, block.y, block.z));
+                        ui.label(format!("chunk: {} {}", chunk_x, chunk_z));
                     }
-                    ui.checkbox(&mut render_debug.render_held_items, "Render held items");
-                    ui.checkbox(
-                        &mut render_debug.render_first_person_arms,
-                        "First-person arms",
-                    );
-                    ui.checkbox(&mut render_debug.render_self_model, "Render self model");
-                    ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
-                    ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
-                    ui.checkbox(&mut render_debug.show_look_info, "Look info");
-                    ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
-                    ui.checkbox(
-                        &mut render_debug.show_target_block_outline,
-                        "Target block outline",
-                    );
-                });
-                debug_ui.render_show_misc = misc_section.fully_open();
-                let mut cutout_mode = render_debug.cutout_debug_mode as i32;
-                egui::ComboBox::from_label("Cutout debug")
-                    .selected_text(match cutout_mode {
-                        1 => "Pass id",
-                        2 => "Atlas RGB",
-                        3 => "Atlas alpha",
-                        4 => "Vertex tint",
-                        5 => "Linear depth",
-                        6 => "Pass flags",
-                        7 => "Alpha + pass",
-                        8 => "Cutout lit flags",
-                        _ => "Off",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut cutout_mode, 0, "Off");
-                        ui.selectable_value(&mut cutout_mode, 1, "Pass id");
-                        ui.selectable_value(&mut cutout_mode, 2, "Atlas rgb");
-                        ui.selectable_value(&mut cutout_mode, 3, "Atlas alpha");
-                        ui.selectable_value(&mut cutout_mode, 4, "Vertex tint");
-                        ui.selectable_value(&mut cutout_mode, 5, "Linear depth");
-                        ui.selectable_value(&mut cutout_mode, 6, "Pass flags");
-                        ui.selectable_value(&mut cutout_mode, 7, "Alpha + pass");
-                        ui.selectable_value(&mut cutout_mode, 8, "Cutout lit flags");
-                    });
-                render_debug.cutout_debug_mode = cutout_mode.clamp(0, 8) as u8;
-                ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
-                ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
-                ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
-                if render_debug.frustum_fov_debug {
-                    ui.add(
-                        egui::Slider::new(&mut render_debug.frustum_fov_deg, 30.0..=140.0)
-                            .text("Frustum FOV"),
-                    );
-                }
-                let mut dist = render_debug.render_distance_chunks as i32;
-                if ui
-                    .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
-                    .changed()
-                {
-                    render_debug.render_distance_chunks = dist;
-                }
-                ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"));
+                    if render_debug.show_look_info {
+                        let yaw_mc = (std::f32::consts::PI - input.0.yaw).to_degrees();
+                        let pitch_mc = (-input.0.pitch).to_degrees();
+                        let (card, axis) = yaw_deg_to_cardinal(yaw_mc);
+                        ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
+                        ui.label(format!("facing: {} ({})", card, axis));
 
-                if render_debug.show_coordinates || render_debug.show_look_info {
-                    ui.separator();
-                }
-                if render_debug.show_coordinates {
-                    let pos = sim_state.current.pos;
-                    let block = pos.floor().as_ivec3();
-                    let chunk_x = block.x.div_euclid(16);
-                    let chunk_z = block.z.div_euclid(16);
-                    ui.label(format!("pos: {:.3} {:.3} {:.3}", pos.x, pos.y, pos.z));
-                    ui.label(format!("block: {} {} {}", block.x, block.y, block.z));
-                    ui.label(format!("chunk: {} {}", chunk_x, chunk_z));
-                }
-                if render_debug.show_look_info {
-                    let yaw_mc = (std::f32::consts::PI - input.0.yaw).to_degrees();
-                    let pitch_mc = (-input.0.pitch).to_degrees();
-                    let (card, axis) = yaw_deg_to_cardinal(yaw_mc);
-                    ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
-                    ui.label(format!("facing: {} ({})", card, axis));
+                        if let Ok(camera_transform) = camera_query.get_single() {
+                            let origin = camera_transform.translation();
+                            let dir = *camera_transform.forward();
+                            let max_reach = if player_status.gamemode == 1 {
+                                CREATIVE_BLOCK_REACH
+                            } else {
+                                SURVIVAL_BLOCK_REACH
+                            };
+                            if let Some(hit) = raycast_block(&collision_map, origin, dir, max_reach)
+                            {
+                                let state =
+                                    collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
+                                let id = block_state_id(state);
+                                let meta = block_state_meta(state);
+                                let kind = block_model_kind(id);
+                                let reg = block_registry_key(id).unwrap_or("minecraft:unknown");
+                                let world = WorldCollision::with_map(&collision_map);
+                                let boxes = debug_block_collision_boxes(
+                                    &world,
+                                    state,
+                                    hit.block.x,
+                                    hit.block.y,
+                                    hit.block.z,
+                                );
 
-                    if let Ok(camera_transform) = camera_query.get_single() {
-                        let origin = camera_transform.translation();
-                        let dir = *camera_transform.forward();
-                        let max_reach = if player_status.gamemode == 1 {
-                            CREATIVE_BLOCK_REACH
-                        } else {
-                            SURVIVAL_BLOCK_REACH
-                        };
-                        if let Some(hit) = raycast_block(&collision_map, origin, dir, max_reach) {
-                            let state = collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
-                            let id = block_state_id(state);
-                            let meta = block_state_meta(state);
-                            let kind = block_model_kind(id);
-                            let reg = block_registry_key(id).unwrap_or("minecraft:unknown");
-                            let world = WorldCollision::with_map(&collision_map);
-                            let boxes =
-                                debug_block_collision_boxes(&world, state, hit.block.x, hit.block.y, hit.block.z);
-
-                            ui.label(format!(
-                                "target block: {} {} {}",
-                                hit.block.x, hit.block.y, hit.block.z
-                            ));
-                            ui.label(format!(
-                                "id/state/meta: {} / {} / {}  kind: {}",
-                                id,
-                                state,
-                                meta,
-                                block_model_kind_label(kind)
-                            ));
-                            ui.label(format!("registry: {}", reg));
-                            ui.label(format!("collision boxes: {}", boxes.len()));
-                            for (idx, (min, max)) in boxes.iter().take(4).enumerate() {
-                                let size = *max - *min;
                                 ui.label(format!(
-                                    "box{} min({:.3},{:.3},{:.3}) size({:.3},{:.3},{:.3})",
-                                    idx,
-                                    min.x,
-                                    min.y,
-                                    min.z,
-                                    size.x,
-                                    size.y,
-                                    size.z
+                                    "target block: {} {} {}",
+                                    hit.block.x, hit.block.y, hit.block.z
                                 ));
+                                ui.label(format!(
+                                    "id/state/meta: {} / {} / {}  kind: {}",
+                                    id,
+                                    state,
+                                    meta,
+                                    block_model_kind_label(kind)
+                                ));
+                                ui.label(format!("registry: {}", reg));
+                                ui.label(format!("collision boxes: {}", boxes.len()));
+                                for (idx, (min, max)) in boxes.iter().take(4).enumerate() {
+                                    let size = *max - *min;
+                                    ui.label(format!(
+                                        "box{} min({:.3},{:.3},{:.3}) size({:.3},{:.3},{:.3})",
+                                        idx, min.x, min.y, min.z, size.x, size.y, size.z
+                                    ));
+                                }
+                                if boxes.len() > 4 {
+                                    ui.label(format!("... {} more boxes", boxes.len() - 4));
+                                }
+                            } else {
+                                ui.label("target block: none");
                             }
-                            if boxes.len() > 4 {
-                                ui.label(format!("... {} more boxes", boxes.len() - 4));
-                            }
-                        } else {
-                            ui.label("target block: none");
                         }
                     }
-                }
-            });
+                });
             debug_ui.show_render = render_section.fully_open();
 
             let prediction_section = egui::CollapsingHeader::new("Prediction")
                 .default_open(debug_ui.show_prediction)
                 .show(ui, |ui| {
-                ui.separator();
-                ui.label(format!("tick: {}", sim_clock.tick));
-                ui.label(format!("history cap: {}", history.0.capacity()));
-                ui.label(format!("last correction: {:.4}", debug.last_correction));
-                ui.label(format!("last replay ticks: {}", debug.last_replay));
-                ui.label(format!(
-                    "smoothing offset: {:.4}",
-                    debug.smoothing_offset_len
-                ));
-                ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
-            });
+                    ui.separator();
+                    ui.label(format!("tick: {}", sim_clock.tick));
+                    ui.label(format!("history cap: {}", history.0.capacity()));
+                    ui.label(format!("last correction: {:.4}", debug.last_correction));
+                    ui.label(format!("last replay ticks: {}", debug.last_replay));
+                    ui.label(format!(
+                        "smoothing offset: {:.4}",
+                        debug.smoothing_offset_len
+                    ));
+                    ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
+                });
             debug_ui.show_prediction = prediction_section.fully_open();
 
             if debug_ui.show_performance {
