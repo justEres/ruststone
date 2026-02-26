@@ -2871,7 +2871,11 @@ fn generate_isometric_block_icon(
                 continue;
             };
             rendered_any = true;
-            raster_iso_quad(&mut out, &mut depth, &quad, &tex);
+            let tint = quad
+                .tint_index
+                .and_then(|_| icon_tint_color(block_id, damage))
+                .unwrap_or([255, 255, 255]);
+            raster_iso_quad(&mut out, &mut depth, &quad, &tex, tint);
         }
         if rendered_any {
             return Some(out);
@@ -2887,12 +2891,15 @@ fn generate_isometric_block_icon(
     }
 
     // Guaranteed fallback: render a textured isometric cube so block items are never flat.
-    let top_name = block_texture_name(block_id, BlockFace::Up);
-    let east_name = block_texture_name(block_id, BlockFace::East);
-    let south_name = block_texture_name(block_id, BlockFace::South);
-    let top = load_block_texture(top_name, texture_cache)?;
-    let east = load_block_texture(east_name, texture_cache)?;
-    let south = load_block_texture(south_name, texture_cache)?;
+    let top_name = fallback_block_face_texture(block_id, damage, BlockFace::Up)
+        .unwrap_or_else(|| block_texture_name(block_id, BlockFace::Up).to_string());
+    let east_name = fallback_block_face_texture(block_id, damage, BlockFace::East)
+        .unwrap_or_else(|| block_texture_name(block_id, BlockFace::East).to_string());
+    let south_name = fallback_block_face_texture(block_id, damage, BlockFace::South)
+        .unwrap_or_else(|| block_texture_name(block_id, BlockFace::South).to_string());
+    let top = load_block_texture(&top_name, texture_cache)?;
+    let east = load_block_texture(&east_name, texture_cache)?;
+    let south = load_block_texture(&south_name, texture_cache)?;
     if block_id != 1 && (top_name == "stone.png" || east_name == "stone.png" || south_name == "stone.png")
     {
         if logged_stone_fallback.insert((item_id, damage)) {
@@ -2921,6 +2928,7 @@ fn generate_isometric_block_icon(
                 ],
                 uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 texture_path: format!("blocks/{south_name}"),
+                tint_index: None,
             },
             south,
         ),
@@ -2934,6 +2942,7 @@ fn generate_isometric_block_icon(
                 ],
                 uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 texture_path: format!("blocks/{east_name}"),
+                tint_index: None,
             },
             east,
         ),
@@ -2947,12 +2956,13 @@ fn generate_isometric_block_icon(
                 ],
                 uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
                 texture_path: format!("blocks/{top_name}"),
+                tint_index: None,
             },
             top,
         ),
     ];
     for (quad, tex) in &cube_faces {
-        raster_iso_quad(&mut out, &mut depth, quad, tex);
+        raster_iso_quad(&mut out, &mut depth, quad, tex, [255, 255, 255]);
     }
     Some(out)
 }
@@ -2962,6 +2972,94 @@ fn load_block_texture(
     cache: &mut HashMap<String, Option<egui::ColorImage>>,
 ) -> Option<egui::ColorImage> {
     load_model_texture(&format!("blocks/{name}"), cache)
+}
+
+fn fallback_block_face_texture(block_id: u16, damage: i16, face: BlockFace) -> Option<String> {
+    let meta = damage as u8;
+    let color = |m: u8| -> &'static str {
+        match m & 0xF {
+            0 => "white",
+            1 => "orange",
+            2 => "magenta",
+            3 => "light_blue",
+            4 => "yellow",
+            5 => "lime",
+            6 => "pink",
+            7 => "gray",
+            8 => "silver",
+            9 => "cyan",
+            10 => "purple",
+            11 => "blue",
+            12 => "brown",
+            13 => "green",
+            14 => "red",
+            _ => "black",
+        }
+    };
+    let wood = |m: u8| -> &'static str {
+        match m & 0x7 {
+            1 => "spruce",
+            2 => "birch",
+            3 => "jungle",
+            4 => "acacia",
+            5 => "big_oak",
+            _ => "oak",
+        }
+    };
+    match block_id {
+        35 => Some(format!("wool_colored_{}.png", color(meta))),
+        95 => Some(format!("glass_{}.png", color(meta))),
+        159 => Some(format!("hardened_clay_stained_{}.png", color(meta))),
+        160 => Some(format!("glass_{}.png", color(meta))),
+        171 => Some(format!("wool_colored_{}.png", color(meta))),
+        5 => Some(format!("planks_{}.png", wood(meta))),
+        6 => {
+            let sap = match meta & 0x7 {
+                1 => "sapling_spruce",
+                2 => "sapling_birch",
+                3 => "sapling_jungle",
+                4 => "sapling_acacia",
+                5 => "sapling_roofed_oak",
+                _ => "sapling_oak",
+            };
+            Some(format!("{sap}.png"))
+        }
+        17 => Some(match face {
+            BlockFace::Up | BlockFace::Down => match meta & 0x3 {
+                1 => "log_spruce_top.png".to_string(),
+                2 => "log_birch_top.png".to_string(),
+                3 => "log_jungle_top.png".to_string(),
+                _ => "log_oak_top.png".to_string(),
+            },
+            _ => match meta & 0x3 {
+                1 => "log_spruce.png".to_string(),
+                2 => "log_birch.png".to_string(),
+                3 => "log_jungle.png".to_string(),
+                _ => "log_oak.png".to_string(),
+            },
+        }),
+        18 => Some(match meta & 0x3 {
+            1 => "leaves_spruce.png".to_string(),
+            2 => "leaves_birch.png".to_string(),
+            3 => "leaves_jungle.png".to_string(),
+            _ => "leaves_oak.png".to_string(),
+        }),
+        161 => Some(match meta & 0x1 {
+            1 => "leaves_big_oak.png".to_string(),
+            _ => "leaves_acacia.png".to_string(),
+        }),
+        162 => Some(match face {
+            BlockFace::Up | BlockFace::Down => match meta & 0x1 {
+                1 => "log_big_oak_top.png".to_string(),
+                _ => "log_acacia_top.png".to_string(),
+            },
+            _ => match meta & 0x1 {
+                1 => "log_big_oak.png".to_string(),
+                _ => "log_acacia.png".to_string(),
+            },
+        }),
+        _ => None,
+    }
 }
 
 fn quad_depth(quad: &IconQuad) -> f32 {
@@ -2990,6 +3088,7 @@ fn raster_iso_quad(
     depth: &mut [f32],
     quad: &IconQuad,
     tex: &egui::ColorImage,
+    tint: [u8; 3],
 ) {
     let mut pts = [[0.0f32; 2]; 4];
     let mut z = [0.0f32; 4];
@@ -3013,6 +3112,7 @@ fn raster_iso_quad(
         quad.uv[1],
         quad.uv[2],
         shade,
+        tint,
     );
     raster_textured_triangle(
         dst,
@@ -3028,6 +3128,7 @@ fn raster_iso_quad(
         quad.uv[2],
         quad.uv[3],
         shade,
+        tint,
     );
 }
 
@@ -3086,6 +3187,7 @@ fn raster_textured_triangle(
     uv1: [f32; 2],
     uv2: [f32; 2],
     shade: f32,
+    tint: [u8; 3],
 ) {
     let min_x = p0[0].min(p1[0]).min(p2[0]).floor().max(0.0) as i32;
     let max_x = p0[0]
@@ -3127,14 +3229,38 @@ fn raster_textured_triangle(
                 continue;
             }
             c = egui::Color32::from_rgba_unmultiplied(
-                (f32::from(c.r()) * shade).clamp(0.0, 255.0) as u8,
-                (f32::from(c.g()) * shade).clamp(0.0, 255.0) as u8,
-                (f32::from(c.b()) * shade).clamp(0.0, 255.0) as u8,
+                (f32::from(c.r()) * shade * (f32::from(tint[0]) / 255.0)).clamp(0.0, 255.0) as u8,
+                (f32::from(c.g()) * shade * (f32::from(tint[1]) / 255.0)).clamp(0.0, 255.0) as u8,
+                (f32::from(c.b()) * shade * (f32::from(tint[2]) / 255.0)).clamp(0.0, 255.0) as u8,
                 c.a(),
             );
             dst.pixels[idx] = c;
             depth[idx] = z;
         }
+    }
+}
+
+fn icon_tint_color(block_id: u16, damage: i16) -> Option<[u8; 3]> {
+    // Deterministic inventory/debug tints approximating vanilla biome coloring.
+    // This avoids grayscale foliage/grass in icon views.
+    let meta = damage as u8;
+    match block_id {
+        // Grass family
+        2 | 31 | 59 | 83 => Some([0x7f, 0xb2, 0x38]),
+        // Vines / foliage family
+        106 | 111 | 161 => Some([0x48, 0xb5, 0x18]),
+        18 => Some(match meta & 0x3 {
+            1 => [0x61, 0x99, 0x61], // spruce
+            2 => [0x80, 0xA7, 0x55], // birch
+            _ => [0x48, 0xB5, 0x18], // oak/jungle
+        }),
+        175 => match meta & 0x7 {
+            2 | 3 => Some([0x7f, 0xb2, 0x38]), // double grass / fern
+            _ => None,
+        },
+        // Water-like tint
+        8 | 9 => Some([0x3f, 0x76, 0xe4]),
+        _ => None,
     }
 }
 
