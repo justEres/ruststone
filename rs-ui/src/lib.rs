@@ -2764,6 +2764,8 @@ struct ItemIconCache {
     missing: HashSet<(i32, i16)>,
     block_model_resolver: BlockModelResolver,
     block_texture_images: HashMap<String, Option<egui::ColorImage>>,
+    logged_stone_fallback: HashSet<(i32, i16)>,
+    logged_model_fallback: HashSet<(i32, i16)>,
 }
 
 impl Default for ItemIconCache {
@@ -2773,6 +2775,8 @@ impl Default for ItemIconCache {
             missing: HashSet::new(),
             block_model_resolver: BlockModelResolver::new(default_model_roots()),
             block_texture_images: HashMap::new(),
+            logged_stone_fallback: HashSet::new(),
+            logged_model_fallback: HashSet::new(),
         }
     }
 }
@@ -2801,6 +2805,8 @@ impl ItemIconCache {
             stack.damage,
             &mut self.block_model_resolver,
             &mut self.block_texture_images,
+            &mut self.logged_stone_fallback,
+            &mut self.logged_model_fallback,
         ) {
             let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
             let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
@@ -2842,6 +2848,8 @@ fn generate_isometric_block_icon(
     damage: i16,
     resolver: &mut BlockModelResolver,
     texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
+    logged_stone_fallback: &mut HashSet<(i32, i16)>,
+    logged_model_fallback: &mut HashSet<(i32, i16)>,
 ) -> Option<egui::ColorImage> {
     let block_id = u16::try_from(item_id).ok()?;
     if block_registry_key(block_id).is_none() {
@@ -2868,15 +2876,37 @@ fn generate_isometric_block_icon(
         if rendered_any {
             return Some(out);
         }
+        if logged_model_fallback.insert((item_id, damage)) {
+            eprintln!(
+                "[isometric-debug] model texture fallback id={} meta={} key={:?}",
+                item_id,
+                damage,
+                block_registry_key(block_id)
+            );
+        }
     }
 
     // Guaranteed fallback: render a textured isometric cube so block items are never flat.
     let top_name = block_texture_name(block_id, BlockFace::Up);
-    let west_name = block_texture_name(block_id, BlockFace::West);
+    let east_name = block_texture_name(block_id, BlockFace::East);
     let south_name = block_texture_name(block_id, BlockFace::South);
     let top = load_block_texture(top_name, texture_cache)?;
-    let west = load_block_texture(west_name, texture_cache)?;
+    let east = load_block_texture(east_name, texture_cache)?;
     let south = load_block_texture(south_name, texture_cache)?;
+    if block_id != 1 && (top_name == "stone.png" || east_name == "stone.png" || south_name == "stone.png")
+    {
+        if logged_stone_fallback.insert((item_id, damage)) {
+            eprintln!(
+                "[isometric-debug] stone texture fallback id={} meta={} key={:?} top={} east={} south={}",
+                item_id,
+                damage,
+                block_registry_key(block_id),
+                top_name,
+                east_name,
+                south_name
+            );
+        }
+    }
 
     let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
     let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
@@ -2897,15 +2927,15 @@ fn generate_isometric_block_icon(
         (
             IconQuad {
                 vertices: [
-                    [0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [0.0, 1.0, 1.0],
-                    [0.0, 1.0, 0.0],
+                    [1.0, 0.0, 1.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                    [1.0, 1.0, 1.0],
                 ],
                 uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
-                texture_path: format!("blocks/{west_name}"),
+                texture_path: format!("blocks/{east_name}"),
             },
-            west,
+            east,
         ),
         (
             IconQuad {
@@ -3027,14 +3057,19 @@ fn face_shade(quad: &IconQuad) -> f32 {
         return 1.0;
     }
     let n = [n[0] / len, n[1] / len, n[2] / len];
-    let light = [0.3f32, 0.9f32, 0.3f32];
-    let light_len = (light[0] * light[0] + light[1] * light[1] + light[2] * light[2]).sqrt();
-    let l = [
-        light[0] / light_len,
-        light[1] / light_len,
-        light[2] / light_len,
-    ];
-    (0.45 + 0.55 * (n[0] * l[0] + n[1] * l[1] + n[2] * l[2]).max(0.0)).clamp(0.35, 1.0)
+    if n[1].abs() > 0.8 {
+        return 1.0;
+    }
+    if n[0] > 0.35 {
+        return 0.82;
+    }
+    if n[2] > 0.35 {
+        return 0.66;
+    }
+    if n[0] < -0.35 || n[2] < -0.35 {
+        return 0.58;
+    }
+    0.72
 }
 
 fn raster_textured_triangle(
