@@ -11,12 +11,13 @@ use bevy_egui::{
     egui::{self},
 };
 use rs_render::{
-    AntiAliasingMode, LightingQualityPreset, RenderDebugSettings, ShadowQualityPreset,
+    AntiAliasingMode, BlockModelResolver, IconQuad, LightingQualityPreset, RenderDebugSettings,
+    ShadowQualityPreset, default_model_roots,
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
-    item_max_durability, item_name, item_texture_candidates,
+    block_registry_key, item_max_durability, item_name, item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +25,7 @@ use serde_json::Value;
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
 const INVENTORY_SLOT_SPACING: f32 = 4.0;
 const DEFAULT_OPTIONS_PATH: &str = "ruststone_options.toml";
+const DEBUG_ITEM_CELL: f32 = 52.0;
 
 pub struct UiPlugin;
 
@@ -121,6 +123,13 @@ fn connect_ui(
         }
         if ui_state.chat_open {
             chat.1.clear();
+        }
+    }
+
+    if keys.just_pressed(KeyCode::F8) && !ctx.wants_keyboard_input() {
+        state.debug_items_open = !state.debug_items_open;
+        if state.debug_items_open && state.debug_items.is_empty() {
+            state.debug_items = build_debug_item_list();
         }
     }
 
@@ -304,7 +313,7 @@ fn connect_ui(
         let visible_lines = if ui_state.chat_open { 16 } else { 8 };
         egui::Area::new(egui::Id::new("chat_overlay"))
             .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -16.0))
-            .interactable(false)
+            .interactable(ui_state.chat_open)
             .show(ctx, |ui| {
                 let frame = egui::Frame::new()
                     .fill(egui::Color32::from_black_alpha(96))
@@ -415,7 +424,10 @@ fn connect_ui(
                     .default_open(state.options_section_lighting)
                     .show(ui, |ui| {
                         options_changed |= ui
-                            .checkbox(&mut render_debug.enable_pbr_terrain_lighting, "PBR terrain path")
+                            .checkbox(
+                                &mut render_debug.enable_pbr_terrain_lighting,
+                                "PBR terrain path",
+                            )
                             .changed();
                         options_changed |= ui
                             .checkbox(&mut render_debug.shadows_enabled, "Shadows")
@@ -459,14 +471,20 @@ fn connect_ui(
                             .changed();
                         options_changed |= ui
                             .add(
-                                egui::Slider::new(&mut render_debug.sun_azimuth_deg, -180.0..=180.0)
-                                    .text("Sun azimuth"),
+                                egui::Slider::new(
+                                    &mut render_debug.sun_azimuth_deg,
+                                    -180.0..=180.0,
+                                )
+                                .text("Sun azimuth"),
                             )
                             .changed();
                         options_changed |= ui
                             .add(
-                                egui::Slider::new(&mut render_debug.sun_elevation_deg, -20.0..=89.0)
-                                    .text("Sun elevation"),
+                                egui::Slider::new(
+                                    &mut render_debug.sun_elevation_deg,
+                                    -20.0..=89.0,
+                                )
+                                .text("Sun elevation"),
                             )
                             .changed();
                         options_changed |= ui
@@ -658,8 +676,11 @@ fn connect_ui(
                                 .changed();
                             options_changed |= ui
                                 .add(
-                                    egui::Slider::new(&mut render_debug.water_ssr_stride, 0.2..=8.0)
-                                        .text("SSR step stride"),
+                                    egui::Slider::new(
+                                        &mut render_debug.water_ssr_stride,
+                                        0.2..=8.0,
+                                    )
+                                    .text("SSR step stride"),
                                 )
                                 .changed();
                         }
@@ -763,7 +784,8 @@ fn connect_ui(
                                         &mut window,
                                     ) {
                                         Ok(()) => {
-                                            state.options_status = format!("Loaded {}", options_path);
+                                            state.options_status =
+                                                format!("Loaded {}", options_path);
                                         }
                                         Err(err) => state.options_status = err,
                                     }
@@ -774,10 +796,14 @@ fn connect_ui(
                                 }
                             }
                             if ui.button("Save").clicked() {
-                                match save_client_options(&state.options_path, &state, &render_debug)
-                                {
+                                match save_client_options(
+                                    &state.options_path,
+                                    &state,
+                                    &render_debug,
+                                ) {
                                     Ok(()) => {
-                                        state.options_status = format!("Saved {}", state.options_path);
+                                        state.options_status =
+                                            format!("Saved {}", state.options_path);
                                         state.options_dirty = false;
                                     }
                                     Err(err) => state.options_status = err,
@@ -877,6 +903,10 @@ fn connect_ui(
 
     if matches!(app_state.0, ApplicationState::Connected) && !player_status.dead {
         draw_hotbar_ui(ctx, &inventory_state, &player_status, &mut item_icons);
+    }
+
+    if state.debug_items_open {
+        draw_debug_item_browser(ctx, &mut state, &mut item_icons);
     }
 
     if matches!(app_state.0, ApplicationState::Connected)
@@ -1007,6 +1037,9 @@ pub struct ConnectUiState {
     pub options_section_layers: bool,
     pub options_section_diagnostics: bool,
     pub options_section_system: bool,
+    pub debug_items_open: bool,
+    pub debug_items_filter: String,
+    pub debug_items: Vec<InventoryItemStack>,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
@@ -1031,6 +1064,9 @@ impl Default for ConnectUiState {
             options_section_layers: false,
             options_section_diagnostics: false,
             options_section_system: false,
+            debug_items_open: false,
+            debug_items_filter: String::new(),
+            debug_items: Vec::new(),
         }
     }
 }
@@ -1298,8 +1334,7 @@ fn apply_options(
     render.water_reflection_strength = options.water_reflection_strength.clamp(0.0, 3.0);
     render.water_reflection_near_boost = options.water_reflection_near_boost.clamp(0.0, 1.0);
     render.water_reflection_blue_tint = options.water_reflection_blue_tint;
-    render.water_reflection_tint_strength =
-        options.water_reflection_tint_strength.clamp(0.0, 2.0);
+    render.water_reflection_tint_strength = options.water_reflection_tint_strength.clamp(0.0, 2.0);
     render.water_wave_strength = options.water_wave_strength.clamp(0.0, 1.2);
     render.water_wave_speed = options.water_wave_speed.clamp(0.0, 4.0);
     render.water_wave_detail_strength = options.water_wave_detail_strength.clamp(0.0, 1.0);
@@ -1549,6 +1584,112 @@ fn draw_stat_bar(painter: &egui::Painter, rect: egui::Rect, progress: f32, fill:
     painter.rect_filled(fill_rect, 1.5, fill);
 }
 
+fn build_debug_item_list() -> Vec<InventoryItemStack> {
+    let mut out = Vec::new();
+    for block_id in 1u16..=197u16 {
+        if block_registry_key(block_id).is_none() {
+            continue;
+        }
+        out.push(InventoryItemStack {
+            item_id: block_id as i32,
+            count: 1,
+            damage: 0,
+            meta: Default::default(),
+        });
+    }
+    for item_id in 0i32..=5000i32 {
+        if item_registry_key(item_id).is_none() {
+            continue;
+        }
+        out.push(InventoryItemStack {
+            item_id,
+            count: 1,
+            damage: 0,
+            meta: Default::default(),
+        });
+    }
+    out
+}
+
+fn draw_debug_item_browser(
+    ctx: &egui::Context,
+    state: &mut ConnectUiState,
+    item_icons: &mut ItemIconCache,
+) {
+    egui::Window::new("Debug Item Browser")
+        .open(&mut state.debug_items_open)
+        .resizable(true)
+        .default_width(900.0)
+        .default_height(620.0)
+        .show(ctx, |ui| {
+            if state.debug_items.is_empty() {
+                state.debug_items = build_debug_item_list();
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Filter");
+                ui.text_edit_singleline(&mut state.debug_items_filter);
+                if ui.button("Clear").clicked() {
+                    state.debug_items_filter.clear();
+                }
+                ui.separator();
+                ui.label(format!("Items: {}", state.debug_items.len()));
+            });
+            ui.add_space(6.0);
+
+            let filter = state.debug_items_filter.trim().to_ascii_lowercase();
+            let filtered: Vec<&InventoryItemStack> = state
+                .debug_items
+                .iter()
+                .filter(|stack| {
+                    if filter.is_empty() {
+                        return true;
+                    }
+                    let name = item_name(stack.item_id).to_ascii_lowercase();
+                    let key = item_registry_key(stack.item_id)
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    let id_text = stack.item_id.to_string();
+                    name.contains(&filter) || key.contains(&filter) || id_text.contains(&filter)
+                })
+                .collect();
+
+            let columns = ((ui.available_width() / DEBUG_ITEM_CELL).floor() as usize).max(1);
+            let mut hovered: Option<InventoryItemStack> = None;
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut i = 0usize;
+                while i < filtered.len() {
+                    ui.horizontal(|ui| {
+                        for _ in 0..columns {
+                            if i >= filtered.len() {
+                                break;
+                            }
+                            let stack = filtered[i];
+                            let response = draw_slot(
+                                ctx,
+                                item_icons,
+                                ui,
+                                Some(stack),
+                                false,
+                                DEBUG_ITEM_CELL - 8.0,
+                                false,
+                            );
+                            if response.hovered() {
+                                hovered = Some(stack.clone());
+                            }
+                            i += 1;
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+            });
+
+            if let Some(stack) = hovered.as_ref() {
+                draw_inventory_item_tooltip(ctx, stack);
+            }
+        });
+}
+
 fn equipped_armor_points(inventory_state: &InventoryState) -> i32 {
     let mut points = 0;
     for slot in [5usize, 6usize, 7usize, 8usize] {
@@ -1598,15 +1739,7 @@ fn draw_inventory_grid(
         .clone()
         .filter(|window| window.id != 0)
     {
-        draw_container_inventory_grid(
-            ctx,
-            ui,
-            to_net,
-            keys,
-            inventory_state,
-            item_icons,
-            &window,
-        );
+        draw_container_inventory_grid(ctx, ui, to_net, keys, inventory_state, item_icons, &window);
         return;
     }
 
@@ -1840,7 +1973,12 @@ fn draw_container_inventory_grid(
                 for col in 0..9usize {
                     let player_offset = row * 9 + col;
                     let slot = unique_slots + player_offset;
-                    let item = container_player_slot_item(inventory_state, window.id, unique_slots, player_offset);
+                    let item = container_player_slot_item(
+                        inventory_state,
+                        window.id,
+                        unique_slots,
+                        player_offset,
+                    );
                     let response = draw_slot(
                         ctx,
                         item_icons,
@@ -1880,7 +2018,12 @@ fn draw_container_inventory_grid(
             for hotbar_idx in 0..9usize {
                 let player_offset = 27 + hotbar_idx;
                 let slot = unique_slots + player_offset;
-                let item = container_player_slot_item(inventory_state, window.id, unique_slots, player_offset);
+                let item = container_player_slot_item(
+                    inventory_state,
+                    window.id,
+                    unique_slots,
+                    player_offset,
+                );
                 let selected = inventory_state.selected_hotbar_slot as usize == hotbar_idx;
                 let response = draw_slot(
                     ctx,
@@ -1923,7 +2066,10 @@ fn draw_container_inventory_grid(
     }
 }
 
-fn container_unique_slot_count(inventory_state: &InventoryState, window: &InventoryWindowInfo) -> usize {
+fn container_unique_slot_count(
+    inventory_state: &InventoryState,
+    window: &InventoryWindowInfo,
+) -> usize {
     let declared = window.slot_count as usize;
     let actual_len = inventory_state
         .window_slots
@@ -2003,7 +2149,11 @@ fn container_player_slot_item(
     } else {
         36 + (player_offset - 27)
     };
-    inventory_state.player_slots.get(player_slot).cloned().flatten()
+    inventory_state
+        .player_slots
+        .get(player_slot)
+        .cloned()
+        .flatten()
 }
 
 fn draw_slot(
@@ -2559,8 +2709,13 @@ fn send_inventory_click(
     to_net: &ToNet,
     inventory_state: &mut InventoryState,
 ) {
-    let clicked_item =
-        inventory_state.apply_local_click_window(window_id, window_unique_slots, slot, button, mode);
+    let clicked_item = inventory_state.apply_local_click_window(
+        window_id,
+        window_unique_slots,
+        slot,
+        button,
+        mode,
+    );
     let action_number = inventory_state.next_action_number;
     inventory_state.next_action_number = inventory_state.next_action_number.wrapping_add(1);
     let _ = to_net.0.send(ToNetMessage::ClickWindow {
@@ -2581,10 +2736,23 @@ fn close_open_window_if_needed(to_net: &ToNet, inventory_state: &mut InventorySt
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct ItemIconCache {
     loaded: HashMap<(i32, i16), egui::TextureHandle>,
     missing: HashSet<(i32, i16)>,
+    block_model_resolver: BlockModelResolver,
+    block_texture_images: HashMap<String, Option<egui::ColorImage>>,
+}
+
+impl Default for ItemIconCache {
+    fn default() -> Self {
+        Self {
+            loaded: HashMap::new(),
+            missing: HashSet::new(),
+            block_model_resolver: BlockModelResolver::new(default_model_roots()),
+            block_texture_images: HashMap::new(),
+        }
+    }
 }
 
 impl ItemIconCache {
@@ -2604,6 +2772,18 @@ impl ItemIconCache {
         }
         if self.missing.contains(&key) {
             return None;
+        }
+
+        if let Some(image) = generate_isometric_block_icon(
+            stack.item_id,
+            &mut self.block_model_resolver,
+            &mut self.block_texture_images,
+        ) {
+            let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
+            let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
+            let id = handle.id();
+            self.loaded.insert(key, handle);
+            return Some(id);
         }
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
@@ -2632,6 +2812,168 @@ impl ItemIconCache {
         self.missing.insert(key);
         None
     }
+}
+
+fn generate_isometric_block_icon(
+    item_id: i32,
+    resolver: &mut BlockModelResolver,
+    texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
+) -> Option<egui::ColorImage> {
+    let block_id = u16::try_from(item_id).ok()?;
+    if block_registry_key(block_id).is_none() {
+        return None;
+    }
+
+    let mut quads = resolver.icon_quads(block_id)?;
+    if quads.is_empty() {
+        return None;
+    }
+
+    quads.sort_by(|a, b| {
+        quad_depth(a)
+            .partial_cmp(&quad_depth(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
+    for quad in quads {
+        let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
+            continue;
+        };
+        raster_iso_quad(&mut out, &quad, &tex);
+    }
+    Some(out)
+}
+
+fn quad_depth(quad: &IconQuad) -> f32 {
+    let mut depth = 0.0;
+    for v in &quad.vertices {
+        depth += v[0] + v[1] + v[2];
+    }
+    depth / 4.0
+}
+
+fn load_model_texture(
+    texture_path: &str,
+    cache: &mut HashMap<String, Option<egui::ColorImage>>,
+) -> Option<egui::ColorImage> {
+    if let Some(cached) = cache.get(texture_path) {
+        return cached.clone();
+    }
+    let path = texturepack_textures_root().join(texture_path);
+    let image = load_color_image(&path);
+    cache.insert(texture_path.to_string(), image.clone());
+    image
+}
+
+fn raster_iso_quad(dst: &mut egui::ColorImage, quad: &IconQuad, tex: &egui::ColorImage) {
+    let mut pts = [[0.0f32; 2]; 4];
+    for (i, v) in quad.vertices.iter().enumerate() {
+        pts[i] = project_iso(*v);
+    }
+    let shade = face_shade(quad);
+    raster_textured_triangle(
+        dst, tex, pts[0], pts[1], pts[2], quad.uv[0], quad.uv[1], quad.uv[2], shade,
+    );
+    raster_textured_triangle(
+        dst, tex, pts[0], pts[2], pts[3], quad.uv[0], quad.uv[2], quad.uv[3], shade,
+    );
+}
+
+fn project_iso(v: [f32; 3]) -> [f32; 2] {
+    let x = v[0] - 0.5;
+    let y = v[1] - 0.5;
+    let z = v[2] - 0.5;
+    let sx = (x - z) * 24.0 + 24.0;
+    let sy = ((x + z) * 12.0 - y * 24.0) + 26.0;
+    [sx, sy]
+}
+
+fn face_shade(quad: &IconQuad) -> f32 {
+    let a = quad.vertices[0];
+    let b = quad.vertices[1];
+    let c = quad.vertices[2];
+    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if len <= f32::EPSILON {
+        return 1.0;
+    }
+    let n = [n[0] / len, n[1] / len, n[2] / len];
+    let light = [0.3f32, 0.9f32, 0.3f32];
+    let light_len = (light[0] * light[0] + light[1] * light[1] + light[2] * light[2]).sqrt();
+    let l = [
+        light[0] / light_len,
+        light[1] / light_len,
+        light[2] / light_len,
+    ];
+    (0.45 + 0.55 * (n[0] * l[0] + n[1] * l[1] + n[2] * l[2]).max(0.0)).clamp(0.35, 1.0)
+}
+
+fn raster_textured_triangle(
+    dst: &mut egui::ColorImage,
+    tex: &egui::ColorImage,
+    p0: [f32; 2],
+    p1: [f32; 2],
+    p2: [f32; 2],
+    uv0: [f32; 2],
+    uv1: [f32; 2],
+    uv2: [f32; 2],
+    shade: f32,
+) {
+    let min_x = p0[0].min(p1[0]).min(p2[0]).floor().max(0.0) as i32;
+    let max_x = p0[0]
+        .max(p1[0])
+        .max(p2[0])
+        .ceil()
+        .min((dst.size[0] - 1) as f32) as i32;
+    let min_y = p0[1].min(p1[1]).min(p2[1]).floor().max(0.0) as i32;
+    let max_y = p0[1]
+        .max(p1[1])
+        .max(p2[1])
+        .ceil()
+        .min((dst.size[1] - 1) as f32) as i32;
+    let area = edge_fn(p0, p1, p2);
+    if area.abs() < 1e-5 {
+        return;
+    }
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let p = [x as f32 + 0.5, y as f32 + 0.5];
+            let w0 = edge_fn(p1, p2, p) / area;
+            let w1 = edge_fn(p2, p0, p) / area;
+            let w2 = edge_fn(p0, p1, p) / area;
+            if w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4 {
+                continue;
+            }
+            let u = w0 * uv0[0] + w1 * uv1[0] + w2 * uv2[0];
+            let v = w0 * uv0[1] + w1 * uv1[1] + w2 * uv2[1];
+            let tx = (u.clamp(0.0, 1.0) * (tex.size[0] as f32 - 1.0)).round() as usize;
+            let ty = (v.clamp(0.0, 1.0) * (tex.size[1] as f32 - 1.0)).round() as usize;
+            let mut c = tex.pixels[ty * tex.size[0] + tx];
+            if c.a() == 0 {
+                continue;
+            }
+            c = egui::Color32::from_rgba_unmultiplied(
+                (f32::from(c.r()) * shade).clamp(0.0, 255.0) as u8,
+                (f32::from(c.g()) * shade).clamp(0.0, 255.0) as u8,
+                (f32::from(c.b()) * shade).clamp(0.0, 255.0) as u8,
+                c.a(),
+            );
+            let idx = y as usize * dst.size[0] + x as usize;
+            dst.pixels[idx] = c;
+        }
+    }
+}
+
+fn edge_fn(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+    (c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])
 }
 
 fn texturepack_textures_root() -> PathBuf {
