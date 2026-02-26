@@ -42,13 +42,15 @@ impl BlockModelResolver {
     }
 
     pub fn icon_quads(&mut self, block_id: u16) -> Option<Vec<IconQuad>> {
+        self.icon_quads_for_meta(block_id, 0)
+    }
+
+    pub fn icon_quads_for_meta(&mut self, block_id: u16, meta: u8) -> Option<Vec<IconQuad>> {
         let Some(registry_key) = block_registry_key(block_id) else {
             return None;
         };
-        let name = registry_key
-            .strip_prefix("minecraft:")
-            .unwrap_or(registry_key);
-        let blockstate = self.load_blockstate(name)?;
+        let name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        let blockstate = self.load_blockstate_best(block_id, name, meta)?;
         let model_name = pick_model_name(&blockstate)?;
         let model = self.resolve_model(&model_name, 0)?;
 
@@ -73,6 +75,15 @@ impl BlockModelResolver {
             }
         }
         Some(quads)
+    }
+
+    fn load_blockstate_best(&mut self, block_id: u16, base_name: &str, meta: u8) -> Option<BlockstateFile> {
+        for name in blockstate_name_candidates(block_id, base_name, meta) {
+            if let Some(state) = self.load_blockstate(&name) {
+                return Some(state);
+            }
+        }
+        None
     }
 
     fn resolve_block_face_textures(&mut self, block_id: u16) -> [Option<String>; 6] {
@@ -197,6 +208,187 @@ impl BlockModelResolver {
         }
         None
     }
+}
+
+fn wood_variant(meta: u8) -> &'static str {
+    match meta & 0x7 {
+        1 => "spruce",
+        2 => "birch",
+        3 => "jungle",
+        4 => "acacia",
+        5 => "dark_oak",
+        _ => "oak",
+    }
+}
+
+fn color_variant(meta: u8) -> &'static str {
+    match meta & 0xF {
+        0 => "white",
+        1 => "orange",
+        2 => "magenta",
+        3 => "light_blue",
+        4 => "yellow",
+        5 => "lime",
+        6 => "pink",
+        7 => "gray",
+        8 => "silver",
+        9 => "cyan",
+        10 => "purple",
+        11 => "blue",
+        12 => "brown",
+        13 => "green",
+        14 => "red",
+        _ => "black",
+    }
+}
+
+fn blockstate_name_candidates(block_id: u16, base_name: &str, meta: u8) -> Vec<String> {
+    let mut out = Vec::with_capacity(6);
+    out.push(base_name.to_string());
+    match block_id {
+        1 => {
+            let name = match meta {
+                1 => "granite",
+                2 => "smooth_granite",
+                3 => "diorite",
+                4 => "smooth_diorite",
+                5 => "andesite",
+                6 => "smooth_andesite",
+                _ => "stone",
+            };
+            out.push(name.to_string());
+        }
+        3 => {
+            let name = match meta {
+                1 => "coarse_dirt",
+                2 => "podzol",
+                _ => "dirt",
+            };
+            out.push(name.to_string());
+        }
+        5 => out.push(format!("{}_planks", wood_variant(meta))),
+        6 => out.push(format!("{}_sapling", wood_variant(meta))),
+        12 => out.push(if (meta & 1) == 1 { "red_sand" } else { "sand" }.to_string()),
+        17 => out.push(format!(
+            "{}_log",
+            match meta & 0x3 {
+                1 => "spruce",
+                2 => "birch",
+                3 => "jungle",
+                _ => "oak",
+            }
+        )),
+        18 => out.push(format!(
+            "{}_leaves",
+            match meta & 0x3 {
+                1 => "spruce",
+                2 => "birch",
+                3 => "jungle",
+                _ => "oak",
+            }
+        )),
+        24 => {
+            let name = match meta & 0x3 {
+                1 => "chiseled_sandstone",
+                2 => "smooth_sandstone",
+                _ => "sandstone",
+            };
+            out.push(name.to_string());
+        }
+        35 => out.push(format!("{}_wool", color_variant(meta))),
+        38 => {
+            let name = match meta {
+                1 => "blue_orchid",
+                2 => "allium",
+                3 => "houstonia",
+                4 => "red_tulip",
+                5 => "orange_tulip",
+                6 => "white_tulip",
+                7 => "pink_tulip",
+                8 => "oxeye_daisy",
+                _ => "poppy",
+            };
+            out.push(name.to_string());
+        }
+        43 | 44 => {
+            let name = match meta & 0x7 {
+                1 => "sandstone_slab",
+                2 => "wood_old_slab",
+                3 => "cobblestone_slab",
+                4 => "brick_slab",
+                5 => "stone_brick_slab",
+                6 => "nether_brick_slab",
+                7 => "quartz_slab",
+                _ => "stone_slab",
+            };
+            out.push(name.to_string());
+        }
+        95 => out.push(format!("{}_stained_glass", color_variant(meta))),
+        97 => {
+            let name = match meta {
+                1 => "cobblestone",
+                2 => "stonebrick",
+                3 => "mossy_stonebrick",
+                4 => "cracked_stonebrick",
+                5 => "chiseled_stonebrick",
+                _ => "stone",
+            };
+            out.push(name.to_string());
+        }
+        98 => {
+            let name = match meta {
+                1 => "mossy_stonebrick",
+                2 => "cracked_stonebrick",
+                3 => "chiseled_stonebrick",
+                _ => "stonebrick",
+            };
+            out.push(name.to_string());
+        }
+        126 => out.push(format!("{}_slab", wood_variant(meta))),
+        159 => out.push(format!("{}_stained_hardened_clay", color_variant(meta))),
+        160 => out.push(format!("{}_stained_glass_pane", color_variant(meta))),
+        161 => out.push(format!(
+            "{}_leaves",
+            if (meta & 0x1) == 1 {
+                "dark_oak"
+            } else {
+                "acacia"
+            }
+        )),
+        162 => out.push(format!(
+            "{}_log",
+            if (meta & 0x1) == 1 {
+                "dark_oak"
+            } else {
+                "acacia"
+            }
+        )),
+        171 => out.push(format!("{}_carpet", color_variant(meta))),
+        175 => {
+            let name = match meta & 0x7 {
+                0 => "sunflower",
+                1 => "lilac",
+                2 => "double_tallgrass",
+                3 => "large_fern",
+                4 => "rose_bush",
+                5 => "peony",
+                _ => "sunflower",
+            };
+            out.push(name.to_string());
+        }
+        _ => {}
+    }
+    dedup_keep_order(out)
+}
+
+fn dedup_keep_order(input: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(input.len());
+    for entry in input {
+        if !out.iter().any(|v| v == &entry) {
+            out.push(entry);
+        }
+    }
+    out
 }
 
 fn append_png(mut s: String) -> String {

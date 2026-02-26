@@ -2776,6 +2776,7 @@ impl ItemIconCache {
 
         if let Some(image) = generate_isometric_block_icon(
             stack.item_id,
+            stack.damage,
             &mut self.block_model_resolver,
             &mut self.block_texture_images,
         ) {
@@ -2816,6 +2817,7 @@ impl ItemIconCache {
 
 fn generate_isometric_block_icon(
     item_id: i32,
+    damage: i16,
     resolver: &mut BlockModelResolver,
     texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
 ) -> Option<egui::ColorImage> {
@@ -2824,7 +2826,7 @@ fn generate_isometric_block_icon(
         return None;
     }
 
-    let mut quads = resolver.icon_quads(block_id)?;
+    let mut quads = resolver.icon_quads_for_meta(block_id, damage as u8)?;
     if quads.is_empty() {
         return None;
     }
@@ -2836,11 +2838,12 @@ fn generate_isometric_block_icon(
     });
 
     let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
+    let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
     for quad in quads {
         let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
             continue;
         };
-        raster_iso_quad(&mut out, &quad, &tex);
+        raster_iso_quad(&mut out, &mut depth, &quad, &tex);
     }
     Some(out)
 }
@@ -2866,27 +2869,60 @@ fn load_model_texture(
     image
 }
 
-fn raster_iso_quad(dst: &mut egui::ColorImage, quad: &IconQuad, tex: &egui::ColorImage) {
+fn raster_iso_quad(
+    dst: &mut egui::ColorImage,
+    depth: &mut [f32],
+    quad: &IconQuad,
+    tex: &egui::ColorImage,
+) {
     let mut pts = [[0.0f32; 2]; 4];
+    let mut z = [0.0f32; 4];
     for (i, v) in quad.vertices.iter().enumerate() {
-        pts[i] = project_iso(*v);
+        let [sx, sy, sz] = project_iso(*v);
+        pts[i] = [sx, sy];
+        z[i] = sz;
     }
     let shade = face_shade(quad);
     raster_textured_triangle(
-        dst, tex, pts[0], pts[1], pts[2], quad.uv[0], quad.uv[1], quad.uv[2], shade,
+        dst,
+        depth,
+        tex,
+        pts[0],
+        pts[1],
+        pts[2],
+        z[0],
+        z[1],
+        z[2],
+        quad.uv[0],
+        quad.uv[1],
+        quad.uv[2],
+        shade,
     );
     raster_textured_triangle(
-        dst, tex, pts[0], pts[2], pts[3], quad.uv[0], quad.uv[2], quad.uv[3], shade,
+        dst,
+        depth,
+        tex,
+        pts[0],
+        pts[2],
+        pts[3],
+        z[0],
+        z[2],
+        z[3],
+        quad.uv[0],
+        quad.uv[2],
+        quad.uv[3],
+        shade,
     );
 }
 
-fn project_iso(v: [f32; 3]) -> [f32; 2] {
+fn project_iso(v: [f32; 3]) -> [f32; 3] {
     let x = v[0] - 0.5;
     let y = v[1] - 0.5;
     let z = v[2] - 0.5;
     let sx = (x - z) * 24.0 + 24.0;
     let sy = ((x + z) * 12.0 - y * 24.0) + 26.0;
-    [sx, sy]
+    let sz = x + y + z;
+    [sx, sy, sz]
 }
 
 fn face_shade(quad: &IconQuad) -> f32 {
@@ -2917,10 +2953,14 @@ fn face_shade(quad: &IconQuad) -> f32 {
 
 fn raster_textured_triangle(
     dst: &mut egui::ColorImage,
+    depth: &mut [f32],
     tex: &egui::ColorImage,
     p0: [f32; 2],
     p1: [f32; 2],
     p2: [f32; 2],
+    z0: f32,
+    z1: f32,
+    z2: f32,
     uv0: [f32; 2],
     uv1: [f32; 2],
     uv2: [f32; 2],
@@ -2952,6 +2992,11 @@ fn raster_textured_triangle(
             if w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4 {
                 continue;
             }
+            let z = w0 * z0 + w1 * z1 + w2 * z2;
+            let idx = y as usize * dst.size[0] + x as usize;
+            if z <= depth[idx] {
+                continue;
+            }
             let u = w0 * uv0[0] + w1 * uv1[0] + w2 * uv2[0];
             let v = w0 * uv0[1] + w1 * uv1[1] + w2 * uv2[1];
             let tx = (u.clamp(0.0, 1.0) * (tex.size[0] as f32 - 1.0)).round() as usize;
@@ -2966,8 +3011,8 @@ fn raster_textured_triangle(
                 (f32::from(c.b()) * shade).clamp(0.0, 255.0) as u8,
                 c.a(),
             );
-            let idx = y as usize * dst.size[0] + x as usize;
             dst.pixels[idx] = c;
+            depth[idx] = z;
         }
     }
 }
