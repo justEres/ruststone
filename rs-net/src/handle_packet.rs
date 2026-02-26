@@ -716,6 +716,34 @@ pub fn handle_packet(
                 walking_speed: abilities.walking_speed,
             });
         }
+        Packet::EntityEffect(effect) => {
+            let _ = to_main.send(FromNetMessage::PotionEffect {
+                entity_id: effect.entity_id.0,
+                effect_id: effect.effect_id,
+                amplifier: effect.amplifier,
+                duration_ticks: effect.duration.0,
+            });
+        }
+        Packet::EntityEffect_i32(effect) => {
+            let _ = to_main.send(FromNetMessage::PotionEffect {
+                entity_id: effect.entity_id,
+                effect_id: effect.effect_id,
+                amplifier: effect.amplifier,
+                duration_ticks: i32::from(effect.duration),
+            });
+        }
+        Packet::EntityRemoveEffect(remove) => {
+            let _ = to_main.send(FromNetMessage::PotionEffectRemove {
+                entity_id: remove.entity_id.0,
+                effect_id: remove.effect_id,
+            });
+        }
+        Packet::EntityRemoveEffect_i32(remove) => {
+            let _ = to_main.send(FromNetMessage::PotionEffectRemove {
+                entity_id: remove.entity_id,
+                effect_id: remove.effect_id,
+            });
+        }
         Packet::WindowOpen(open) => {
             let _ = to_main.send(FromNetMessage::Inventory(InventoryMessage::WindowOpen(
                 InventoryWindowInfo {

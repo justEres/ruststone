@@ -11,10 +11,11 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - World/chunk decoding and meshing with async mesh generation.
 - Chunk metadata/state decode kept end-to-end (`id + meta`) and used in render/collision paths.
 - Block texture atlas rendering, water transparency improvements, biome tint support.
-- Dedicated water reflection pass (toggleable) with mirrored world sampling, wave distortion, and skybox-aware reflections.
+- SSR-based water reflections with skybox fallback, wave distortion, and runtime tuning controls.
 - Water reflection tuning controls (strength, near-boost, optional blue tint, wave strength/speed).
 - State-aware texture selection for metadata variants (e.g. acacia/dark-oak logs & leaves, flower variants).
 - Non-cube rendering for slabs and stairs (metadata-driven orientation/half) instead of full-cube fallback.
+- Custom model rendering + collision boxes for common special blocks: farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, and cobble/mossy walls.
 - Manual/engine culling toggles, render distance controls, wireframe and performance overlays.
 
 ### Networking and gameplay loop
@@ -26,6 +27,7 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - Chat, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
 - Local block placement guard prevents placing into the local player collider.
 - Movement collision supports slab/stair shapes and includes vanilla-style step-up (`0.6`) for walking up stairs.
+- Movement collision now includes many custom/non-cube block shapes used in world meshing (not just slab/stair).
 
 ### UI (egui)
 - Connect screen, chat, pause menu, debug menu, death screen.
@@ -33,6 +35,7 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - HUD bars for health, hunger, and experience.
 - Survival inventory/hotbar window scaffolding with server-synced item stacks.
 - Inventory item textures loaded from the client texture pack.
+- Debug overlay can show looked-at block details (position, id/state/meta, model kind, registry key, collision boxes).
 - Inventory interactions implemented for common survival actions:
   - left/right click
   - shift-click
@@ -83,7 +86,7 @@ Legend:
 | `0x10` | `CreativeInventoryAction` | Not implemented |  |
 | `0x11` | `EnchantItem` | Not implemented |  |
 | `0x12` | `SetSign` | Not implemented |  |
-| `0x13` | `ClientAbilities_f32` | Not implemented |  |
+| `0x13` | `ClientAbilities_f32` | Implemented | Flight ability flags/speeds sent when toggled. |
 | `0x14` | `TabComplete_NoAssume` | Not implemented |  |
 | `0x15` | `ClientSettings_u8_Handsfree` | Not implemented |  |
 | `0x16` | `ClientStatus` | Implemented | Respawn action. |
@@ -124,8 +127,8 @@ Legend:
 | `0x1A` | `EntityStatus` | Partial | Hurt animation mapped for common status codes. |
 | `0x1B` | `EntityAttach_leashed` | Not implemented |  |
 | `0x1C` | `EntityMetadata` | Implemented | Parsed for pose flags (sneak) and dropped-item labels from stack metadata. |
-| `0x1D` | `EntityEffect` | Not implemented |  |
-| `0x1E` | `EntityRemoveEffect` | Not implemented |  |
+| `0x1D` | `EntityEffect` | Partial | Speed/Jump Boost applied to local simulation state. |
+| `0x1E` | `EntityRemoveEffect` | Partial | Clears Speed/Jump Boost state for local player. |
 | `0x1F` | `SetExperience` | Implemented | Experience bar / level / total XP sync to HUD state. |
 | `0x20` | `EntityProperties` | Partial | Parsed, ignored. |
 | `0x21` | `ChunkData_NoEntities_u16` | Implemented | Handled via `ChunkData` decode path. |
@@ -152,7 +155,7 @@ Legend:
 | `0x36` | `SignEditorOpen` | Not implemented |  |
 | `0x37` | `Statistics` | Not implemented |  |
 | `0x38` | `PlayerInfo` | Implemented | Name/UUID registry updates. |
-| `0x39` | `PlayerAbilities` | Not implemented |  |
+| `0x39` | `PlayerAbilities` | Implemented | Syncs mayfly/flying + speed values into local status. |
 | `0x3A` | `TabCompleteReply` | Not implemented |  |
 | `0x3B` | `ScoreboardObjective` | Not implemented |  |
 | `0x3C` | `UpdateScore` | Not implemented |  |
@@ -176,8 +179,29 @@ Legend:
 - Dropped item labels currently rely on metadata parsing plus static fallback naming (not full translation/NBT naming parity).
 - Inventory drag-splitting (`mode 5`) not implemented yet.
 - Stair corner shape rendering/collision (inner/outer) is still simplified; straight/top/bottom variants are implemented.
+- Block model/collider coverage is still incomplete for full vanilla parity (many high-impact special cases are now implemented, but not every block/state).
+- Mob rendering coverage is expanded (player, zombie, skeleton, creeper, pig, sheep, cow, enderman), but full vanilla entity set is not done yet.
 - Many play packets are still intentionally unimplemented (see matrix above).
 - Protocol support target is currently `1.8.9` only.
+
+## Shipping Build (Single Binary)
+
+- `bundle_assets` compile feature embeds `rs-client/assets` into the executable and extracts them to a runtime cache directory automatically.
+- Runtime asset lookup is unified via `RUSTSTONE_ASSETS_ROOT` and no longer depends on repo-relative paths.
+- Bevy `dynamic_linking` is disabled in workspace crates so release builds can be shipped as a single executable.
+
+### Build commands
+
+- Linux/macOS shipping build:
+  - `cargo build -p rs-client --release --features bundle_assets`
+- Windows build from Linux (GNU toolchain target):
+  - `rustup target add x86_64-pc-windows-gnu`
+  - install a MinGW-w64 cross linker (`x86_64-w64-mingw32-gcc`)
+  - `cargo build -p rs-client --release --target x86_64-pc-windows-gnu --features bundle_assets`
+
+Notes:
+- `ruststone_options.toml` and Prism `accounts.json` remain external runtime files.
+- For Windows MSVC targets (`x86_64-pc-windows-msvc`) you need the MSVC linker/toolchain (typically from a Windows build environment).
 
 ## Credits and attribution
 

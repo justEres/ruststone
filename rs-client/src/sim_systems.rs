@@ -518,6 +518,11 @@ pub fn fixed_sim_tick_system(
     input_snapshot.can_fly = player_status.can_fly;
     input_snapshot.flying = player_status.flying;
     input_snapshot.flying_speed = player_status.flying_speed;
+    input_snapshot.speed_multiplier = match player_status.speed_effect_amplifier {
+        Some(amplifier) => 1.0 + 0.2 * (f32::from(amplifier) + 1.0),
+        None => 1.0,
+    };
+    input_snapshot.jump_boost_amplifier = player_status.jump_boost_amplifier;
 
     // Vanilla-like sprint state latching:
     // - start requires strong forward input and movement
@@ -1088,6 +1093,22 @@ pub fn world_interaction_system(
             });
         } else if let Some(hit) = block_hit {
             let face = normal_to_face_index(hit.normal);
+            let target_state = collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
+            let target_id = block_state_id(target_state);
+
+            if is_interactable_block(target_id) {
+                let _ = to_net.0.send(ToNetMessage::PlaceBlock {
+                    x: hit.block.x,
+                    y: hit.block.y,
+                    z: hit.block.z,
+                    face: face as i8,
+                    cursor_x: 8,
+                    cursor_y: 8,
+                    cursor_z: 8,
+                });
+                return;
+            }
+
             let place_pos = hit.block + hit.normal;
             if placement_intersects_player(place_pos, sim_state.current.pos) {
                 return;
@@ -1109,6 +1130,22 @@ pub fn world_interaction_system(
             let _ = to_net.0.send(ToNetMessage::UseItem { held_item });
         }
     }
+}
+
+fn is_interactable_block(block_id: u16) -> bool {
+    matches!(
+        block_id,
+        // Containers
+        23 | 54 | 61 | 62 | 84 | 130 | 146 | 154 | 158
+            // Utility blocks
+            | 58 | 116 | 117 | 118 | 120 | 145
+            // Doors, trapdoors, fence gates
+            | 64 | 71 | 96 | 107 | 167 | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197
+            // Buttons/levers
+            | 69 | 77 | 143
+            // Note block
+            | 25
+    )
 }
 
 fn placement_intersects_player(block_pos: IVec3, player_feet: Vec3) -> bool {

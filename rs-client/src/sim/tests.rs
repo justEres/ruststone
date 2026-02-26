@@ -16,6 +16,8 @@ fn input_sequence(len: usize) -> Vec<InputState> {
             can_fly: false,
             flying: false,
             flying_speed: 0.05,
+            speed_multiplier: 1.0,
+            jump_boost_amplifier: None,
             yaw: (i as f32 * 0.01) % 6.28,
             pitch: (i as f32 * 0.005) % 1.5,
         });

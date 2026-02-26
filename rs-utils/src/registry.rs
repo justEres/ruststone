@@ -116,7 +116,7 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
         101 | 102 | 160 => BlockModelKind::Pane,
         50 | 75 | 76 => BlockModelKind::TorchLike,
-        27 | 28 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 139 | 157 | 171
+        27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146 | 157 | 171
         | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => {
             BlockModelKind::Custom
         }
@@ -172,6 +172,16 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
             BlockFace::Down => "planks_oak.png",
             BlockFace::East | BlockFace::West => "crafting_table_front.png",
             _ => "crafting_table_side.png",
+        },
+        54 | 146 => match face {
+            BlockFace::Up => "planks_oak.png",
+            BlockFace::Down => "planks_oak.png",
+            _ => "planks_oak.png",
+        },
+        130 => match face {
+            BlockFace::Up => "obsidian.png",
+            BlockFace::Down => "obsidian.png",
+            _ => "obsidian.png",
         },
         60 => match face {
             BlockFace::Up => "farmland_dry.png",

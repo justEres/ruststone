@@ -16,6 +16,8 @@
 
     - ✅ in f5 / front perspective mode the controls are inverted. always go from cameras perspective when deciding walk direction. 
 
+    - sometimes chunks are missing. 
+
 - Animations:
     - ✅ Block breaking animation
     - ✅ correct break duration aproxximation -> also for eating and so on... 
@@ -25,7 +27,9 @@
     - 🚧 sprinting still feels "different" and more sticky than original minecraft
         - ✅ phase 1: ground friction now uses vanilla-style per-block slipperiness (ice/slime/packed ice)
     - 🚧 must be exactly the same as original minecraft in every aspect. Browse original source code if needed for constants and timing or logic.
-    - same with collision
+    - 🚧 same with collision
+        - ✅ custom block collision boxes added for many non-full blocks (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
+        - ⬜ parity pass for remaining edge cases and per-state corner logic
 - Reach
     - ✅ the range i can click blocks or entitys feels further than original. keep it the same
 
@@ -34,12 +38,17 @@
 
 
 - Potion effects:
-    - at least the ones affecting movement like speed and jump boost  
+    - 🚧 at least the ones affecting movement like speed and jump boost
+        - ✅ server packet handling + local sim multiplier wiring for Speed + Jump Boost
+        - ⬜ exact vanilla parity tuning/edge cases (stacking/timing with other modifiers)
 
 - Inventory, UI:
     - ✅ armor slots
     - ✅ armor bar over hotbar
-    - chests
+    - 🚧 chests
+        - ✅ dynamic chest/container window layout + click routing by window id
+        - ✅ chest blocks are interactable (right-click use path)
+        - 🚧 chest world rendering/collision has a functional placeholder model (refine visuals later)
     - later:
         - crafting
         - smelting
@@ -65,13 +74,20 @@
     - ✅ wavy reflecting(ssr) water
 
 - Rendering in general:
-    - all block models -> doors, fences...
+    - 🚧 all block models -> doors, fences...
+        - ✅ first high-impact custom model batch implemented (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
+        - ⬜ remaining special blocks/states
     - ✅ better antialiasing
 
     - Lods (optional, very late in development, experimental)
 
     - Entitys: 
-        - other animals with animations 
+        - 🚧 other animals with animations
+            - ✅ pig, sheep, cow, creeper, enderman model/scaffold support added (plus existing zombie/skeleton/player)
+            - ⬜ remaining vanilla entity model/animation coverage
+
+- Debugging:
+    - ✅ looked-at block debug info in overlay (pos/id/state/meta/model kind/registry/collision boxes)
 
 - Refactoring:
     - ✅ better plugin management, instead of 1000 systems in main.rs
@@ -84,12 +100,30 @@
     - ✅ use all available threads for bevy scheduler
     - ✅ make timing analysis a compile time feature flag -> no time counting -> more performance
 
+- Networking
+    - implement all packets, ignore some that we dont need yet but at least decode them
+
 <!-- - Debugging: 
     - better timing analysis support -->
 
 - Shipping:
     - tested windows support -> checked it, works
     - bake assets into binary -> whole project single executable + accounts + options files 
+
+- Sounds
+    - implement full directional sound support:
+        - block breaking and placing
+        - steps 
+        - entity sounds -> e.g. animals
+
+- Chat
+    - 🚧 transparent chat in bottom left corner
+        - ✅ basic transparent chat overlay while chat input is closed
+    - 🚧 color and formatting support
+        - ✅ legacy `§` color/style code rendering pass in UI
+        - ⬜ richer JSON chat components / hover / click events
+    - autocomplete for commands with tab
+
 
 - Ideas:
     - wasm support?

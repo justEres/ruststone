@@ -14,6 +14,7 @@ use bevy::render::render_resource::{
 use image::{DynamicImage, ImageBuffer, Rgba, imageops};
 use rs_utils::{
     BlockModelKind, BlockUpdate, ChunkData, block_model_kind, block_state_id, block_state_meta,
+    ruststone_assets_root, texturepack_minecraft_root,
 };
 
 use crate::block_models::{BlockModelResolver, default_model_roots};
@@ -454,7 +455,7 @@ impl FromWorld for ChunkRenderAssets {
 }
 
 fn assets_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rs-client/assets")
+    ruststone_assets_root()
 }
 
 fn texture_root_path() -> PathBuf {
@@ -535,7 +536,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         Some(&mut model_resolver),
     ));
     let biome_tints = Arc::new(BiomeTintResolver::load(
-        &assets_root().join("texturepack/assets/minecraft"),
+        &texturepack_minecraft_root(),
     ));
     (
         bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas)),
@@ -606,7 +607,7 @@ fn is_foliage_tinted_texture(name: &str) -> bool {
     name.starts_with("leaves_") || matches!(name, "vine.png" | "waterlily.png")
 }
 
-fn collect_texture_names(textures_root: &PathBuf) -> Vec<String> {
+fn collect_texture_names(textures_root: &std::path::Path) -> Vec<String> {
     let mut out = Vec::new();
     let Ok(read_dir) = std::fs::read_dir(textures_root) else {
         return out;
@@ -648,7 +649,7 @@ fn bevy_image_from_rgba(img: DynamicImage) -> Image {
 }
 
 fn dump_atlas_debug_images(atlas: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
-    let out_dir = PathBuf::from("rs-client/assets/debug");
+    let out_dir = assets_root().join("debug");
     if fs::create_dir_all(&out_dir).is_err() {
         return;
     }
@@ -1865,6 +1866,20 @@ fn add_custom_block(
         BlockModelKind::Custom => {
             let id = block_type(block_id);
             match id {
+                // Chests / trapped chests / ender chests.
+                54 | 130 | 146 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [1.0 / 16.0, 0.0, 1.0 / 16.0],
+                    [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0],
+                    block_id,
+                    tint,
+                ),
                 60 => add_box(
                     batch,
                     Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
