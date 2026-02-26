@@ -507,7 +507,10 @@ impl InventoryState {
         let mut slots = if window_id == 0 {
             self.player_slots.clone()
         } else {
-            self.window_slots.get(&window_id).cloned().unwrap_or_default()
+            self.window_slots
+                .get(&window_id)
+                .cloned()
+                .unwrap_or_default()
         };
         let mut cursor = self.cursor_item.clone();
 

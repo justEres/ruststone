@@ -116,10 +116,8 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
         101 | 102 | 160 => BlockModelKind::Pane,
         50 | 75 | 76 => BlockModelKind::TorchLike,
-        27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146 | 157 | 171
-        | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => {
-            BlockModelKind::Custom
-        }
+        27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146 | 157
+        | 171 | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => BlockModelKind::Custom,
         _ => BlockModelKind::FullCube,
     }
 }

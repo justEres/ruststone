@@ -5,8 +5,7 @@ use bevy::core_pipeline::{
 };
 use bevy::pbr::{
     CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap,
-    OpaqueRendererMethod,
-    ScreenSpaceAmbientOcclusion,
+    OpaqueRendererMethod, ScreenSpaceAmbientOcclusion,
 };
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
@@ -139,25 +138,31 @@ pub fn lighting_uniform_for_mode(
     let fixed_debug = false;
     let az = settings.sun_azimuth_deg.to_radians();
     let el = settings.sun_elevation_deg.to_radians();
-    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
-        .normalize_or_zero();
+    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero();
     let quality_mode = if fixed_debug {
         0.0
     } else {
         settings.shader_quality_mode.clamp(0, 3) as f32
     };
     AtlasLightingUniform {
-        sun_dir_and_strength: Vec4::new(
-            sun_dir.x,
-            sun_dir.y,
-            sun_dir.z,
-            settings.sun_strength,
-        ),
+        sun_dir_and_strength: Vec4::new(sun_dir.x, sun_dir.y, sun_dir.z, settings.sun_strength),
         ambient_and_fog: Vec4::new(
             settings.ambient_strength,
-            if fixed_debug { 0.0 } else { settings.fog_density },
-            if fixed_debug { 10_000.0 } else { settings.fog_start },
-            if fixed_debug { 10_001.0 } else { settings.fog_end },
+            if fixed_debug {
+                0.0
+            } else {
+                settings.fog_density
+            },
+            if fixed_debug {
+                10_000.0
+            } else {
+                settings.fog_start
+            },
+            if fixed_debug {
+                10_001.0
+            } else {
+                settings.fog_end
+            },
         ),
         quality_and_water: Vec4::new(
             quality_mode,
@@ -181,7 +186,11 @@ pub fn lighting_uniform_for_mode(
             } else {
                 settings.color_brightness
             },
-            if fixed_debug { 1.0 } else { settings.color_gamma },
+            if fixed_debug {
+                1.0
+            } else {
+                settings.color_gamma
+            },
         ),
         water_effects: Vec4::new(
             water_reflection_mode(settings, fixed_debug),
@@ -289,9 +298,7 @@ pub fn apply_lighting_quality(
         settings.enable_pbr_terrain_lighting,
         settings.material_rebuild_nonce,
     );
-    let recreate_materials = last_material_key
-        .map(|k| k != material_key)
-        .unwrap_or(true);
+    let recreate_materials = last_material_key.map(|k| k != material_key).unwrap_or(true);
     *last_material_key = Some(material_key);
 
     if recreate_materials {
@@ -441,8 +448,7 @@ pub fn apply_lighting_quality(
     let is_fancy = uses_shadowed_pbr_path(&settings);
     let az = settings.sun_azimuth_deg.to_radians();
     let el = settings.sun_elevation_deg.to_radians();
-    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin())
-        .normalize_or_zero();
+    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero();
     let sun_travel_dir = -sun_dir;
     ambient.brightness = settings.ambient_brightness;
 
@@ -491,20 +497,25 @@ pub fn update_water_animation(
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
 
     for (handle, pass_mode, force_unlit, alpha_mode) in [
-        (&assets.opaque_material, 0.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Opaque),
         (
-            &assets.cutout_material,
-            2.0,
-            false,
-            cutout_alpha_mode,
+            &assets.opaque_material,
+            0.0,
+            !uses_shadowed_pbr_path(&settings),
+            AlphaMode::Opaque,
         ),
+        (&assets.cutout_material, 2.0, false, cutout_alpha_mode),
         (
             &assets.cutout_culled_material,
             2.0,
             false,
             cutout_alpha_mode,
         ),
-        (&assets.transparent_material, 1.0, !uses_shadowed_pbr_path(&settings), AlphaMode::Blend),
+        (
+            &assets.transparent_material,
+            1.0,
+            !uses_shadowed_pbr_path(&settings),
+            AlphaMode::Blend,
+        ),
     ] {
         if let Some(mat) = materials.get_mut(handle) {
             // Rebuild the full uniform every frame to prevent stale pass specialization
@@ -527,17 +538,16 @@ pub fn update_water_animation(
                 },
                 t,
             );
-            mat.extension.lighting.water_controls =
-                Vec4::new(
-                    settings.water_reflection_strength,
-                    plane_y,
-                    settings.water_reflection_near_boost,
-                    if settings.water_reflection_blue_tint {
-                        settings.water_reflection_tint_strength
-                    } else {
-                        0.0
-                    },
-                );
+            mat.extension.lighting.water_controls = Vec4::new(
+                settings.water_reflection_strength,
+                plane_y,
+                settings.water_reflection_near_boost,
+                if settings.water_reflection_blue_tint {
+                    settings.water_reflection_tint_strength
+                } else {
+                    0.0
+                },
+            );
             mat.extension.lighting.water_extra = Vec4::new(
                 if fixed_debug {
                     0.0
@@ -560,13 +570,12 @@ pub fn update_water_animation(
                     settings.water_reflection_edge_fade
                 },
             );
-            mat.extension.lighting.debug_flags =
-                Vec4::new(
-                    settings.cutout_debug_mode as f32,
-                    settings.water_reflection_sky_fill,
-                    0.0,
-                    0.0,
-                );
+            mat.extension.lighting.debug_flags = Vec4::new(
+                settings.cutout_debug_mode as f32,
+                settings.water_reflection_sky_fill,
+                0.0,
+                0.0,
+            );
             mat.extension.lighting.grass_overlay_info = assets.grass_overlay_info;
             mat.extension.lighting.reflection_view_proj = Mat4::IDENTITY;
         }
@@ -749,7 +758,8 @@ pub fn apply_depth_prepass_for_ssr(
     let Ok((camera_entity, has_depth_prepass)) = camera_query.single() else {
         return;
     };
-    let want_depth_prepass = settings.water_reflections_enabled && settings.water_reflection_screen_space;
+    let want_depth_prepass =
+        settings.water_reflections_enabled && settings.water_reflection_screen_space;
     match (want_depth_prepass, has_depth_prepass.is_some()) {
         (true, false) => {
             commands.entity(camera_entity).insert(DepthPrepass);

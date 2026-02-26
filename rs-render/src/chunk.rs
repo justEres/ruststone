@@ -535,9 +535,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         &name_to_index,
         Some(&mut model_resolver),
     ));
-    let biome_tints = Arc::new(BiomeTintResolver::load(
-        &texturepack_minecraft_root(),
-    ));
+    let biome_tints = Arc::new(BiomeTintResolver::load(&texturepack_minecraft_root()));
     (
         bevy_image_from_rgba(DynamicImage::ImageRgba8(atlas)),
         mapping,
@@ -657,7 +655,8 @@ fn dump_atlas_debug_images(atlas: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
     let atlas_path = out_dir.join("atlas_dump.png");
     let _ = DynamicImage::ImageRgba8(atlas.clone()).save(&atlas_path);
 
-    let mut alpha_img = ImageBuffer::from_pixel(atlas.width(), atlas.height(), Rgba([0, 0, 0, 255]));
+    let mut alpha_img =
+        ImageBuffer::from_pixel(atlas.width(), atlas.height(), Rgba([0, 0, 0, 255]));
     for (src, dst) in atlas.pixels().zip(alpha_img.pixels_mut()) {
         let a = src.0[3];
         *dst = Rgba([a, a, a, 255]);
@@ -992,24 +991,24 @@ fn build_chunk_mesh_greedy(
                     let quads = greedy_mesh_binary_plane(data, 16);
                     for quad in quads {
                         let tint = biome_tints.tint_for_biome(key.tint_key);
-                    add_greedy_quad(
-                        &mut batch,
-                        snapshot,
-                        chunk_x,
-                        chunk_z,
-                        face,
-                        axis as i32,
-                        base_y,
-                        quad,
-                        key.texture_index,
-                        key.block_id,
-                        tint,
-                        voxel_ao_enabled,
-                        voxel_ao_strength,
-                        voxel_ao_cutout,
-                    );
+                        add_greedy_quad(
+                            &mut batch,
+                            snapshot,
+                            chunk_x,
+                            chunk_z,
+                            face,
+                            axis as i32,
+                            base_y,
+                            quad,
+                            key.texture_index,
+                            key.block_id,
+                            tint,
+                            voxel_ao_enabled,
+                            voxel_ao_strength,
+                            voxel_ao_cutout,
+                        );
+                    }
                 }
-            }
             }
         }
     }
@@ -1122,7 +1121,8 @@ fn add_greedy_quad(
     );
     for shade in shades {
         if is_grass_side_face(block_id, face) {
-            data.colors.push([base_color[0], base_color[1], base_color[2], shade]);
+            data.colors
+                .push([base_color[0], base_color[1], base_color[2], shade]);
         } else {
             data.colors.push([
                 base_color[0] * shade,
@@ -1153,7 +1153,6 @@ fn add_greedy_quad(
             base_index + 2,
         ]);
     }
-
 }
 
 fn greedy_mesh_binary_plane(mut data: [u32; 16], size: u32) -> Vec<GreedyQuad> {
@@ -1333,7 +1332,8 @@ fn add_block_faces(
                 voxel_ao_cutout,
             );
             if is_grass_side_face(block_id, face) {
-                data.colors.push([base_color[0], base_color[1], base_color[2], shade]);
+                data.colors
+                    .push([base_color[0], base_color[1], base_color[2], shade]);
             } else {
                 data.colors.push([
                     base_color[0] * shade,
@@ -1355,8 +1355,7 @@ fn add_block_faces(
 }
 
 fn is_grass_side_face(block_state: u16, face: Face) -> bool {
-    block_type(block_state) == 2
-        && !matches!(face, Face::PosY | Face::NegY)
+    block_type(block_state) == 2 && !matches!(face, Face::PosY | Face::NegY)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1471,14 +1470,7 @@ fn add_cross_plant(
         [x0 + 1.0, y0 + 1.0, z0 + 1.0],
         [x0 + 0.0, y0 + 1.0, z0 + 0.0],
     ];
-    add_double_sided_quad(
-        data,
-        a,
-        normal_a,
-        uvs,
-        tile_origin,
-        color,
-    );
+    add_double_sided_quad(data, a, normal_a, uvs, tile_origin, color);
 
     // Plane B: (1,0,0) -> (0,1,1)
     let normal_b = cross_normal_lift(Vec3::new(-1.0, 0.0, 1.0));
@@ -1488,14 +1480,7 @@ fn add_cross_plant(
         [x0 + 0.0, y0 + 1.0, z0 + 1.0],
         [x0 + 1.0, y0 + 1.0, z0 + 0.0],
     ];
-    add_double_sided_quad(
-        data,
-        b,
-        normal_b,
-        uvs,
-        tile_origin,
-        color,
-    );
+    add_double_sided_quad(data, b, normal_b, uvs, tile_origin, color);
 }
 
 fn cross_vegetation_biome_tint(
@@ -2068,8 +2053,10 @@ fn add_custom_block(
                 }
                 // Cobblestone walls (meta 0/1 texture handled via texture mapping).
                 139 => {
-                    let connect_east = wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x + 1, y, z));
-                    let connect_west = wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x - 1, y, z));
+                    let connect_east =
+                        wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x + 1, y, z));
+                    let connect_west =
+                        wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x - 1, y, z));
                     let connect_south =
                         wall_connects_to(block_at(snapshot, chunk_x, chunk_z, x, y, z + 1));
                     let connect_north =

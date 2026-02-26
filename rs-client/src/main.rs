@@ -1,13 +1,15 @@
+use bevy::asset::AssetPlugin;
 use bevy::window::PresentMode;
 use bevy::{log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
 use rs_render::RenderPlugin;
 use rs_ui::{ConnectUiState, UiPlugin};
-use rs_utils::{ApplicationState, AuthMode, FromNet, ToNet};
+use rs_utils::{ApplicationState, AuthMode, FromNet, RUSTSTONE_ASSETS_ROOT_ENV, ToNet};
 use rs_utils::{FromNetMessage, ToNetMessage};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+mod embedded_assets;
 mod entities;
 mod entity_model;
 mod inventory_systems;
@@ -70,6 +72,18 @@ fn main() {
         .init();
 
     info!("Starting ruststone");
+    let assets_root = match embedded_assets::resolve_runtime_assets_root() {
+        Ok(path) => path,
+        Err(err) => {
+            warn!("failed to resolve runtime assets root: {}", err);
+            rs_utils::ruststone_assets_root()
+        }
+    };
+    // Safe because this runs before spawning worker threads.
+    unsafe {
+        std::env::set_var(RUSTSTONE_ASSETS_ROOT_ENV, assets_root.as_os_str());
+    }
+
     let thread_count = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
@@ -115,6 +129,10 @@ fn main() {
                         present_mode: PresentMode::AutoNoVsync,
                         ..Default::default()
                     }),
+                    ..Default::default()
+                })
+                .set(AssetPlugin {
+                    file_path: assets_root.to_string_lossy().into_owned(),
                     ..Default::default()
                 })
                 .build()
