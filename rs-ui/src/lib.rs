@@ -17,7 +17,8 @@ use rs_render::{
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
-    block_registry_key, item_max_durability, item_name, item_registry_key, item_texture_candidates,
+    BlockFace, block_registry_key, block_texture_name, item_max_durability, item_name,
+    item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1590,12 +1591,14 @@ fn build_debug_item_list() -> Vec<InventoryItemStack> {
         if block_registry_key(block_id).is_none() {
             continue;
         }
-        out.push(InventoryItemStack {
-            item_id: block_id as i32,
-            count: 1,
-            damage: 0,
-            meta: Default::default(),
-        });
+        for damage in debug_block_meta_variants(block_id) {
+            out.push(InventoryItemStack {
+                item_id: block_id as i32,
+                count: 1,
+                damage,
+                meta: Default::default(),
+            });
+        }
     }
     for item_id in 0i32..=5000i32 {
         if item_registry_key(item_id).is_none() {
@@ -1607,6 +1610,25 @@ fn build_debug_item_list() -> Vec<InventoryItemStack> {
             damage: 0,
             meta: Default::default(),
         });
+    }
+    out
+}
+
+fn debug_block_meta_variants(block_id: u16) -> Vec<i16> {
+    let metas: &[i16] = match block_id {
+        1 | 3 | 6 | 12 | 17 | 18 | 24 | 35 | 38 | 43 | 44 | 95 | 97 | 98 | 126 | 159 | 160
+        | 161 | 162 | 171 | 175 => &[0, 1, 2, 3, 4, 5, 6, 7],
+        _ => &[0],
+    };
+    let mut out = Vec::new();
+    for &m in metas {
+        out.push(m);
+    }
+    if matches!(block_id, 35 | 95 | 159 | 160 | 171) {
+        out.clear();
+        for m in 0..=15i16 {
+            out.push(m);
+        }
     }
     out
 }
@@ -2826,26 +2848,90 @@ fn generate_isometric_block_icon(
         return None;
     }
 
-    let mut quads = resolver.icon_quads_for_meta(block_id, damage as u8)?;
-    if quads.is_empty() {
-        return None;
+    if let Some(mut quads) = resolver.icon_quads_for_meta(block_id, damage as u8) {
+        quads.sort_by(|a, b| {
+            quad_depth(a)
+                .partial_cmp(&quad_depth(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
+        let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
+        let mut rendered_any = false;
+        for quad in quads {
+            let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
+                continue;
+            };
+            rendered_any = true;
+            raster_iso_quad(&mut out, &mut depth, &quad, &tex);
+        }
+        if rendered_any {
+            return Some(out);
+        }
     }
 
-    quads.sort_by(|a, b| {
-        quad_depth(a)
-            .partial_cmp(&quad_depth(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Guaranteed fallback: render a textured isometric cube so block items are never flat.
+    let top_name = block_texture_name(block_id, BlockFace::Up);
+    let west_name = block_texture_name(block_id, BlockFace::West);
+    let south_name = block_texture_name(block_id, BlockFace::South);
+    let top = load_block_texture(top_name, texture_cache)?;
+    let west = load_block_texture(west_name, texture_cache)?;
+    let south = load_block_texture(south_name, texture_cache)?;
 
     let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
     let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
-    for quad in quads {
-        let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
-            continue;
-        };
-        raster_iso_quad(&mut out, &mut depth, &quad, &tex);
+    let cube_faces = [
+        (
+            IconQuad {
+                vertices: [
+                    [0.0, 0.0, 1.0],
+                    [1.0, 0.0, 1.0],
+                    [1.0, 1.0, 1.0],
+                    [0.0, 1.0, 1.0],
+                ],
+                uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                texture_path: format!("blocks/{south_name}"),
+            },
+            south,
+        ),
+        (
+            IconQuad {
+                vertices: [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [0.0, 1.0, 1.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                texture_path: format!("blocks/{west_name}"),
+            },
+            west,
+        ),
+        (
+            IconQuad {
+                vertices: [
+                    [0.0, 1.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                    [1.0, 1.0, 1.0],
+                    [0.0, 1.0, 1.0],
+                ],
+                uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                texture_path: format!("blocks/{top_name}"),
+            },
+            top,
+        ),
+    ];
+    for (quad, tex) in &cube_faces {
+        raster_iso_quad(&mut out, &mut depth, quad, tex);
     }
     Some(out)
+}
+
+fn load_block_texture(
+    name: &str,
+    cache: &mut HashMap<String, Option<egui::ColorImage>>,
+) -> Option<egui::ColorImage> {
+    load_model_texture(&format!("blocks/{name}"), cache)
 }
 
 fn quad_depth(quad: &IconQuad) -> f32 {
