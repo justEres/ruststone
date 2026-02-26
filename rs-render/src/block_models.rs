@@ -13,6 +13,7 @@ pub struct IconQuad {
     pub vertices: [[f32; 3]; 4],
     pub uv: [[f32; 2]; 4],
     pub texture_path: String,
+    pub tint_index: Option<u8>,
 }
 
 #[derive(Default)]
@@ -71,6 +72,7 @@ impl BlockModelResolver {
                     vertices,
                     uv: face_uvs(face),
                     texture_path: append_png(texture_path),
+                    tint_index: face.tintindex.map(|v| v as u8),
                 });
             }
         }
@@ -625,6 +627,8 @@ struct ModelElement {
 #[derive(Debug, Clone, Deserialize)]
 struct ModelFace {
     texture: String,
+    #[serde(default)]
+    tintindex: Option<i32>,
     #[serde(default)]
     uv: Option<[f32; 4]>,
     #[serde(default)]
