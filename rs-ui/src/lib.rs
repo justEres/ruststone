@@ -1699,7 +1699,7 @@ fn draw_debug_item_browser(
                                 Some(stack),
                                 false,
                                 DEBUG_ITEM_CELL - 8.0,
-                                false,
+                                true,
                             );
                             if response.hovered() {
                                 hovered = Some(stack.clone());
@@ -2985,14 +2985,17 @@ fn generate_isometric_block_icon(
     // Guaranteed fallback: render a textured isometric cube so block items are never flat.
     let top_name = resolver
         .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosY)
+        .filter(|name| !(block_id != 1 && name == "stone.png"))
         .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::Up))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::Up).to_string());
     let east_name = resolver
         .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosX)
+        .filter(|name| !(block_id != 1 && name == "stone.png"))
         .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::East))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::East).to_string());
     let south_name = resolver
         .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosZ)
+        .filter(|name| !(block_id != 1 && name == "stone.png"))
         .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::South))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::South).to_string());
     let top = load_block_texture(&top_name, texture_cache)?;
@@ -3113,6 +3116,95 @@ fn fallback_block_face_texture(block_id: u16, damage: i16, face: BlockFace) -> O
         }
     };
     match block_id {
+        8 | 9 => Some("water_still.png".to_string()),
+        10 | 11 => Some("lava_still.png".to_string()),
+        23 => Some(match face {
+            BlockFace::Up | BlockFace::Down => "furnace_top.png".to_string(),
+            BlockFace::South => "dispenser_front_horizontal.png".to_string(),
+            _ => "furnace_side.png".to_string(),
+        }),
+        26 => Some("bed_feet_top.png".to_string()),
+        29 => Some(match face {
+            BlockFace::Up | BlockFace::Down => "piston_top_sticky.png".to_string(),
+            _ => "piston_side.png".to_string(),
+        }),
+        30 => Some("web.png".to_string()),
+        31 => Some(if (meta & 0x3) == 2 { "fern.png" } else { "tallgrass.png" }.to_string()),
+        32 => Some("deadbush.png".to_string()),
+        33 => Some(match face {
+            BlockFace::Up => "piston_top_normal.png".to_string(),
+            BlockFace::Down => "piston_bottom.png".to_string(),
+            _ => "piston_side.png".to_string(),
+        }),
+        34 | 36 => Some("piston_top_normal.png".to_string()),
+        37 => Some("flower_dandelion.png".to_string()),
+        38 => Some(match meta {
+            1 => "flower_blue_orchid.png".to_string(),
+            2 => "flower_allium.png".to_string(),
+            3 => "flower_houstonia.png".to_string(),
+            4 => "flower_tulip_red.png".to_string(),
+            5 => "flower_tulip_orange.png".to_string(),
+            6 => "flower_tulip_white.png".to_string(),
+            7 => "flower_tulip_pink.png".to_string(),
+            8 => "flower_oxeye_daisy.png".to_string(),
+            _ => "flower_rose.png".to_string(),
+        }),
+        39 => Some("mushroom_brown.png".to_string()),
+        40 => Some("mushroom_red.png".to_string()),
+        43 | 44 => Some(match meta & 0x7 {
+            1 => "sandstone_normal.png".to_string(),
+            2 => "planks_oak.png".to_string(),
+            3 => "cobblestone.png".to_string(),
+            4 => "brick.png".to_string(),
+            5 => "stonebrick.png".to_string(),
+            6 => "nether_brick.png".to_string(),
+            7 => "quartz_block_side.png".to_string(),
+            _ => "stone.png".to_string(),
+        }),
+        50 | 75 | 76 => Some("torch_on.png".to_string()),
+        51 => Some("fire_layer_0.png".to_string()),
+        55 => Some("redstone_dust_line0.png".to_string()),
+        59 => Some("wheat_stage_0.png".to_string()),
+        63 | 68 => Some("planks_oak.png".to_string()),
+        69 => Some("lever.png".to_string()),
+        74 => Some("redstone_ore.png".to_string()),
+        83 => Some("reeds.png".to_string()),
+        90 => Some("portal.png".to_string()),
+        92 => Some("cake_top.png".to_string()),
+        93 | 94 => Some("repeater_off_south.png".to_string()),
+        101 => Some("iron_bars.png".to_string()),
+        102 => Some("glass.png".to_string()),
+        104 => Some("pumpkin_stem_disconnected.png".to_string()),
+        105 => Some("melon_stem_disconnected.png".to_string()),
+        106 => Some("vine.png".to_string()),
+        111 => Some("waterlily.png".to_string()),
+        115 => Some("nether_wart_stage_0.png".to_string()),
+        117 => Some("brewing_stand_base.png".to_string()),
+        118 => Some("cauldron_top.png".to_string()),
+        119 => Some("endframe_top.png".to_string()),
+        127 => Some("cocoa_stage_0.png".to_string()),
+        131 => Some("trip_wire_source.png".to_string()),
+        132 => Some("trip_wire.png".to_string()),
+        140 => Some("flower_pot.png".to_string()),
+        141 => Some("carrots_stage_0.png".to_string()),
+        142 => Some("potatoes_stage_0.png".to_string()),
+        144 => Some("skeleton_skull.png".to_string()),
+        145 => Some("anvil_top_damaged_0.png".to_string()),
+        149 | 150 => Some("comparator_off.png".to_string()),
+        154 => Some("hopper_top.png".to_string()),
+        166 => Some("barrier.png".to_string()),
+        175 => Some("double_plant_sunflower_bottom.png".to_string()),
+        176 | 177 => Some("wool_colored_white.png".to_string()),
+        178 => Some("daylight_detector_top.png".to_string()),
+        181 | 182 => Some(match meta & 0x7 {
+            1 => "red_sandstone_top.png".to_string(),
+            _ => "red_sandstone_normal.png".to_string(),
+        }),
+        193 => Some("door_spruce_lower.png".to_string()),
+        194 => Some("door_birch_lower.png".to_string()),
+        195 => Some("door_jungle_lower.png".to_string()),
+        196 => Some("door_acacia_lower.png".to_string()),
+        197 => Some("door_dark_oak_lower.png".to_string()),
         35 => Some(format!("wool_colored_{}.png", color(meta))),
         95 => Some(format!("glass_{}.png", color(meta))),
         159 => Some(format!("hardened_clay_stained_{}.png", color(meta))),
