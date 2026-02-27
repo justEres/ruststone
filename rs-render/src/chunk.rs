@@ -1135,6 +1135,7 @@ struct GreedyKey {
     texture_index: u16,
     block_id: u16,
     tint_key: u8,
+    shade_key: u16,
 }
 
 #[derive(Debug)]
@@ -1248,6 +1249,19 @@ fn build_chunk_mesh_greedy(
                             texture_index,
                             block_id,
                             tint_key,
+                            shade_key: face_shade_signature(
+                                snapshot,
+                                chunk_x,
+                                chunk_z,
+                                x,
+                                base_y + y,
+                                z,
+                                face,
+                                block_id,
+                                voxel_ao_enabled,
+                                voxel_ao_strength,
+                                voxel_ao_cutout,
+                            ),
                         };
 
                         let (axis, u, v) = match face {
@@ -3073,6 +3087,87 @@ fn light_factor_from_level(level: f32) -> f32 {
     (0.18 + (level / 15.0) * 0.82).clamp(0.0, 1.0)
 }
 
+fn quantize_shade_4bit(shade: f32) -> u16 {
+    (shade.clamp(0.0, 1.0) * 15.0).round() as u16
+}
+
+fn face_vertices(face: Face) -> [[f32; 3]; 4] {
+    match face {
+        Face::PosX => [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ],
+        Face::NegX => [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+        ],
+        Face::PosY => [
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ],
+        Face::NegY => [
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ],
+        Face::PosZ => [
+            [1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ],
+        Face::NegZ => [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn face_shade_signature(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    block_id: u16,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
+) -> u16 {
+    let verts = face_vertices(face);
+    let mut packed = 0u16;
+    for (idx, vert) in verts.into_iter().enumerate() {
+        let shade = compute_vertex_shade(
+            snapshot,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            face,
+            vert,
+            block_id,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
+        );
+        packed |= quantize_shade_4bit(shade) << (idx * 4);
+    }
+    packed
+}
+
 fn can_apply_vertex_shading(block_id: u16, voxel_ao_cutout: bool) -> bool {
     match render_group_for_block(block_id) {
         MaterialGroup::Opaque => true,
@@ -3320,8 +3415,26 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
     }
     if matches!(
         id,
-        26 | 27 | 28 | 51 | 63 | 64 | 65 | 66 | 68 | 69 | 71 | 96 | 140 | 144 | 157 | 166
-            | 193 | 194 | 195 | 196 | 197
+        26 | 27
+            | 28
+            | 51
+            | 63
+            | 64
+            | 65
+            | 66
+            | 68
+            | 69
+            | 71
+            | 96
+            | 140
+            | 144
+            | 157
+            | 166
+            | 193
+            | 194
+            | 195
+            | 196
+            | 197
     ) {
         return MaterialGroup::Cutout;
     }
