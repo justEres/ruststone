@@ -11,15 +11,14 @@ use bevy_egui::{
     egui::{self},
 };
 use rs_render::{
-    AntiAliasingMode, BlockModelResolver, IconQuad, LightingQualityPreset, RenderDebugSettings,
-    ModelFace, ShadowQualityPreset, default_model_roots,
+    AntiAliasingMode, BlockModelResolver, IconQuad, LightingQualityPreset, ModelFace,
+    RenderDebugSettings, ShadowQualityPreset, default_model_roots,
 };
 use rs_utils::{
-    AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
-    InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
-    BlockFace, BlockModelKind, block_model_kind, block_registry_key, block_texture_name,
-    item_max_durability, item_name,
-    item_registry_key, item_texture_candidates,
+    AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,
+    InventoryItemStack, InventoryState, InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet,
+    ToNetMessage, UiState, block_model_kind, block_registry_key, block_texture_name,
+    item_max_durability, item_name, item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -325,7 +324,11 @@ fn connect_ui(
         } else {
             16.6667
         };
-        let fps = if frame_ms > 0.0 { 1000.0 / frame_ms } else { 0.0 };
+        let fps = if frame_ms > 0.0 {
+            1000.0 / frame_ms
+        } else {
+            0.0
+        };
         fps_overlay.elapsed_s += (frame_ms / 1000.0) as f64;
         let now = fps_overlay.elapsed_s;
         fps_overlay.samples.push((now, fps));
@@ -364,7 +367,11 @@ fn connect_ui(
                     .inner_margin(egui::Margin::same(8))
                     .corner_radius(4.0);
                 frame.show(ui, |ui| {
-                    ui.label(egui::RichText::new(format!("FPS: {:.0}", fps)).color(fps_color).strong());
+                    ui.label(
+                        egui::RichText::new(format!("FPS: {:.0}", fps))
+                            .color(fps_color)
+                            .strong(),
+                    );
                     ui.label(
                         egui::RichText::new(format!("1s avg: {:.1}", avg_1s))
                             .color(egui::Color32::from_gray(220)),
@@ -474,6 +481,36 @@ fn connect_ui(
                         options_changed |= ui
                             .checkbox(&mut render_debug.occlusion_cull_enabled, "Occlusion cull")
                             .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.use_greedy_meshing,
+                                "Binary greedy meshing",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.wireframe_enabled, "Wireframe")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.barrier_billboard,
+                                "Barriers as billboard sprites",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.render_held_items, "Render held items")
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.render_first_person_arms,
+                                "Render first-person arms",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.render_self_model, "Render self model")
+                            .changed();
                         if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
                             options_changed = true;
                             if let Ok(mut window) = window_query.get_single_mut() {
@@ -558,6 +595,18 @@ fn connect_ui(
                             .add(
                                 egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
                                     .text("Sun strength"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.sun_warmth, 0.0..=1.0)
+                                    .text("Sun warmth"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.shadow_opacity, 0.0..=1.0)
+                                    .text("Shadow opacity"),
                             )
                             .changed();
                         options_changed |= ui
@@ -754,33 +803,6 @@ fn connect_ui(
                     });
                 state.options_section_water = water_section.fully_open();
 
-                let layers_section = egui::CollapsingHeader::new("Render Layers")
-                    .default_open(state.options_section_layers)
-                    .show(ui, |ui| {
-                        options_changed |= ui
-                            .checkbox(&mut render_debug.show_layer_entities, "Show entities layer")
-                            .changed();
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.show_layer_chunks_opaque,
-                                "Show opaque chunks layer",
-                            )
-                            .changed();
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.show_layer_chunks_cutout,
-                                "Show cutout chunks layer",
-                            )
-                            .changed();
-                        options_changed |= ui
-                            .checkbox(
-                                &mut render_debug.show_layer_chunks_transparent,
-                                "Show transparent chunks layer",
-                            )
-                            .changed();
-                    });
-                state.options_section_layers = layers_section.fully_open();
-
                 let diagnostics_section = egui::CollapsingHeader::new("Diagnostics")
                     .default_open(state.options_section_diagnostics)
                     .show(ui, |ui| {
@@ -815,6 +837,31 @@ fn connect_ui(
                         if selected_debug_mode != render_debug.cutout_debug_mode {
                             render_debug.cutout_debug_mode = selected_debug_mode;
                             options_changed = true;
+                        }
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug")
+                            .changed();
+                        if render_debug.frustum_fov_debug {
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.frustum_fov_deg,
+                                        30.0..=140.0,
+                                    )
+                                    .text("Frustum FOV"),
+                                )
+                                .changed();
+                        }
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.show_chunk_borders, "Show chunk borders")
+                            .changed();
+                        ui.add_space(8.0);
+                        if ui.button("Force remesh chunks").clicked() {
+                            render_debug.force_remesh = true;
+                        }
+                        if ui.button("Rebuild render materials").clicked() {
+                            render_debug.material_rebuild_nonce =
+                                render_debug.material_rebuild_nonce.wrapping_add(1);
                         }
                     });
                 state.options_section_diagnostics = diagnostics_section.fully_open();
@@ -1101,7 +1148,6 @@ pub struct ConnectUiState {
     pub options_section_general: bool,
     pub options_section_lighting: bool,
     pub options_section_water: bool,
-    pub options_section_layers: bool,
     pub options_section_diagnostics: bool,
     pub options_section_system: bool,
     pub debug_items_open: bool,
@@ -1128,7 +1174,6 @@ impl Default for ConnectUiState {
             options_section_general: false,
             options_section_lighting: false,
             options_section_water: false,
-            options_section_layers: false,
             options_section_diagnostics: false,
             options_section_system: false,
             debug_items_open: false,
@@ -1149,7 +1194,15 @@ struct ClientOptionsFile {
     pub aa_mode: String,
     pub manual_frustum_cull: bool,
     pub occlusion_cull_enabled: bool,
+    pub frustum_fov_debug: bool,
+    pub frustum_fov_deg: f32,
     pub vsync_enabled: bool,
+    pub use_greedy_meshing: bool,
+    pub wireframe_enabled: bool,
+    pub render_held_items: bool,
+    pub render_first_person_arms: bool,
+    pub render_self_model: bool,
+    pub show_chunk_borders: bool,
     pub lighting_quality: String,
     pub shadow_quality: String,
     pub shader_quality_mode: u8,
@@ -1157,6 +1210,8 @@ struct ClientOptionsFile {
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
     pub sun_strength: f32,
+    pub sun_warmth: f32,
+    pub shadow_opacity: f32,
     pub ambient_strength: f32,
     pub ambient_brightness: f32,
     pub sun_illuminance: f32,
@@ -1216,7 +1271,15 @@ impl Default for ClientOptionsFile {
             aa_mode: render.aa_mode.as_options_value().to_string(),
             manual_frustum_cull: render.manual_frustum_cull,
             occlusion_cull_enabled: render.occlusion_cull_enabled,
+            frustum_fov_debug: render.frustum_fov_debug,
+            frustum_fov_deg: render.frustum_fov_deg,
             vsync_enabled: false,
+            use_greedy_meshing: render.use_greedy_meshing,
+            wireframe_enabled: render.wireframe_enabled,
+            render_held_items: render.render_held_items,
+            render_first_person_arms: render.render_first_person_arms,
+            render_self_model: render.render_self_model,
+            show_chunk_borders: render.show_chunk_borders,
             lighting_quality: render.lighting_quality.as_options_value().to_string(),
             shadow_quality: render.shadow_quality.as_options_value().to_string(),
             shader_quality_mode: render.shader_quality_mode,
@@ -1224,6 +1287,8 @@ impl Default for ClientOptionsFile {
             sun_azimuth_deg: render.sun_azimuth_deg,
             sun_elevation_deg: render.sun_elevation_deg,
             sun_strength: render.sun_strength,
+            sun_warmth: render.sun_warmth,
+            shadow_opacity: render.shadow_opacity,
             ambient_strength: render.ambient_strength,
             ambient_brightness: render.ambient_brightness,
             sun_illuminance: render.sun_illuminance,
@@ -1283,7 +1348,15 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         aa_mode: render.aa_mode.as_options_value().to_string(),
         manual_frustum_cull: render.manual_frustum_cull,
         occlusion_cull_enabled: render.occlusion_cull_enabled,
+        frustum_fov_debug: render.frustum_fov_debug,
+        frustum_fov_deg: render.frustum_fov_deg,
         vsync_enabled: state.vsync_enabled,
+        use_greedy_meshing: render.use_greedy_meshing,
+        wireframe_enabled: render.wireframe_enabled,
+        render_held_items: render.render_held_items,
+        render_first_person_arms: render.render_first_person_arms,
+        render_self_model: render.render_self_model,
+        show_chunk_borders: render.show_chunk_borders,
         lighting_quality: render.lighting_quality.as_options_value().to_string(),
         shadow_quality: render.shadow_quality.as_options_value().to_string(),
         shader_quality_mode: render.shader_quality_mode,
@@ -1291,6 +1364,8 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         sun_azimuth_deg: render.sun_azimuth_deg,
         sun_elevation_deg: render.sun_elevation_deg,
         sun_strength: render.sun_strength,
+        sun_warmth: render.sun_warmth,
+        shadow_opacity: render.shadow_opacity,
         ambient_strength: render.ambient_strength,
         ambient_brightness: render.ambient_brightness,
         sun_illuminance: render.sun_illuminance,
@@ -1373,10 +1448,20 @@ fn apply_options(
     );
     render.manual_frustum_cull = options.manual_frustum_cull;
     render.occlusion_cull_enabled = options.occlusion_cull_enabled;
+    render.frustum_fov_debug = options.frustum_fov_debug;
+    render.frustum_fov_deg = options.frustum_fov_deg.clamp(30.0, 140.0);
+    render.use_greedy_meshing = options.use_greedy_meshing;
+    render.wireframe_enabled = options.wireframe_enabled;
+    render.render_held_items = options.render_held_items;
+    render.render_first_person_arms = options.render_first_person_arms;
+    render.render_self_model = options.render_self_model;
+    render.show_chunk_borders = options.show_chunk_borders;
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
     render.sun_azimuth_deg = options.sun_azimuth_deg.clamp(-360.0, 360.0);
     render.sun_elevation_deg = options.sun_elevation_deg.clamp(-89.0, 89.0);
     render.sun_strength = options.sun_strength.clamp(0.0, 2.0);
+    render.sun_warmth = options.sun_warmth.clamp(0.0, 1.0);
+    render.shadow_opacity = options.shadow_opacity.clamp(0.0, 1.0);
     render.ambient_strength = options.ambient_strength.clamp(0.0, 2.0);
     render.ambient_brightness = options.ambient_brightness.clamp(0.0, 2.0);
     render.sun_illuminance = options.sun_illuminance.clamp(0.0, 50_000.0);
@@ -2920,9 +3005,12 @@ impl ItemIconCache {
             .ok()
             .and_then(block_registry_key)
             .is_some();
-        let prefer_flat_block_icon = u16::try_from(stack.item_id)
-            .ok()
-            .is_some_and(|id| matches!(block_model_kind(id), BlockModelKind::Cross | BlockModelKind::TorchLike));
+        let prefer_flat_block_icon = u16::try_from(stack.item_id).ok().is_some_and(|id| {
+            matches!(
+                block_model_kind(id),
+                BlockModelKind::Cross | BlockModelKind::TorchLike
+            )
+        });
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
         let mut first_candidate_image: Option<(String, egui::ColorImage)> = None;
@@ -3089,7 +3177,8 @@ fn generate_isometric_block_icon(
     let top = load_block_texture(&top_name, texture_cache)?;
     let east = load_block_texture(&east_name, texture_cache)?;
     let south = load_block_texture(&south_name, texture_cache)?;
-    if block_id != 1 && (top_name == "stone.png" || east_name == "stone.png" || south_name == "stone.png")
+    if block_id != 1
+        && (top_name == "stone.png" || east_name == "stone.png" || south_name == "stone.png")
     {
         if logged_stone_fallback.insert((item_id, damage)) {
             warn!(
@@ -3209,7 +3298,14 @@ fn fallback_block_face_texture(block_id: u16, damage: i16, face: BlockFace) -> O
             _ => "piston_side.png".to_string(),
         }),
         30 => Some("web.png".to_string()),
-        31 => Some(if (meta & 0x3) == 2 { "fern.png" } else { "tallgrass.png" }.to_string()),
+        31 => Some(
+            if (meta & 0x3) == 2 {
+                "fern.png"
+            } else {
+                "tallgrass.png"
+            }
+            .to_string(),
+        ),
         32 => Some("deadbush.png".to_string()),
         33 => Some(match face {
             BlockFace::Up => "piston_top_normal.png".to_string(),
@@ -3377,36 +3473,12 @@ fn raster_iso_quad(
     }
     let shade = face_shade(quad);
     raster_textured_triangle(
-        dst,
-        depth,
-        tex,
-        pts[0],
-        pts[1],
-        pts[2],
-        z[0],
-        z[1],
-        z[2],
-        quad.uv[0],
-        quad.uv[1],
-        quad.uv[2],
-        shade,
-        tint,
+        dst, depth, tex, pts[0], pts[1], pts[2], z[0], z[1], z[2], quad.uv[0], quad.uv[1],
+        quad.uv[2], shade, tint,
     );
     raster_textured_triangle(
-        dst,
-        depth,
-        tex,
-        pts[0],
-        pts[2],
-        pts[3],
-        z[0],
-        z[2],
-        z[3],
-        quad.uv[0],
-        quad.uv[2],
-        quad.uv[3],
-        shade,
-        tint,
+        dst, depth, tex, pts[0], pts[2], pts[3], z[0], z[2], z[3], quad.uv[0], quad.uv[2],
+        quad.uv[3], shade, tint,
     );
 }
 

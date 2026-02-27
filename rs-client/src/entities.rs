@@ -94,10 +94,7 @@ pub struct RemoteSkinDownloader {
 }
 
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct PlayerTextureDebugSettings {
-    pub flip_u: bool,
-    pub flip_v: bool,
-}
+pub struct PlayerTextureDebugSettings;
 
 impl Default for RemoteSkinDownloader {
     fn default() -> Self {
@@ -991,7 +988,9 @@ pub fn draw_remote_entity_names(
         if !through_walls && !view_visibility.get() {
             continue;
         }
-        if !through_walls && transform.translation().distance(cam_pos) > NON_PLAYER_NAME_MAX_DISTANCE {
+        if !through_walls
+            && transform.translation().distance(cam_pos) > NON_PLAYER_NAME_MAX_DISTANCE
+        {
             continue;
         }
         if !through_walls && line_of_sight_blocked(&collision_map, cam_pos, world_pos) {
@@ -2906,10 +2905,10 @@ fn add_face(
     verts: [[f32; 3]; 4],
     normal: [f32; 3],
     rect: SkinUvRect,
-    texture_debug: &PlayerTextureDebugSettings,
+    _texture_debug: &PlayerTextureDebugSettings,
 ) {
     let mut verts = verts;
-    let mut uv = uv_rect(rect, texture_debug.flip_u, texture_debug.flip_v);
+    let mut uv = uv_rect(rect);
 
     // Keep face winding consistent with the provided normal so both triangles
     // are front-facing together (fixes diagonal half-quad culling).
@@ -2932,23 +2931,12 @@ fn add_face(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-fn uv_rect(rect: SkinUvRect, flip_u: bool, flip_v: bool) -> [[f32; 2]; 4] {
+fn uv_rect(rect: SkinUvRect) -> [[f32; 2]; 4] {
     let u0 = rect.u / 64.0;
     let u1 = (rect.u + rect.w) / 64.0;
     let v0 = rect.v / 64.0;
     let v1 = (rect.v + rect.h) / 64.0;
-    let mut out = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-    if flip_u {
-        for uv in &mut out {
-            uv[0] = 1.0 - uv[0];
-        }
-    }
-    if flip_v {
-        for uv in &mut out {
-            uv[1] = 1.0 - uv[1];
-        }
-    }
-    out
+    [[u0, v1], [u1, v1], [u1, v0], [u0, v0]]
 }
 
 fn player_root_rotation(yaw: f32) -> Quat {

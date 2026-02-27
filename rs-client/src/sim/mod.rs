@@ -157,9 +157,6 @@ pub struct DebugUiState {
     pub show_performance: bool,
     pub show_render: bool,
     pub render_show_layers: bool,
-    pub render_show_lighting: bool,
-    pub render_show_water: bool,
-    pub render_show_misc: bool,
     pub perf_show_schedules: bool,
     pub perf_show_render_stats: bool,
 }
@@ -172,9 +169,6 @@ impl Default for DebugUiState {
             show_performance: false,
             show_render: false,
             render_show_layers: false,
-            render_show_lighting: false,
-            render_show_water: false,
-            render_show_misc: false,
             perf_show_schedules: false,
             perf_show_render_stats: false,
         }
