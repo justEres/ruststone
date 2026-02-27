@@ -651,7 +651,7 @@ pub fn fixed_sim_tick_system(
             true
         };
 
-        let kind = if moved && rotated {
+        if moved && rotated {
             let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
                 x: pos.x as f64,
                 y: pos.y as f64,
@@ -660,7 +660,6 @@ pub fn fixed_sim_tick_system(
                 pitch,
                 on_ground,
             });
-            "poslook"
         } else if moved {
             let _ = to_net.0.send(ToNetMessage::PlayerMovePos {
                 x: pos.x as f64,
@@ -668,33 +667,14 @@ pub fn fixed_sim_tick_system(
                 z: pos.z as f64,
                 on_ground,
             });
-            "pos"
         } else if rotated {
             let _ = to_net.0.send(ToNetMessage::PlayerMoveLook {
                 yaw,
                 pitch,
                 on_ground,
             });
-            "look"
         } else {
             let _ = to_net.0.send(ToNetMessage::PlayerMoveGround { on_ground });
-            "ground"
-        };
-        if correction_guard.repeats > 0 {
-            println!(
-                "[net/move] tick={} kind={} pos=({:.4},{:.4},{:.4}) yaw={:.3} pitch={:.3} on_ground={} gm={} can_fly={} flying={}",
-                tick,
-                kind,
-                pos.x,
-                pos.y,
-                pos.z,
-                yaw,
-                pitch,
-                on_ground,
-                player_status.gamemode,
-                player_status.can_fly,
-                player_status.flying
-            );
         }
 
         if moved {
