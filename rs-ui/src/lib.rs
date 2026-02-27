@@ -2845,35 +2845,31 @@ impl ItemIconCache {
         if let Some(handle) = self.loaded.get(&key) {
             return Some(handle.id());
         }
-        if stack.damage != 0 {
-            if let Some(handle) = self.loaded.get(&(stack.item_id, 0)) {
-                return Some(handle.id());
-            }
-        }
         if self.missing.contains(&key) {
             return None;
         }
 
+        let is_block_item = u16::try_from(stack.item_id)
+            .ok()
+            .and_then(block_registry_key)
+            .is_some();
+
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
-        let mut found_candidate = false;
+        let mut first_candidate_image: Option<(String, egui::ColorImage)> = None;
         for rel_path in &candidates {
             let full_path = texturepack_textures_root().join(&rel_path);
             if !full_path.exists() {
                 continue;
             }
-            found_candidate = true;
             let Some(color_image) = load_color_image(&full_path) else {
                 continue;
             };
-            let texture_name = format!("item_icon_{}_{}_{}", stack.item_id, stack.damage, rel_path);
-            let handle = ctx.load_texture(texture_name, color_image, egui::TextureOptions::NEAREST);
-            let id = handle.id();
-            self.loaded.insert(key, handle);
-            return Some(id);
+            first_candidate_image = Some((rel_path.clone(), color_image));
+            break;
         }
-        // If there is no direct texture candidate, render an isometric icon from block model data.
-        if !found_candidate
-            && let Some(image) = generate_isometric_block_icon(
+
+        if is_block_item
+            && let Some((image, source)) = generate_isometric_block_icon(
                 stack.item_id,
                 stack.damage,
                 &mut self.block_model_resolver,
@@ -2883,8 +2879,30 @@ impl ItemIconCache {
                 &mut self.logged_resolution_path,
             )
         {
+            // For blocks that only hit manual cube fallback (flowers, rails, etc.),
+            // prefer their explicit flat item texture if available.
+            if source == IsometricIconSource::ManualCubeFallback
+                && let Some((rel_path, color_image)) = first_candidate_image.take()
+            {
+                let texture_name =
+                    format!("item_icon_{}_{}_{}", stack.item_id, stack.damage, rel_path);
+                let handle =
+                    ctx.load_texture(texture_name, color_image, egui::TextureOptions::NEAREST);
+                let id = handle.id();
+                self.loaded.insert(key, handle);
+                return Some(id);
+            }
+
             let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
             let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
+            let id = handle.id();
+            self.loaded.insert(key, handle);
+            return Some(id);
+        }
+
+        if let Some((rel_path, color_image)) = first_candidate_image {
+            let texture_name = format!("item_icon_{}_{}_{}", stack.item_id, stack.damage, rel_path);
+            let handle = ctx.load_texture(texture_name, color_image, egui::TextureOptions::NEAREST);
             let id = handle.id();
             self.loaded.insert(key, handle);
             return Some(id);
@@ -2902,6 +2920,13 @@ impl ItemIconCache {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IsometricIconSource {
+    BlockstateModel,
+    ItemModel,
+    ManualCubeFallback,
+}
+
 fn generate_isometric_block_icon(
     item_id: i32,
     damage: i16,
@@ -2910,7 +2935,7 @@ fn generate_isometric_block_icon(
     logged_stone_fallback: &mut HashSet<(i32, i16)>,
     logged_model_fallback: &mut HashSet<(i32, i16)>,
     logged_resolution_path: &mut HashSet<(i32, i16)>,
-) -> Option<egui::ColorImage> {
+) -> Option<(egui::ColorImage, IsometricIconSource)> {
     let block_id = u16::try_from(item_id).ok()?;
     if block_registry_key(block_id).is_none() {
         return None;
@@ -2946,7 +2971,7 @@ fn generate_isometric_block_icon(
                     block_registry_key(block_id)
                 );
             }
-            return Some(out);
+            return Some((out, IsometricIconSource::BlockstateModel));
         }
         if logged_model_fallback.insert((item_id, damage)) {
             warn!(
@@ -2982,7 +3007,7 @@ fn generate_isometric_block_icon(
                     block_registry_key(block_id)
                 );
             }
-            return Some(out);
+            return Some((out, IsometricIconSource::ItemModel));
         }
     }
 
@@ -3077,7 +3102,7 @@ fn generate_isometric_block_icon(
             block_registry_key(block_id)
         );
     }
-    Some(out)
+    Some((out, IsometricIconSource::ManualCubeFallback))
 }
 
 fn load_block_texture(
