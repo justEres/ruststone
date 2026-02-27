@@ -86,6 +86,7 @@ fn enqueue_chunk_meshes(
     render_debug: Res<debug::RenderDebugSettings>,
     mut perf: ResMut<debug::RenderPerfStats>,
     assets: Res<chunk::ChunkRenderAssets>,
+    camera_query: Query<&GlobalTransform, With<components::PlayerCamera>>,
 ) {
     let start = std::time::Instant::now();
     if queue.0.is_empty() {
@@ -120,7 +121,20 @@ fn enqueue_chunk_meshes(
     }
     let updates_len = updated_keys.len() as u32;
 
-    for key in updated_keys {
+    let mut ordered_keys = updated_keys.into_iter().collect::<Vec<_>>();
+    if let Ok(cam) = camera_query.get_single() {
+        let cam_pos = cam.translation();
+        let cam_fwd = cam.forward();
+        ordered_keys.sort_by(|a, b| {
+            let sa = mesh_priority_score(*a, cam_pos, *cam_fwd);
+            let sb = mesh_priority_score(*b, cam_pos, *cam_fwd);
+            sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    } else {
+        ordered_keys.sort_unstable();
+    }
+
+    for key in ordered_keys {
         if in_flight.chunks.contains(&key) {
             in_flight.pending_remesh.insert(key);
             continue;
@@ -152,6 +166,14 @@ fn enqueue_chunk_meshes(
     perf.last_updates = updates_len;
     perf.last_updates_raw = raw_updates;
     perf.in_flight = in_flight.chunks.len() as u32;
+}
+
+fn mesh_priority_score(key: (i32, i32), cam_pos: Vec3, cam_forward: Vec3) -> f32 {
+    let center = Vec3::new((key.0 * 16 + 8) as f32, cam_pos.y, (key.1 * 16 + 8) as f32);
+    let to = center - cam_pos;
+    let dist2 = to.length_squared();
+    let front_bias = to.normalize_or_zero().dot(cam_forward).max(0.0);
+    dist2 - front_bias * 1024.0
 }
 
 fn apply_mesh_results(
