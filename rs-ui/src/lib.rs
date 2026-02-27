@@ -22,6 +22,7 @@ use rs_utils::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::warn;
 
 const INVENTORY_SLOT_SIZE: f32 = 40.0;
 const INVENTORY_SLOT_SPACING: f32 = 4.0;
@@ -1705,7 +1706,15 @@ fn draw_debug_item_browser(
                             }
                             if response.clicked() {
                                 let cmd = debug_give_command(stack, &give_target);
-                                let _ = to_net.0.send(ToNetMessage::ChatMessage(cmd));
+                                warn!(
+                                    "debug give click item_id={} damage={} cmd={}",
+                                    stack.item_id, stack.damage, cmd
+                                );
+                                if let Err(err) = to_net.0.send(ToNetMessage::ChatMessage(cmd)) {
+                                    warn!("debug give send failed: {}", err);
+                                } else {
+                                    warn!("debug give send ok");
+                                }
                             }
                             i += 1;
                         }
@@ -2926,7 +2935,7 @@ fn generate_isometric_block_icon(
         }
         if rendered_any {
             if logged_resolution_path.insert((item_id, damage)) {
-                eprintln!(
+                warn!(
                     "[isometric-debug] path=id:{} meta:{} source:blockstate-model key={:?}",
                     item_id,
                     damage,
@@ -2936,7 +2945,7 @@ fn generate_isometric_block_icon(
             return Some(out);
         }
         if logged_model_fallback.insert((item_id, damage)) {
-            eprintln!(
+            warn!(
                 "[isometric-debug] model texture fallback id={} meta={} key={:?}",
                 item_id,
                 damage,
@@ -2962,7 +2971,7 @@ fn generate_isometric_block_icon(
         }
         if rendered_any {
             if logged_resolution_path.insert((item_id, damage)) {
-                eprintln!(
+                warn!(
                     "[isometric-debug] path=id:{} meta:{} source:item-model key={:?}",
                     item_id,
                     damage,
@@ -2992,7 +3001,7 @@ fn generate_isometric_block_icon(
     if block_id != 1 && (top_name == "stone.png" || east_name == "stone.png" || south_name == "stone.png")
     {
         if logged_stone_fallback.insert((item_id, damage)) {
-            eprintln!(
+            warn!(
                 "[isometric-debug] stone texture fallback id={} meta={} key={:?} top={} east={} south={}",
                 item_id,
                 damage,
@@ -3054,7 +3063,7 @@ fn generate_isometric_block_icon(
         raster_iso_quad(&mut out, &mut depth, quad, tex, [255, 255, 255]);
     }
     if logged_resolution_path.insert((item_id, damage)) {
-        eprintln!(
+        warn!(
             "[isometric-debug] path=id:{} meta:{} source:manual-cube-fallback key={:?}",
             item_id,
             damage,
@@ -3371,7 +3380,14 @@ fn texturepack_textures_root() -> PathBuf {
 
 fn load_color_image(path: &Path) -> Option<egui::ColorImage> {
     let bytes = std::fs::read(path).ok()?;
-    let rgba = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let mut rgba = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    // For animated texture sheets (e.g. frame stacks), use first frame only.
+    // Vanilla atlas animation advances frames over time; debug icons should not stretch the full sheet.
+    if rgba.height() > rgba.width() && rgba.height() % rgba.width() == 0 {
+        let w = rgba.width();
+        let frame = image::imageops::crop(&mut rgba, 0, 0, w, w).to_image();
+        rgba = frame;
+    }
     let size = [rgba.width() as usize, rgba.height() as usize];
     Some(egui::ColorImage::from_rgba_unmultiplied(
         size,
