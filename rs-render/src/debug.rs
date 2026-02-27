@@ -23,6 +23,7 @@ const OCCLUSION_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.85;
 const OCCLUSION_CULL_VERTICAL_FOV_MULTIPLIER: f32 = 1.60;
 const OCCLUSION_CULL_RADIUS: f32 = 20.0;
 const OCCLUSION_CULL_FRUSTUM_PAD: f32 = 24.0;
+const OCCLUSION_CULL_Y_SAMPLES: [f32; 5] = [8.0, 64.0, 128.0, 192.0, 248.0];
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -345,21 +346,17 @@ pub fn occlusion_cull_chunks(
     for (chunk, visibility) in &chunks {
         if !matches!(*visibility, Visibility::Hidden) {
             distance_visible.insert(chunk.key);
-            let center = Vec3::new(
-                (chunk.key.0 * 16 + 8) as f32,
-                cam_pos.y,
-                (chunk.key.1 * 16 + 8) as f32,
-            );
-            let radius = OCCLUSION_CULL_RADIUS;
-            let to_center = center - cam_pos;
-            let z = to_center.dot(*cam_forward);
-            let x = to_center.dot(*cam_right).abs();
-            let y = to_center.dot(*cam_up).abs();
-            let in_frustum = z >= near - radius - OCCLUSION_CULL_FRUSTUM_PAD
-                && z <= far + radius + OCCLUSION_CULL_FRUSTUM_PAD
-                && x <= z * tan_x + radius + OCCLUSION_CULL_FRUSTUM_PAD
-                && y <= z * tan_y + radius + OCCLUSION_CULL_FRUSTUM_PAD;
-            if in_frustum {
+            if chunk_key_in_coarse_frustum(
+                chunk.key,
+                cam_pos,
+                *cam_forward,
+                *cam_right,
+                *cam_up,
+                tan_x,
+                tan_y,
+                near,
+                far,
+            ) {
                 frustum_candidates.insert(chunk.key);
             }
         }
@@ -466,6 +463,40 @@ pub fn occlusion_cull_chunks(
     perf.visible_chunks_after_occlusion = keep_visible.len() as u32;
     perf.occluded_chunks = distance_visible.len().saturating_sub(keep_visible.len()) as u32;
     perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn chunk_key_in_coarse_frustum(
+    chunk_key: (i32, i32),
+    cam_pos: Vec3,
+    cam_forward: Vec3,
+    cam_right: Vec3,
+    cam_up: Vec3,
+    tan_x: f32,
+    tan_y: f32,
+    near: f32,
+    far: f32,
+) -> bool {
+    let base_x = (chunk_key.0 * 16 + 8) as f32;
+    let base_z = (chunk_key.1 * 16 + 8) as f32;
+    for sample_y in OCCLUSION_CULL_Y_SAMPLES {
+        let sample = Vec3::new(base_x, sample_y, base_z);
+        let to_sample = sample - cam_pos;
+        let z = to_sample.dot(cam_forward);
+        let x = to_sample.dot(cam_right).abs();
+        let y = to_sample.dot(cam_up).abs();
+        if z < near - OCCLUSION_CULL_RADIUS - OCCLUSION_CULL_FRUSTUM_PAD
+            || z > far + OCCLUSION_CULL_RADIUS + OCCLUSION_CULL_FRUSTUM_PAD
+        {
+            continue;
+        }
+        if x <= z * tan_x + OCCLUSION_CULL_RADIUS + OCCLUSION_CULL_FRUSTUM_PAD
+            && y <= z * tan_y + OCCLUSION_CULL_RADIUS + OCCLUSION_CULL_FRUSTUM_PAD
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn apply_render_debug_settings(
