@@ -1,4 +1,7 @@
 use base64::Engine;
+use rs_protocol::format::Component;
+use rs_protocol::format::ComponentType;
+use rs_protocol::format::color::Color;
 use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
@@ -639,15 +642,15 @@ pub fn handle_packet(
             .unwrap();
         }
         Packet::ServerMessage_NoPosition(sm) => {
-            let text = sm.message.to_string();
+            let text = component_to_legacy(&sm.message);
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::ServerMessage_Position(sm) => {
-            let text = sm.message.to_string();
+            let text = component_to_legacy(&sm.message);
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::ServerMessage_Sender(sm) => {
-            let text = sm.message.to_string();
+            let text = component_to_legacy(&sm.message);
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::UpdateHealth(health) => {
@@ -922,6 +925,66 @@ fn handle_entity_metadata(
                 label,
             }));
         }
+    }
+}
+
+fn component_to_legacy(component: &Component) -> String {
+    let mut out = String::new();
+    for part in &component.list {
+        let modifier = part.get_modifier();
+        if let Some(code) = legacy_color_code(modifier.color) {
+            out.push('§');
+            out.push(code);
+        }
+        if modifier.bold {
+            out.push_str("§l");
+        }
+        if modifier.italic {
+            out.push_str("§o");
+        }
+        if modifier.underlined {
+            out.push_str("§n");
+        }
+        if modifier.strikethrough {
+            out.push_str("§m");
+        }
+        if modifier.obfuscated {
+            out.push_str("§k");
+        }
+        out.push_str(match part {
+            ComponentType::Text { text, .. } => text,
+            ComponentType::Hover { text, .. } => text,
+            ComponentType::Click { text, .. } => text,
+            ComponentType::ClickAndHover { text, .. } => text,
+        });
+    }
+    if out.is_empty() {
+        component.to_string()
+    } else {
+        out
+    }
+}
+
+fn legacy_color_code(color: Color) -> Option<char> {
+    match color {
+        Color::Black => Some('0'),
+        Color::DarkBlue => Some('1'),
+        Color::DarkGreen => Some('2'),
+        Color::DarkAqua => Some('3'),
+        Color::DarkRed => Some('4'),
+        Color::DarkPurple => Some('5'),
+        Color::Gold => Some('6'),
+        Color::Gray => Some('7'),
+        Color::DarkGray => Some('8'),
+        Color::Blue => Some('9'),
+        Color::Green => Some('a'),
+        Color::Aqua => Some('b'),
+        Color::Red => Some('c'),
+        Color::LightPurple => Some('d'),
+        Color::Yellow => Some('e'),
+        Color::White => Some('f'),
+        Color::Reset => Some('r'),
+        Color::RGB(_) | Color::None => None,
     }
 }
 
