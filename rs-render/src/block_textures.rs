@@ -95,6 +95,46 @@ impl AtlasBlockMapping {
             } else {
                 "sand.png"
             }),
+            26 => {
+                let is_head = (meta & 0x8) != 0;
+                let facing = meta & 0x3;
+                let head_facing_face = match facing {
+                    0 => Face::PosZ,
+                    1 => Face::NegX,
+                    2 => Face::NegZ,
+                    _ => Face::PosX,
+                };
+                let foot_facing_face = match head_facing_face {
+                    Face::PosX => Face::NegX,
+                    Face::NegX => Face::PosX,
+                    Face::PosZ => Face::NegZ,
+                    Face::NegZ => Face::PosZ,
+                    f => f,
+                };
+                Some(match face {
+                    Face::PosY => {
+                        if is_head {
+                            "bed_head_top.png"
+                        } else {
+                            "bed_feet_top.png"
+                        }
+                    }
+                    Face::NegY => "planks_oak.png",
+                    _ => {
+                        if is_head {
+                            if face == head_facing_face {
+                                "bed_head_end.png"
+                            } else {
+                                "bed_head_side.png"
+                            }
+                        } else if face == foot_facing_face {
+                            "bed_feet_end.png"
+                        } else {
+                            "bed_feet_side.png"
+                        }
+                    }
+                })
+            }
             17 => Some(match face {
                 Face::PosY | Face::NegY => match meta & 0x3 {
                     1 => "log_spruce_top.png",

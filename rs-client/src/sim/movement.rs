@@ -702,6 +702,16 @@ fn append_block_collision_boxes(
                     out,
                 );
             }
+            26 => {
+                append_box(
+                    block_x,
+                    block_y,
+                    block_z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 9.0 / 16.0, 1.0],
+                    out,
+                );
+            }
             27 | 28 | 66 | 157 => {
                 append_box(
                     block_x,
