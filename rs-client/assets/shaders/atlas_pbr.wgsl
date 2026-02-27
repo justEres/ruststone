@@ -606,29 +606,15 @@ fn fragment(
         );
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
-    let quality_mode = lighting_uniform.quality_and_water.x;
-    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
-        out.color = apply_pbr_lighting(pbr_input);
-        out.color = apply_fancy_post_lighting(
-            out.color,
-            normal,
-            abs(in.position.w),
-            view_dir,
-            is_water_surface,
-            water_scene_reflection,
-            water_scene_reflection_valid,
-        );
-    } else {
-        out.color = apply_voxel_lighting(
-            pbr_input.material.base_color,
-            normal,
-            abs(in.position.w),
-            view_dir,
-            is_water_surface,
-            water_scene_reflection,
-            water_scene_reflection_valid,
-        );
-    }
+    out.color = apply_voxel_lighting(
+        pbr_input.material.base_color,
+        normal,
+        abs(in.position.w),
+        view_dir,
+        is_water_surface,
+        water_scene_reflection,
+        water_scene_reflection_valid,
+    );
     if !fixed_debug_state {
         out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
     }
