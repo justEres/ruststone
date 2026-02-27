@@ -1865,6 +1865,20 @@ fn add_custom_block(
                     block_id,
                     tint,
                 ),
+                // Bed: low 9/16-height block.
+                26 => add_box(
+                    batch,
+                    Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+                    texture_mapping,
+                    biome_tints,
+                    x,
+                    y,
+                    z,
+                    [0.0, 0.0, 0.0],
+                    [1.0, 9.0 / 16.0, 1.0],
+                    block_id,
+                    tint,
+                ),
                 60 => add_box(
                     batch,
                     Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
@@ -2861,7 +2875,7 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
     }
     if matches!(
         id,
-        27 | 28 | 64 | 65 | 66 | 71 | 96 | 157 | 193 | 194 | 195 | 196 | 197
+        26 | 27 | 28 | 64 | 65 | 66 | 71 | 96 | 157 | 193 | 194 | 195 | 196 | 197
     ) {
         return MaterialGroup::Cutout;
     }

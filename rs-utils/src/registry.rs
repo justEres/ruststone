@@ -116,8 +116,10 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
         101 | 102 | 160 => BlockModelKind::Pane,
         50 | 75 | 76 => BlockModelKind::TorchLike,
-        27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146 | 157
-        | 171 | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => BlockModelKind::Custom,
+        26 | 27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146
+        | 157 | 171 | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => {
+            BlockModelKind::Custom
+        }
         _ => BlockModelKind::FullCube,
     }
 }
@@ -153,6 +155,11 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
             _ => "sandstone_normal.png",
         },
         25 => "noteblock.png",
+        26 => match face {
+            BlockFace::Up => "bed_feet_top.png",
+            BlockFace::Down => "planks_oak.png",
+            _ => "bed_feet_side.png",
+        },
         41 => "gold_block.png",
         42 => "iron_block.png",
         45 => "brick.png",

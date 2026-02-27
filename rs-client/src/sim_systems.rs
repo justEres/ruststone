@@ -1488,24 +1488,72 @@ pub fn draw_chunk_debug_system(
             SURVIVAL_BLOCK_REACH
         };
         if let Some(hit) = raycast_block(&collision_map, origin, dir, max_reach) {
+            let state = collision_map.block_at(hit.block.x, hit.block.y, hit.block.z);
+            let world = WorldCollision::with_map(&collision_map);
+            let boxes = target_outline_boxes(&world, state, hit.block.x, hit.block.y, hit.block.z);
             let inflate = 0.0025;
-            let min = Vec3::new(hit.block.x as f32, hit.block.y as f32, hit.block.z as f32)
-                - Vec3::splat(inflate);
-            let max = min + Vec3::splat(1.0 + inflate * 2.0);
-            draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.02, 0.02, 0.02, 1.0));
+            for (mut min, mut max) in boxes.iter().copied() {
+                min -= Vec3::splat(inflate);
+                max += Vec3::splat(inflate);
+                draw_aabb_lines(&mut gizmos, min, max, Color::srgba(0.02, 0.02, 0.02, 1.0));
+            }
             if break_indicator.active {
                 let p = break_indicator.progress.clamp(0.0, 1.0);
                 let crack_color = Color::srgb(0.32 + 0.50 * p, 0.32 - 0.20 * p, 0.32 - 0.20 * p);
                 let crack_inflate = 0.008 + p * 0.010;
-                draw_aabb_lines(
-                    &mut gizmos,
-                    min - Vec3::splat(crack_inflate),
-                    max + Vec3::splat(crack_inflate),
-                    crack_color,
-                );
+                for (min, max) in boxes {
+                    draw_aabb_lines(
+                        &mut gizmos,
+                        min - Vec3::splat(crack_inflate),
+                        max + Vec3::splat(crack_inflate),
+                        crack_color,
+                    );
+                }
             }
         }
     }
+}
+
+fn target_outline_boxes(
+    world: &WorldCollision,
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+) -> Vec<(Vec3, Vec3)> {
+    let mut boxes = debug_block_collision_boxes(world, block_state, block_x, block_y, block_z);
+    if !boxes.is_empty() {
+        return boxes;
+    }
+
+    let min = Vec3::new(block_x as f32, block_y as f32, block_z as f32);
+    let max = min + Vec3::ONE;
+    let id = block_state_id(block_state);
+
+    let fallback = match block_model_kind(id) {
+        rs_utils::BlockModelKind::Cross => {
+            let h = if id == 175 { 1.0 } else { 0.875 };
+            Some((min + Vec3::new(0.1, 0.0, 0.1), min + Vec3::new(0.9, h, 0.9)))
+        }
+        rs_utils::BlockModelKind::TorchLike => {
+            Some((min + Vec3::new(0.4, 0.0, 0.4), min + Vec3::new(0.6, 0.75, 0.6)))
+        }
+        rs_utils::BlockModelKind::Custom => match id {
+            26 => Some((min, min + Vec3::new(1.0, 9.0 / 16.0, 1.0))), // bed
+            27 | 28 | 66 | 157 | 171 => Some((min, min + Vec3::new(1.0, 1.0 / 16.0, 1.0))), // rails/carpet
+            78 => {
+                let h = ((block_state_meta(block_state) & 0x7) as f32 + 1.0) / 8.0;
+                Some((min, min + Vec3::new(1.0, h.clamp(0.125, 1.0), 1.0)))
+            }
+            _ => Some((min, max)),
+        },
+        _ => Some((min, max)),
+    };
+
+    if let Some(bb) = fallback {
+        boxes.push(bb);
+    }
+    boxes
 }
 
 fn draw_aabb_lines(gizmos: &mut Gizmos, min: Vec3, max: Vec3, color: Color) {
