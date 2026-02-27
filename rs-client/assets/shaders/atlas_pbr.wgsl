@@ -618,6 +618,14 @@ fn fragment(
             water_scene_reflection,
             water_scene_reflection_valid,
         );
+        // Damp near-camera specular washout that can appear when geometry gets very close.
+        let near_fade = clamp((abs(in.position.w) - 0.25) / 1.5, 0.0, 1.0);
+        let near_damp = 1.0 - near_fade;
+        if near_damp > 0.0 {
+            let base_lit = pbr_input.material.base_color.rgb
+                * (lighting_uniform.ambient_and_fog.x + 0.25);
+            out.color.rgb = mix(out.color.rgb, base_lit, near_damp * 0.30);
+        }
     } else {
         out.color = apply_voxel_lighting(
             pbr_input.material.base_color,
