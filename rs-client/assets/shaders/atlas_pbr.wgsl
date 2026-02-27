@@ -606,18 +606,13 @@ fn fragment(
         );
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
-    let view_z = abs(in.position.w);
     let quality_mode = lighting_uniform.quality_and_water.x;
-    // Keep full PBR at normal view distances, but avoid close-camera grazing washout.
-    let use_pbr_path = quality_mode >= 2.0
-        && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u
-        && view_z > 1.25;
-    if use_pbr_path {
+    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(
             out.color,
             normal,
-            view_z,
+            abs(in.position.w),
             view_dir,
             is_water_surface,
             water_scene_reflection,
@@ -627,7 +622,7 @@ fn fragment(
         out.color = apply_voxel_lighting(
             pbr_input.material.base_color,
             normal,
-            view_z,
+            abs(in.position.w),
             view_dir,
             is_water_surface,
             water_scene_reflection,
@@ -638,8 +633,8 @@ fn fragment(
         out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
     }
 
-    // Apply in-shader post processing (fog, alpha-premultiply, and optional tonemapping/debanding).
-    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    // Disable Bevy's post-lighting post process in this shader path.
+    // This avoids close-range washout/white-lift artifacts near geometry.
 #endif
 
 #ifdef OIT_ENABLED
