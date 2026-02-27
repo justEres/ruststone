@@ -907,7 +907,7 @@ fn connect_ui(
     }
 
     if state.debug_items_open {
-        draw_debug_item_browser(ctx, &mut state, &mut item_icons);
+        draw_debug_item_browser(ctx, &mut state, &mut item_icons, &to_net);
     }
 
     if matches!(app_state.0, ApplicationState::Connected)
@@ -1637,6 +1637,7 @@ fn draw_debug_item_browser(
     ctx: &egui::Context,
     state: &mut ConnectUiState,
     item_icons: &mut ItemIconCache,
+    to_net: &ToNet,
 ) {
     egui::Window::new("Debug Item Browser")
         .open(&mut state.debug_items_open)
@@ -1656,6 +1657,8 @@ fn draw_debug_item_browser(
                 }
                 ui.separator();
                 ui.label(format!("Items: {}", state.debug_items.len()));
+                ui.separator();
+                ui.label("Click item: send /give");
             });
             ui.add_space(6.0);
 
@@ -1699,6 +1702,10 @@ fn draw_debug_item_browser(
                             if response.hovered() {
                                 hovered = Some(stack.clone());
                             }
+                            if response.clicked() {
+                                let cmd = debug_give_command(stack);
+                                let _ = to_net.0.send(ToNetMessage::ChatMessage(cmd));
+                            }
                             i += 1;
                         }
                     });
@@ -1710,6 +1717,20 @@ fn draw_debug_item_browser(
                 draw_inventory_item_tooltip(ctx, stack);
             }
         });
+}
+
+fn debug_give_command(stack: &InventoryItemStack) -> String {
+    let item = item_registry_key(stack.item_id)
+        .map(|k| format!("minecraft:{k}"))
+        .or_else(|| {
+            u16::try_from(stack.item_id)
+                .ok()
+                .and_then(block_registry_key)
+                .map(|k| format!("minecraft:{k}"))
+        })
+        .unwrap_or_else(|| stack.item_id.to_string());
+    let damage = i32::from(stack.damage.max(0));
+    format!("/give @p {item} 1 {damage}")
 }
 
 fn equipped_armor_points(inventory_state: &InventoryState) -> i32 {
