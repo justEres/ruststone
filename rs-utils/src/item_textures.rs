@@ -12,6 +12,55 @@ pub fn item_texture_candidates(item_id: i32, damage: i16) -> Vec<String> {
 
     // Keep important subtype-aware item mappings explicit.
     match item_id {
+        37 => {
+            push_candidate(&mut out, "blocks/flower_dandelion.png".to_string());
+        }
+        39 => {
+            push_candidate(&mut out, "blocks/mushroom_brown.png".to_string());
+        }
+        40 => {
+            push_candidate(&mut out, "blocks/mushroom_red.png".to_string());
+        }
+        50 => {
+            push_candidate(&mut out, "blocks/torch_on.png".to_string());
+        }
+        55 => {
+            push_candidate(&mut out, "blocks/redstone_dust_line.png".to_string());
+            push_candidate(&mut out, "items/redstone_dust.png".to_string());
+        }
+        93 => {
+            push_candidate(&mut out, "blocks/repeater_off.png".to_string());
+            push_candidate(&mut out, "items/repeater.png".to_string());
+        }
+        94 => {
+            push_candidate(&mut out, "blocks/repeater_on.png".to_string());
+            push_candidate(&mut out, "items/repeater.png".to_string());
+        }
+        104 => {
+            push_candidate(&mut out, "blocks/pumpkin_stem_disconnected.png".to_string());
+        }
+        105 => {
+            push_candidate(&mut out, "blocks/melon_stem_disconnected.png".to_string());
+        }
+        141 => {
+            push_candidate(&mut out, "blocks/carrots_stage_3.png".to_string());
+            push_candidate(&mut out, "items/carrot.png".to_string());
+        }
+        142 => {
+            push_candidate(&mut out, "blocks/potatoes_stage_3.png".to_string());
+            push_candidate(&mut out, "items/potato.png".to_string());
+        }
+        175 => {
+            let tex = match damage & 0x7 {
+                1 => "blocks/double_plant_syringa_bottom.png",
+                2 => "blocks/double_plant_grass_bottom.png",
+                3 => "blocks/double_plant_fern_bottom.png",
+                4 => "blocks/double_plant_rose_bottom.png",
+                5 => "blocks/double_plant_paeonia_bottom.png",
+                _ => "blocks/double_plant_sunflower_bottom.png",
+            };
+            push_candidate(&mut out, tex.to_string());
+        }
         // Planks
         5 => {
             let planks = match damage {
@@ -279,6 +328,39 @@ fn add_key_candidates(out: &mut Vec<String>, key: &str) {
         "flowing_lava" | "lava" => push_candidate(out, "blocks/lava_still.png".to_string()),
         "redstone_torch" => push_candidate(out, "blocks/redstone_torch_on.png".to_string()),
         "unlit_redstone_torch" => push_candidate(out, "blocks/redstone_torch_off.png".to_string()),
+        "yellow_flower" => push_candidate(out, "blocks/flower_dandelion.png".to_string()),
+        "brown_mushroom" => push_candidate(out, "blocks/mushroom_brown.png".to_string()),
+        "red_mushroom" => push_candidate(out, "blocks/mushroom_red.png".to_string()),
+        "torch" => push_candidate(out, "blocks/torch_on.png".to_string()),
+        "redstone_wire" => {
+            push_candidate(out, "blocks/redstone_dust_line.png".to_string());
+            push_candidate(out, "items/redstone_dust.png".to_string());
+        }
+        "unpowered_repeater" => {
+            push_candidate(out, "blocks/repeater_off.png".to_string());
+            push_candidate(out, "items/repeater.png".to_string());
+        }
+        "powered_repeater" => {
+            push_candidate(out, "blocks/repeater_on.png".to_string());
+            push_candidate(out, "items/repeater.png".to_string());
+        }
+        "pumpkin_stem" => {
+            push_candidate(out, "blocks/pumpkin_stem_disconnected.png".to_string());
+        }
+        "melon_stem" => {
+            push_candidate(out, "blocks/melon_stem_disconnected.png".to_string());
+        }
+        "carrots" => push_candidate(out, "blocks/carrots_stage_3.png".to_string()),
+        "potatoes" => push_candidate(out, "blocks/potatoes_stage_3.png".to_string()),
+        "double_plant" => push_candidate(out, "blocks/double_plant_sunflower_bottom.png".to_string()),
+        "slime_ball" => push_candidate(out, "items/slimeball.png".to_string()),
+        "fermented_spider_eye" => push_candidate(out, "items/spider_eye_fermented.png".to_string()),
+        "golden_carrot" => push_candidate(out, "items/carrot_golden.png".to_string()),
+        "rabbit" => push_candidate(out, "items/rabbit_raw.png".to_string()),
+        "cooked_rabbit" => push_candidate(out, "items/rabbit_cooked.png".to_string()),
+        "mutton" => push_candidate(out, "items/mutton_raw.png".to_string()),
+        "cooked_mutton" => push_candidate(out, "items/mutton_cooked.png".to_string()),
+        "banner" => push_candidate(out, "items/banner_base.png".to_string()),
         "brick_block" => push_candidate(out, "blocks/brick.png".to_string()),
         "mossy_cobblestone" => push_candidate(out, "blocks/cobblestone_mossy.png".to_string()),
         _ => {}
