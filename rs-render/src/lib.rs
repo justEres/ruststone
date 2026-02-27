@@ -6,7 +6,7 @@ use bevy::prelude::Mesh3d;
 use bevy::render::view::RenderLayers;
 use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
-use rs_utils::block_state_id;
+use rs_utils::{BlockModelKind, block_model_kind, block_state_id};
 
 mod async_mesh;
 mod block_models;
@@ -36,6 +36,8 @@ const DYNAMIC_LIGHT_SCAN_RADIUS_XZ: i32 = 20;
 const DYNAMIC_LIGHT_SCAN_RADIUS_Y: i32 = 12;
 const DYNAMIC_LIGHT_MAX_COUNT: usize = 96;
 const DYNAMIC_LIGHT_REFRESH_SECONDS: f32 = 0.20;
+const DYNAMIC_LIGHT_INTENSITY_SCALE: f32 = 0.55;
+const DYNAMIC_LIGHT_RANGE_SCALE: f32 = 0.80;
 
 #[derive(Component)]
 struct DynamicBlockLight;
@@ -571,6 +573,42 @@ fn is_exposed_light_block(store: &chunk::ChunkStore, pos: IVec3) -> bool {
     false
 }
 
+fn is_light_blocking_geometry(block_state: u16) -> bool {
+    let id = block_state_id(block_state);
+    if id == 0 {
+        return false;
+    }
+    if matches!(id, 8 | 9 | 10 | 11) {
+        return false;
+    }
+    !matches!(
+        block_model_kind(id),
+        BlockModelKind::Cross | BlockModelKind::TorchLike
+    )
+}
+
+fn is_camera_to_light_occluded(store: &chunk::ChunkStore, camera_pos: Vec3, light_pos: Vec3) -> bool {
+    let to_light = light_pos - camera_pos;
+    let dist = to_light.length();
+    if dist <= 0.05 {
+        return false;
+    }
+    let dir = to_light / dist;
+    // Skip the immediate near-camera region and the exact light source voxel.
+    let start = 0.35f32;
+    let end = (dist - 0.30).max(start);
+    let steps = ((end - start) / 0.20).ceil().max(1.0) as i32;
+    for i in 0..=steps {
+        let t = start + (end - start) * (i as f32 / steps as f32);
+        let p = camera_pos + dir * t;
+        let cell = p.floor().as_ivec3();
+        if is_light_blocking_geometry(chunk_block_state_at(store, cell)) {
+            return true;
+        }
+    }
+    false
+}
+
 fn update_dynamic_block_lights(
     mut commands: Commands,
     time: Res<Time>,
@@ -612,6 +650,9 @@ fn update_dynamic_block_lights(
                 }
                 let world =
                     Vec3::new(x as f32 + 0.5, y as f32 + spec.y_offset, z as f32 + 0.5);
+                if is_camera_to_light_occluded(&store, camera.translation(), world) {
+                    continue;
+                }
                 let d2 = camera.translation().distance_squared(world);
                 candidates.push((d2, pos, spec));
             }
@@ -646,8 +687,8 @@ fn update_dynamic_block_lights(
             commands.entity(entity).insert((
                 PointLight {
                     color: spec.color,
-                    intensity: spec.intensity,
-                    range: spec.range,
+                    intensity: spec.intensity * DYNAMIC_LIGHT_INTENSITY_SCALE,
+                    range: spec.range * DYNAMIC_LIGHT_RANGE_SCALE,
                     radius: 0.18,
                     shadows_enabled: false,
                     ..default()
@@ -660,8 +701,8 @@ fn update_dynamic_block_lights(
                     DynamicBlockLight,
                     PointLight {
                         color: spec.color,
-                        intensity: spec.intensity,
-                        range: spec.range,
+                        intensity: spec.intensity * DYNAMIC_LIGHT_INTENSITY_SCALE,
+                        range: spec.range * DYNAMIC_LIGHT_RANGE_SCALE,
                         radius: 0.18,
                         shadows_enabled: false,
                         ..default()
