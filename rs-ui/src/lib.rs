@@ -12,7 +12,7 @@ use bevy_egui::{
 };
 use rs_render::{
     AntiAliasingMode, BlockModelResolver, IconQuad, LightingQualityPreset, RenderDebugSettings,
-    ShadowQualityPreset, default_model_roots,
+    ModelFace, ShadowQualityPreset, default_model_roots,
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
@@ -2934,11 +2934,17 @@ fn generate_isometric_block_icon(
     }
 
     // Guaranteed fallback: render a textured isometric cube so block items are never flat.
-    let top_name = fallback_block_face_texture(block_id, damage, BlockFace::Up)
+    let top_name = resolver
+        .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosY)
+        .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::Up))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::Up).to_string());
-    let east_name = fallback_block_face_texture(block_id, damage, BlockFace::East)
+    let east_name = resolver
+        .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosX)
+        .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::East))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::East).to_string());
-    let south_name = fallback_block_face_texture(block_id, damage, BlockFace::South)
+    let south_name = resolver
+        .face_texture_name_for_meta(block_id, damage as u8, ModelFace::PosZ)
+        .or_else(|| fallback_block_face_texture(block_id, damage, BlockFace::South))
         .unwrap_or_else(|| block_texture_name(block_id, BlockFace::South).to_string());
     let top = load_block_texture(&top_name, texture_cache)?;
     let east = load_block_texture(&east_name, texture_cache)?;
