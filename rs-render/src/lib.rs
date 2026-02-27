@@ -148,6 +148,7 @@ fn enqueue_chunk_meshes(
             voxel_ao_enabled: render_debug.voxel_ao_enabled,
             voxel_ao_strength: render_debug.voxel_ao_strength,
             voxel_ao_cutout: render_debug.voxel_ao_cutout,
+            barrier_billboard: render_debug.barrier_billboard,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };
@@ -347,6 +348,7 @@ fn apply_mesh_results(
                 voxel_ao_enabled: render_debug.voxel_ao_enabled,
                 voxel_ao_strength: render_debug.voxel_ao_strength,
                 voxel_ao_cutout: render_debug.voxel_ao_cutout,
+                barrier_billboard: render_debug.barrier_billboard,
                 texture_mapping: assets.texture_mapping.clone(),
                 biome_tints: assets.biome_tints.clone(),
             };

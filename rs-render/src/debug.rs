@@ -138,6 +138,7 @@ pub struct RenderDebugSettings {
     pub voxel_ao_enabled: bool,
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
+    pub barrier_billboard: bool,
     pub water_reflections_enabled: bool,
     pub water_reflection_strength: f32,
     pub water_reflection_near_boost: f32,
@@ -219,6 +220,7 @@ impl Default for RenderDebugSettings {
             voxel_ao_enabled: true,
             voxel_ao_strength: 1.0,
             voxel_ao_cutout: true,
+            barrier_billboard: true,
             water_reflections_enabled: true,
             water_reflection_strength: 0.85,
             water_reflection_near_boost: 0.18,
@@ -254,6 +256,7 @@ pub struct MeshingToggleState {
     pub last_voxel_ao_enabled: bool,
     pub last_voxel_ao_cutout: bool,
     pub last_voxel_ao_strength: f32,
+    pub last_barrier_billboard: bool,
 }
 
 impl Default for MeshingToggleState {
@@ -263,6 +266,7 @@ impl Default for MeshingToggleState {
             last_voxel_ao_enabled: true,
             last_voxel_ao_cutout: true,
             last_voxel_ao_strength: 1.0,
+            last_barrier_billboard: true,
         }
     }
 }
@@ -570,6 +574,7 @@ pub fn remesh_on_meshing_toggle(
         && settings.voxel_ao_enabled == state.last_voxel_ao_enabled
         && settings.voxel_ao_cutout == state.last_voxel_ao_cutout
         && (settings.voxel_ao_strength - state.last_voxel_ao_strength).abs() < 0.001
+        && settings.barrier_billboard == state.last_barrier_billboard
         && !settings.force_remesh
     {
         return;
@@ -578,6 +583,7 @@ pub fn remesh_on_meshing_toggle(
     state.last_voxel_ao_enabled = settings.voxel_ao_enabled;
     state.last_voxel_ao_cutout = settings.voxel_ao_cutout;
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
+    state.last_barrier_billboard = settings.barrier_billboard;
     settings.force_remesh = false;
     in_flight.chunks.clear();
     for key in store.chunks.keys().copied() {
@@ -590,6 +596,7 @@ pub fn remesh_on_meshing_toggle(
             voxel_ao_enabled: settings.voxel_ao_enabled,
             voxel_ao_strength: settings.voxel_ao_strength,
             voxel_ao_cutout: settings.voxel_ao_cutout,
+            barrier_billboard: settings.barrier_billboard,
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };

@@ -194,6 +194,7 @@ impl ChunkColumnSnapshot {
         voxel_ao_enabled: bool,
         voxel_ao_strength: f32,
         voxel_ao_cutout: bool,
+        barrier_billboard: bool,
         texture_mapping: &AtlasBlockMapping,
         biome_tints: &BiomeTintResolver,
     ) -> MeshBatch {
@@ -206,6 +207,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                barrier_billboard,
                 texture_mapping,
                 biome_tints,
             )
@@ -218,6 +220,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                barrier_billboard,
                 texture_mapping,
                 biome_tints,
             )
@@ -540,7 +543,10 @@ fn texture_root_path() -> PathBuf {
 
 fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolver>) {
     let textures_root = texture_root_path();
+    let extra_sources = extra_texture_sources();
     let mut texture_names = collect_texture_names(&textures_root);
+    texture_names.extend(extra_sources.keys().cloned());
+    texture_names.extend(PLAYER_HEAD_TEXTURES.iter().map(|s| (*s).to_string()));
     texture_names.sort();
     texture_names.dedup();
     if texture_names.is_empty() {
@@ -569,8 +575,8 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
     let mut atlas = None::<ImageBuffer<Rgba<u8>, Vec<u8>>>;
 
     for (idx, texture_name) in texture_names.iter().enumerate() {
-        let texture_path = textures_root.join(texture_name);
-        let img = image::open(&texture_path).unwrap_or_else(|_| missing_texture_image());
+        let img = load_texture_image(&textures_root, texture_name, &extra_sources)
+            .unwrap_or_else(missing_texture_image);
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
         let size = tile_size.get_or_insert((w, h));
@@ -617,6 +623,72 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         mapping,
         biome_tints,
     )
+}
+
+const PLAYER_HEAD_TEXTURES: [&str; 6] = [
+    "head_player_top.png",
+    "head_player_bottom.png",
+    "head_player_front.png",
+    "head_player_back.png",
+    "head_player_left.png",
+    "head_player_right.png",
+];
+
+fn extra_texture_sources() -> HashMap<String, PathBuf> {
+    let root = texturepack_minecraft_root().join("textures");
+    [
+        ("barrier_item.png", "items/barrier.png"),
+        ("chest_normal.png", "entity/chest/normal.png"),
+        ("chest_trapped.png", "entity/chest/trapped.png"),
+        ("chest_ender.png", "entity/chest/ender.png"),
+        ("sign_entity.png", "entity/sign.png"),
+    ]
+    .into_iter()
+    .map(|(name, rel)| (name.to_string(), root.join(rel)))
+    .collect()
+}
+
+fn load_texture_image(
+    textures_root: &std::path::Path,
+    texture_name: &str,
+    extra_sources: &HashMap<String, PathBuf>,
+) -> Option<DynamicImage> {
+    if let Some(path) = extra_sources.get(texture_name)
+        && let Ok(img) = image::open(path)
+    {
+        return Some(img);
+    }
+
+    let direct_path = textures_root.join(texture_name);
+    if let Ok(img) = image::open(&direct_path) {
+        return Some(img);
+    }
+
+    if let Some(img) = player_head_face_texture(texture_name) {
+        return Some(img);
+    }
+
+    None
+}
+
+fn player_head_face_texture(texture_name: &str) -> Option<DynamicImage> {
+    let (x, y) = match texture_name {
+        "head_player_right.png" => (0, 8),
+        "head_player_front.png" => (8, 8),
+        "head_player_left.png" => (16, 8),
+        "head_player_back.png" => (24, 8),
+        "head_player_top.png" => (8, 0),
+        "head_player_bottom.png" => (16, 0),
+        _ => return None,
+    };
+
+    let steve = texturepack_minecraft_root().join("textures/entity/steve.png");
+    let img = image::open(steve).ok()?.to_rgba8();
+    if img.width() < x + 8 || img.height() < y + 8 {
+        return None;
+    }
+    let cropped = imageops::crop_imm(&img, x, y, 8, 8).to_image();
+    Some(DynamicImage::ImageRgba8(cropped))
 }
 
 fn apply_default_foliage_tint(texture_name: &str, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
@@ -990,6 +1062,7 @@ fn build_chunk_mesh_culled(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    barrier_billboard: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -1027,6 +1100,7 @@ fn build_chunk_mesh_culled(
                             z,
                             block_id,
                             tint,
+                            barrier_billboard,
                         );
                         continue;
                     }
@@ -1079,6 +1153,7 @@ fn build_chunk_mesh_greedy(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    barrier_billboard: bool,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -1117,6 +1192,7 @@ fn build_chunk_mesh_greedy(
                         z,
                         block_id,
                         tint,
+                        barrier_billboard,
                     );
                 }
             }
@@ -1769,6 +1845,7 @@ fn add_custom_block(
     z: i32,
     block_id: u16,
     tint: BiomeTint,
+    barrier_billboard: bool,
 ) {
     match block_model_kind(block_type(block_id)) {
         BlockModelKind::Cross => add_cross_plant(
@@ -2439,6 +2516,175 @@ fn add_custom_block(
                     block_id,
                     tint,
                 ),
+                // Lever: compact base + short handle segment.
+                69 => {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.3125, 0.0, 0.3125],
+                        [0.6875, 0.1875, 0.6875],
+                        block_id,
+                        tint,
+                    );
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.4375, 0.1875, 0.4375],
+                        [0.5625, 0.75, 0.5625],
+                        block_id,
+                        tint,
+                    );
+                }
+                // Signs: thin board and optional post.
+                63 => {
+                    let yaw = (block_meta(block_id) as f32) * std::f32::consts::TAU / 16.0;
+                    let sx = yaw.sin().abs();
+                    let sz = yaw.cos().abs();
+                    let half_thickness = 0.0625 + 0.0625 * sx.max(sz);
+                    let min_x = (0.5 - half_thickness).clamp(0.0, 1.0);
+                    let max_x = (0.5 + half_thickness).clamp(0.0, 1.0);
+                    let min_z = (0.5 - half_thickness).clamp(0.0, 1.0);
+                    let max_z = (0.5 + half_thickness).clamp(0.0, 1.0);
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [min_x, 0.5, min_z],
+                        [max_x, 1.0, max_z],
+                        block_id,
+                        tint,
+                    );
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.4375, 0.0, 0.4375],
+                        [0.5625, 0.5, 0.5625],
+                        block_id,
+                        tint,
+                    );
+                }
+                68 => {
+                    let (min, max) = match block_meta(block_id) & 0x7 {
+                        2 => ([0.0, 0.25, 0.875], [1.0, 0.875, 0.9375]),
+                        3 => ([0.0, 0.25, 0.0625], [1.0, 0.875, 0.125]),
+                        4 => ([0.875, 0.25, 0.0], [0.9375, 0.875, 1.0]),
+                        _ => ([0.0625, 0.25, 0.0], [0.125, 0.875, 1.0]),
+                    };
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        min,
+                        max,
+                        block_id,
+                        tint,
+                    );
+                }
+                // Flower pot: low pot shape.
+                140 => {
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        [0.3125, 0.0, 0.3125],
+                        [0.6875, 0.375, 0.6875],
+                        block_id,
+                        tint,
+                    );
+                }
+                // Skull/head: player head sized cube.
+                144 => {
+                    let (min, max) = if (block_meta(block_id) & 0x7) == 1 {
+                        ([0.25, 0.25, 0.5], [0.75, 0.75, 1.0])
+                    } else {
+                        ([0.25, 0.0, 0.25], [0.75, 0.5, 0.75])
+                    };
+                    add_box(
+                        batch,
+                        None,
+                        texture_mapping,
+                        biome_tints,
+                        x,
+                        y,
+                        z,
+                        min,
+                        max,
+                        block_id,
+                        tint,
+                    );
+                }
+                // Barrier: either a sprite marker or a transparent cube.
+                166 => {
+                    if barrier_billboard {
+                        add_cross_plant(
+                            batch,
+                            snapshot,
+                            texture_mapping,
+                            biome_tints,
+                            chunk_x,
+                            chunk_z,
+                            x,
+                            y,
+                            z,
+                            block_id,
+                            tint,
+                        );
+                    } else {
+                        add_box(
+                            batch,
+                            None,
+                            texture_mapping,
+                            biome_tints,
+                            x,
+                            y,
+                            z,
+                            [0.0, 0.0, 0.0],
+                            [1.0, 1.0, 1.0],
+                            block_id,
+                            tint,
+                        );
+                    }
+                }
+                51 => add_cross_plant(
+                    batch,
+                    snapshot,
+                    texture_mapping,
+                    biome_tints,
+                    chunk_x,
+                    chunk_z,
+                    x,
+                    y,
+                    z,
+                    block_id,
+                    tint,
+                ),
                 _ => {}
             }
         }
@@ -3074,7 +3320,8 @@ fn render_group_for_block(block_id: u16) -> MaterialGroup {
     }
     if matches!(
         id,
-        26 | 27 | 28 | 64 | 65 | 66 | 71 | 96 | 157 | 193 | 194 | 195 | 196 | 197
+        26 | 27 | 28 | 51 | 63 | 64 | 65 | 66 | 68 | 69 | 71 | 96 | 140 | 144 | 157 | 166
+            | 193 | 194 | 195 | 196 | 197
     ) {
         return MaterialGroup::Cutout;
     }

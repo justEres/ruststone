@@ -204,6 +204,26 @@ impl AtlasBlockMapping {
                 8 => "flower_oxeye_daisy.png",
                 _ => "flower_rose.png",
             }),
+            51 => Some(if (meta & 0x1) != 0 {
+                "fire_layer_1.png"
+            } else {
+                "fire_layer_0.png"
+            }),
+            54 => Some("chest_normal.png"),
+            146 => Some("chest_trapped.png"),
+            130 => Some("chest_ender.png"),
+            63 | 68 => Some("sign_entity.png"),
+            69 => Some("lever.png"),
+            140 => Some("flower_pot.png"),
+            144 => Some(match face {
+                Face::PosY => "head_player_top.png",
+                Face::NegY => "head_player_bottom.png",
+                Face::PosZ => "head_player_front.png",
+                Face::NegZ => "head_player_back.png",
+                Face::PosX => "head_player_right.png",
+                Face::NegX => "head_player_left.png",
+            }),
+            166 => Some("barrier_item.png"),
             43 | 44 => Some(match meta & 0x7 {
                 1 => match face {
                     Face::PosY => "sandstone_top.png",

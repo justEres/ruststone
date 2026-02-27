@@ -64,6 +64,7 @@ pub struct MeshJob {
     pub voxel_ao_enabled: bool,
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
+    pub barrier_billboard: bool,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
 }
@@ -76,6 +77,7 @@ impl MeshJob {
             self.voxel_ao_enabled,
             self.voxel_ao_strength,
             self.voxel_ao_cutout,
+            self.barrier_billboard,
             &self.texture_mapping,
             &self.biome_tints,
         )
