@@ -27,7 +27,7 @@ use rs_utils::{
     block_registry_key, block_state_id, block_state_meta,
 };
 
-use crate::entities::{ItemSpriteStack, PlayerTextureDebugSettings, RemoteVisual};
+use crate::entities::{ItemSpriteStack, RemoteVisual};
 use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use crate::timing::Timing;
@@ -1535,9 +1535,10 @@ fn target_outline_boxes(
             let h = if id == 175 { 1.0 } else { 0.875 };
             Some((min + Vec3::new(0.1, 0.0, 0.1), min + Vec3::new(0.9, h, 0.9)))
         }
-        rs_utils::BlockModelKind::TorchLike => {
-            Some((min + Vec3::new(0.4, 0.0, 0.4), min + Vec3::new(0.6, 0.75, 0.6)))
-        }
+        rs_utils::BlockModelKind::TorchLike => Some((
+            min + Vec3::new(0.4, 0.0, 0.4),
+            min + Vec3::new(0.6, 0.75, 0.6),
+        )),
         rs_utils::BlockModelKind::Custom => match id {
             26 => Some((min, min + Vec3::new(1.0, 9.0 / 16.0, 1.0))), // bed
             27 | 28 | 66 | 157 | 171 => Some((min, min + Vec3::new(1.0, 1.0 / 16.0, 1.0))), // rails/carpet
@@ -1674,7 +1675,6 @@ pub fn debug_overlay_system(
     time: Res<Time>,
     mut debug_ui: ResMut<DebugUiState>,
     mut render_debug: ResMut<RenderDebugSettings>,
-    mut player_tex_debug: ResMut<PlayerTextureDebugSettings>,
     render_perf: Res<RenderPerfStats>,
     sim_state: Res<SimState>,
     input: Res<CurrentInput>,
@@ -1739,342 +1739,16 @@ pub fn debug_overlay_system(
                                 &mut render_debug.show_layer_chunks_transparent,
                                 "Layer: chunks transparent",
                             );
-                            ui.checkbox(
-                                &mut render_debug.manual_frustum_cull,
-                                "Manual frustum cull",
-                            );
                         });
                     debug_ui.render_show_layers = layers_section.fully_open();
-
-                    let lighting_section = egui::CollapsingHeader::new("Lighting")
-                        .default_open(debug_ui.render_show_lighting)
-                        .show(ui, |ui| {
-                            ui.separator();
-                            ui.checkbox(
-                                &mut render_debug.enable_pbr_terrain_lighting,
-                                "Enable PBR path",
-                            );
-                            ui.checkbox(&mut render_debug.shadows_enabled, "Shadows");
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shader_quality_mode, 0..=3)
-                                    .text("Shader quality mode"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.shadow_distance_scale,
-                                    0.25..=20.0,
-                                )
-                                .logarithmic(true)
-                                .text("Shadow distance"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shadow_map_size, 256..=4096)
-                                    .text("Shadow map size"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shadow_cascades, 1..=4)
-                                    .text("Shadow cascades"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.shadow_max_distance,
-                                    8.0..=400.0,
-                                )
-                                .text("Shadow max distance"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.shadow_first_cascade_far_bound,
-                                    4.0..=200.0,
-                                )
-                                .text("Shadow first cascade far"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shadow_depth_bias, 0.0..=0.2)
-                                    .text("Shadow depth bias"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shadow_normal_bias, 0.0..=2.0)
-                                    .text("Shadow normal bias"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.sun_azimuth_deg,
-                                    -180.0..=180.0,
-                                )
-                                .text("Sun azimuth"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.sun_elevation_deg,
-                                    -20.0..=89.0,
-                                )
-                                .text("Sun elevation"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
-                                    .text("Sun strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.sun_warmth, 0.0..=1.0)
-                                    .text("Sun warmth"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.shadow_opacity, 0.0..=1.0)
-                                    .text("Shadow opacity"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
-                                    .text("Ambient strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.ambient_brightness, 0.0..=2.0)
-                                    .text("Ambient brightness"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
-                                    .text("Fog density"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.fog_start, 0.0..=500.0)
-                                    .text("Fog start"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.fog_end, 1.0..=700.0)
-                                    .text("Fog end"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.water_absorption, 0.0..=1.0)
-                                    .text("Water absorption"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.water_fresnel, 0.0..=1.0)
-                                    .text("Water fresnel"),
-                            );
-                        });
-                    debug_ui.render_show_lighting = lighting_section.fully_open();
-
-                    let water_section = egui::CollapsingHeader::new("Water")
-                        .default_open(debug_ui.render_show_water)
-                        .show(ui, |ui| {
-                            ui.separator();
-                            ui.checkbox(
-                                &mut render_debug.water_reflections_enabled,
-                                "Water reflections",
-                            );
-                            ui.checkbox(
-                                &mut render_debug.water_reflection_screen_space,
-                                "Screen-space SSR raymarch",
-                            );
-                            if render_debug.water_reflection_screen_space {
-                                ui.add(
-                                    egui::Slider::new(&mut render_debug.water_ssr_steps, 4..=64)
-                                        .text("SSR ray steps"),
-                                );
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut render_debug.water_ssr_thickness,
-                                        0.02..=2.0,
-                                    )
-                                    .text("SSR hit thickness"),
-                                );
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut render_debug.water_ssr_max_distance,
-                                        4.0..=400.0,
-                                    )
-                                    .text("SSR max distance"),
-                                );
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut render_debug.water_ssr_stride,
-                                        0.2..=8.0,
-                                    )
-                                    .text("SSR step stride"),
-                                );
-                            }
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_strength,
-                                    0.0..=3.0,
-                                )
-                                .text("Water reflection strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_near_boost,
-                                    0.0..=1.0,
-                                )
-                                .text("Near reflection boost"),
-                            );
-                            ui.checkbox(
-                                &mut render_debug.water_reflection_blue_tint,
-                                "Blue reflection tint",
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_tint_strength,
-                                    0.0..=2.0,
-                                )
-                                .text("Blue tint strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.water_wave_strength, 0.0..=1.2)
-                                    .text("Water wave strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.water_wave_speed, 0.0..=3.0)
-                                    .text("Water wave speed"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_wave_detail_strength,
-                                    0.0..=1.2,
-                                )
-                                .text("Wave detail strength"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_wave_detail_scale,
-                                    1.0..=8.0,
-                                )
-                                .text("Wave detail scale"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_wave_detail_speed,
-                                    0.0..=4.0,
-                                )
-                                .text("Wave detail speed"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_edge_fade,
-                                    0.02..=0.5,
-                                )
-                                .text("Reflection edge fade"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_sky_fill,
-                                    0.0..=1.0,
-                                )
-                                .text("Sky fallback fill"),
-                            );
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_overscan,
-                                    1.0..=3.0,
-                                )
-                                .text("Reflection overscan"),
-                            );
-                        });
-                    debug_ui.render_show_water = water_section.fully_open();
-
-                    let misc_section = egui::CollapsingHeader::new("Misc")
-                        .default_open(debug_ui.render_show_misc)
-                        .show(ui, |ui| {
-                            ui.separator();
-                            let mut aa_mode = render_debug.aa_mode;
-                            egui::ComboBox::from_label("AA")
-                                .selected_text(aa_mode.label())
-                                .show_ui(ui, |ui| {
-                                    for mode in rs_render::AntiAliasingMode::ALL {
-                                        ui.selectable_value(&mut aa_mode, mode, mode.label());
-                                    }
-                                });
-                            if aa_mode != render_debug.aa_mode {
-                                render_debug.aa_mode = aa_mode;
-                                render_debug.fxaa_enabled = matches!(
-                                    render_debug.aa_mode,
-                                    rs_render::AntiAliasingMode::Fxaa
-                                        | rs_render::AntiAliasingMode::Msaa4
-                                        | rs_render::AntiAliasingMode::Msaa8
-                                );
-                            }
-                            ui.checkbox(
-                                &mut render_debug.use_greedy_meshing,
-                                "Binary greedy meshing",
-                            );
-                            ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
-                            ui.checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO");
-                            ui.checkbox(&mut render_debug.voxel_ao_cutout, "Voxel AO on cutout");
-                            ui.checkbox(
-                                &mut render_debug.barrier_billboard,
-                                "Barriers as billboard sprites",
-                            );
-                            ui.add(
-                                egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
-                                    .text("Voxel AO strength"),
-                            );
-                            if ui.button("Force remesh chunks").clicked() {
-                                render_debug.force_remesh = true;
-                            }
-                            if ui.button("Reset Debug/Render Settings").clicked() {
-                                *render_debug = RenderDebugSettings::default();
-                            }
-                            if ui.button("Rebuild render materials").clicked() {
-                                render_debug.material_rebuild_nonce =
-                                    render_debug.material_rebuild_nonce.wrapping_add(1);
-                            }
-                            ui.checkbox(&mut render_debug.render_held_items, "Render held items");
-                            ui.checkbox(
-                                &mut render_debug.render_first_person_arms,
-                                "First-person arms",
-                            );
-                            ui.checkbox(&mut render_debug.render_self_model, "Render self model");
-                            ui.checkbox(&mut render_debug.show_chunk_borders, "Chunk borders");
-                            ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
-                            ui.checkbox(&mut render_debug.show_look_info, "Look info");
-                            ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
-                            ui.checkbox(
-                                &mut render_debug.show_target_block_outline,
-                                "Target block outline",
-                            );
-                        });
-                    debug_ui.render_show_misc = misc_section.fully_open();
-                    let mut cutout_mode = render_debug.cutout_debug_mode as i32;
-                    egui::ComboBox::from_label("Cutout debug")
-                        .selected_text(match cutout_mode {
-                            1 => "Pass id",
-                            2 => "Atlas RGB",
-                            3 => "Atlas alpha",
-                            4 => "Vertex tint",
-                            5 => "Linear depth",
-                            6 => "Pass flags",
-                            7 => "Alpha + pass",
-                            8 => "Cutout lit flags",
-                            _ => "Off",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut cutout_mode, 0, "Off");
-                            ui.selectable_value(&mut cutout_mode, 1, "Pass id");
-                            ui.selectable_value(&mut cutout_mode, 2, "Atlas rgb");
-                            ui.selectable_value(&mut cutout_mode, 3, "Atlas alpha");
-                            ui.selectable_value(&mut cutout_mode, 4, "Vertex tint");
-                            ui.selectable_value(&mut cutout_mode, 5, "Linear depth");
-                            ui.selectable_value(&mut cutout_mode, 6, "Pass flags");
-                            ui.selectable_value(&mut cutout_mode, 7, "Alpha + pass");
-                            ui.selectable_value(&mut cutout_mode, 8, "Cutout lit flags");
-                        });
-                    render_debug.cutout_debug_mode = cutout_mode.clamp(0, 8) as u8;
-                    ui.checkbox(&mut render_debug.frustum_fov_debug, "Frustum FOV debug");
-                    ui.checkbox(&mut player_tex_debug.flip_u, "Flip player skin U");
-                    ui.checkbox(&mut player_tex_debug.flip_v, "Flip player skin V");
-                    if render_debug.frustum_fov_debug {
-                        ui.add(
-                            egui::Slider::new(&mut render_debug.frustum_fov_deg, 30.0..=140.0)
-                                .text("Frustum FOV"),
-                        );
-                    }
-                    let mut dist = render_debug.render_distance_chunks as i32;
-                    if ui
-                        .add(egui::Slider::new(&mut dist, 2..=32).text("Render distance"))
-                        .changed()
-                    {
-                        render_debug.render_distance_chunks = dist;
-                    }
-                    ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV"));
+                    ui.separator();
+                    ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
+                    ui.checkbox(&mut render_debug.show_look_info, "Look info");
+                    ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
+                    ui.checkbox(
+                        &mut render_debug.show_target_block_outline,
+                        "Target block outline",
+                    );
 
                     if render_debug.show_coordinates || render_debug.show_look_info {
                         ui.separator();
@@ -2299,8 +1973,7 @@ pub fn debug_overlay_system(
                     ));
                     ui.label(format!(
                         "chunks after occlusion: {} (occluded {})",
-                        render_perf.visible_chunks_after_occlusion,
-                        render_perf.occluded_chunks
+                        render_perf.visible_chunks_after_occlusion, render_perf.occluded_chunks
                     ));
                     ui.separator();
                     ui.label(format!(
