@@ -381,10 +381,10 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
 }
 
 fn sanitize_outgoing_chat(input: &str) -> String {
-    // 1.8 servers reject section sign and control chars in client chat.
+    // Keep Minecraft formatting code points (e.g. §) intact but strip control bytes.
     let filtered: String = input
         .chars()
-        .filter(|&ch| ch >= ' ' && ch != '\u{7f}' && ch != '§')
+        .filter(|&ch| ch >= ' ' && ch != '\u{7f}')
         .collect();
     if filtered.chars().count() > 100 {
         filtered.chars().take(100).collect()
