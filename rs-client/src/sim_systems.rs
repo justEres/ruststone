@@ -2253,11 +2253,6 @@ pub fn debug_overlay_system(
                         fmt_pct(render_perf.last_enqueue_ms)
                     ));
                     ui.label(format!(
-                        "manual cull ms: {:.2} {}",
-                        render_perf.manual_cull_ms,
-                        fmt_pct(render_perf.manual_cull_ms)
-                    ));
-                    ui.label(format!(
                         "occlusion cull ms: {:.2} {}",
                         render_perf.occlusion_cull_ms,
                         fmt_pct(render_perf.occlusion_cull_ms)

@@ -19,6 +19,10 @@ const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
 const MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.30;
 const MANUAL_CULL_PAD_BASE: f32 = 6.0;
 const MANUAL_CULL_PAD_SHADOW_EXTRA: f32 = 12.0;
+const OCCLUSION_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.85;
+const OCCLUSION_CULL_VERTICAL_FOV_MULTIPLIER: f32 = 1.60;
+const OCCLUSION_CULL_RADIUS: f32 = 20.0;
+const OCCLUSION_CULL_FRUSTUM_PAD: f32 = 24.0;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -325,8 +329,8 @@ pub fn occlusion_cull_chunks(
         return;
     };
     let (fov_y, aspect, near, far) = camera_fov_params(&settings, projection);
-    let tan_y = (fov_y * 0.5).tan();
-    let tan_x = tan_y * aspect * MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER;
+    let tan_y = (fov_y * 0.5).tan() * OCCLUSION_CULL_VERTICAL_FOV_MULTIPLIER;
+    let tan_x = tan_y * aspect * OCCLUSION_CULL_HORIZONTAL_FOV_MULTIPLIER;
     let cam_pos = cam_transform.translation();
     let cam_forward = cam_transform.forward();
     let cam_right = cam_transform.right();
@@ -346,15 +350,15 @@ pub fn occlusion_cull_chunks(
                 cam_pos.y,
                 (chunk.key.1 * 16 + 8) as f32,
             );
-            let radius = 14.0;
+            let radius = OCCLUSION_CULL_RADIUS;
             let to_center = center - cam_pos;
             let z = to_center.dot(*cam_forward);
             let x = to_center.dot(*cam_right).abs();
             let y = to_center.dot(*cam_up).abs();
-            let in_frustum = z >= near - radius
-                && z <= far + radius
-                && x <= z * tan_x + radius
-                && y <= z * tan_y + radius;
+            let in_frustum = z >= near - radius - OCCLUSION_CULL_FRUSTUM_PAD
+                && z <= far + radius + OCCLUSION_CULL_FRUSTUM_PAD
+                && x <= z * tan_x + radius + OCCLUSION_CULL_FRUSTUM_PAD
+                && y <= z * tan_y + radius + OCCLUSION_CULL_FRUSTUM_PAD;
             if in_frustum {
                 frustum_candidates.insert(chunk.key);
             }

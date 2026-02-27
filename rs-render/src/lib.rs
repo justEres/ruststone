@@ -69,9 +69,6 @@ impl Plugin for RenderPlugin {
                 apply_mesh_results.before(VisibilitySystems::CheckVisibility),
                 debug::occlusion_cull_chunks
                     .after(apply_mesh_results)
-                    .before(debug::manual_frustum_cull),
-                debug::manual_frustum_cull
-                    .after(apply_mesh_results)
                     .before(VisibilitySystems::CheckVisibility),
                 debug::gather_render_stats.after(VisibilitySystems::CheckVisibility),
             ),

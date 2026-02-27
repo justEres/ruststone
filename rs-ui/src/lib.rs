@@ -37,8 +37,15 @@ impl Plugin for UiPlugin {
         app.add_systems(EguiPrimaryContextPass, connect_ui)
             .add_plugins(EguiPlugin::default())
             .init_resource::<ConnectUiState>()
-            .init_resource::<ItemIconCache>();
+            .init_resource::<ItemIconCache>()
+            .init_resource::<FpsOverlayState>();
     }
+}
+
+#[derive(Resource, Default)]
+struct FpsOverlayState {
+    samples: Vec<(f64, f32)>,
+    elapsed_s: f64,
 }
 
 fn connect_ui(
@@ -57,6 +64,7 @@ fn connect_ui(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut window_events: EventReader<WindowFocused>,
     mut timings: ResMut<PerfTimings>,
+    mut fps_overlay: ResMut<FpsOverlayState>,
 ) {
     let start = std::time::Instant::now();
     let ctx = contexts.ctx_mut().unwrap();
@@ -312,6 +320,62 @@ fn connect_ui(
     }
 
     if matches!(app_state.0, ApplicationState::Connected) {
+        let frame_ms = if timings.frame_delta_ms > 0.0 {
+            timings.frame_delta_ms
+        } else {
+            16.6667
+        };
+        let fps = if frame_ms > 0.0 { 1000.0 / frame_ms } else { 0.0 };
+        fps_overlay.elapsed_s += (frame_ms / 1000.0) as f64;
+        let now = fps_overlay.elapsed_s;
+        fps_overlay.samples.push((now, fps));
+        let cutoff_10s = now - 10.0;
+        fps_overlay.samples.retain(|(t, _)| *t >= cutoff_10s);
+
+        let avg_for_window = |window_s: f64| -> f32 {
+            let cutoff = now - window_s;
+            let mut sum = 0.0f32;
+            let mut count = 0u32;
+            for (t, value) in &fps_overlay.samples {
+                if *t >= cutoff {
+                    sum += *value;
+                    count += 1;
+                }
+            }
+            if count > 0 { sum / count as f32 } else { fps }
+        };
+        let avg_1s = avg_for_window(1.0);
+        let avg_10s = avg_for_window(10.0);
+        let fps_color = if fps >= 120.0 {
+            egui::Color32::from_rgb(125, 220, 120)
+        } else if fps >= 60.0 {
+            egui::Color32::from_rgb(200, 220, 120)
+        } else if fps >= 30.0 {
+            egui::Color32::from_rgb(230, 170, 100)
+        } else {
+            egui::Color32::from_rgb(230, 110, 110)
+        };
+        egui::Area::new(egui::Id::new("fps_overlay"))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let frame = egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(96))
+                    .inner_margin(egui::Margin::same(8))
+                    .corner_radius(4.0);
+                frame.show(ui, |ui| {
+                    ui.label(egui::RichText::new(format!("FPS: {:.0}", fps)).color(fps_color).strong());
+                    ui.label(
+                        egui::RichText::new(format!("1s avg: {:.1}", avg_1s))
+                            .color(egui::Color32::from_gray(220)),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!("10s avg: {:.1}", avg_10s))
+                            .color(egui::Color32::from_gray(220)),
+                    );
+                });
+            });
+
         let panel_width = (ctx.screen_rect().width() * 0.45).clamp(280.0, 520.0);
         let visible_lines = if ui_state.chat_open { 16 } else { 8 };
         egui::Area::new(egui::Id::new("chat_overlay"))
@@ -407,9 +471,6 @@ fn connect_ui(
                             );
                             options_changed = true;
                         }
-                        options_changed |= ui
-                            .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
-                            .changed();
                         options_changed |= ui
                             .checkbox(&mut render_debug.occlusion_cull_enabled, "Occlusion cull")
                             .changed();
