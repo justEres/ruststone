@@ -419,18 +419,25 @@ pub fn apply_lighting_quality(
         mat.base.unlit = !uses_shadowed_pbr_path(&settings);
         mat.base.alpha_mode = AlphaMode::Opaque;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
+        // Minecraft-style blocks should remain mostly diffuse; avoid close-range white sheen.
+        mat.base.perceptual_roughness = 1.0;
+        mat.base.reflectance = 0.02;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_material) {
         mat.extension.lighting = make_lighting(2.0);
         mat.base.unlit = false;
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
+        mat.base.perceptual_roughness = 1.0;
+        mat.base.reflectance = 0.02;
     }
     if let Some(mat) = materials.get_mut(&assets.cutout_culled_material) {
         mat.extension.lighting = make_lighting(2.0);
         mat.base.unlit = false;
         mat.base.alpha_mode = cutout_alpha_mode;
         mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
+        mat.base.perceptual_roughness = 1.0;
+        mat.base.reflectance = 0.02;
     }
     if let Some(mat) = materials.get_mut(&assets.transparent_material) {
         mat.extension.lighting = make_lighting(1.0);
