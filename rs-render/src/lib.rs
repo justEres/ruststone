@@ -193,6 +193,7 @@ fn apply_mesh_results(
             chunk::ChunkEntry {
                 entity,
                 submeshes: HashMap::new(),
+                occlusion: chunk::ChunkOcclusionData::default(),
             }
         });
 
@@ -202,7 +203,9 @@ fn apply_mesh_results(
             cutout,
             cutout_culled,
             transparent,
+            occlusion,
         } = mesh_batch;
+        entry.occlusion = occlusion;
         for (group, data, material) in [
             (
                 chunk::MaterialGroup::Opaque,
