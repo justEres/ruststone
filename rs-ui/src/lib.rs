@@ -2854,33 +2854,37 @@ impl ItemIconCache {
             return None;
         }
 
-        if let Some(image) = generate_isometric_block_icon(
-            stack.item_id,
-            stack.damage,
-            &mut self.block_model_resolver,
-            &mut self.block_texture_images,
-            &mut self.logged_stone_fallback,
-            &mut self.logged_model_fallback,
-            &mut self.logged_resolution_path,
-        ) {
-            let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
-            let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
-            let id = handle.id();
-            self.loaded.insert(key, handle);
-            return Some(id);
-        }
-
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
-        for rel_path in candidates {
+        let mut found_candidate = false;
+        for rel_path in &candidates {
             let full_path = texturepack_textures_root().join(&rel_path);
             if !full_path.exists() {
                 continue;
             }
+            found_candidate = true;
             let Some(color_image) = load_color_image(&full_path) else {
                 continue;
             };
             let texture_name = format!("item_icon_{}_{}_{}", stack.item_id, stack.damage, rel_path);
             let handle = ctx.load_texture(texture_name, color_image, egui::TextureOptions::NEAREST);
+            let id = handle.id();
+            self.loaded.insert(key, handle);
+            return Some(id);
+        }
+        // If there is no direct texture candidate, render an isometric icon from block model data.
+        if !found_candidate
+            && let Some(image) = generate_isometric_block_icon(
+                stack.item_id,
+                stack.damage,
+                &mut self.block_model_resolver,
+                &mut self.block_texture_images,
+                &mut self.logged_stone_fallback,
+                &mut self.logged_model_fallback,
+                &mut self.logged_resolution_path,
+            )
+        {
+            let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
+            let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
             let id = handle.id();
             self.loaded.insert(key, handle);
             return Some(id);
