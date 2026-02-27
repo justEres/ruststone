@@ -262,10 +262,11 @@ pub fn local_held_item_view_system(
     render_debug: Res<RenderDebugSettings>,
     perspective: Res<CameraPerspectiveState>,
     inventory: Res<InventoryState>,
+    collision_map: Res<WorldCollisionMap>,
     mut item_textures: ResMut<ItemTextureCache>,
     item_sprite_mesh: Res<ItemSpriteMesh>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<Entity, With<PlayerCamera>>,
+    camera: Query<(Entity, &GlobalTransform), With<PlayerCamera>>,
     existing: Query<Entity, With<LocalHeldItemSprite>>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
@@ -283,9 +284,30 @@ pub fn local_held_item_view_system(
         return;
     }
 
-    let Ok(cam_entity) = camera.get_single() else {
+    let Ok((cam_entity, cam_transform)) = camera.get_single() else {
         return;
     };
+
+    let cam_pos = cam_transform.translation();
+    let cam_rot = cam_transform.compute_transform().rotation;
+    // Held item occupies the right-lower-forward camera space; hide it when intersecting solids.
+    let held_item_probes = [
+        Vec3::new(0.20, -0.24, -0.38),
+        Vec3::new(0.36, -0.32, -0.56),
+        Vec3::new(0.48, -0.38, -0.72),
+        Vec3::new(0.58, -0.42, -0.86),
+    ];
+    let colliding_near_wall = held_item_probes.into_iter().any(|probe| {
+        let world = cam_pos + cam_rot * probe;
+        let cell = world.floor().as_ivec3();
+        crate::sim::collision::is_solid(collision_map.block_at(cell.x, cell.y, cell.z))
+    });
+    if colliding_near_wall {
+        for e in existing.iter() {
+            commands.entity(e).despawn_recursive();
+        }
+        return;
+    }
 
     let held = inventory.hotbar_item(inventory.selected_hotbar_slot);
     let Some(stack) = held else {
