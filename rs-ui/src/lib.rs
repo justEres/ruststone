@@ -1639,6 +1639,7 @@ fn draw_debug_item_browser(
     item_icons: &mut ItemIconCache,
     to_net: &ToNet,
 ) {
+    let give_target = debug_give_target(state);
     egui::Window::new("Debug Item Browser")
         .open(&mut state.debug_items_open)
         .resizable(true)
@@ -1703,7 +1704,7 @@ fn draw_debug_item_browser(
                                 hovered = Some(stack.clone());
                             }
                             if response.clicked() {
-                                let cmd = debug_give_command(stack);
+                                let cmd = debug_give_command(stack, &give_target);
                                 let _ = to_net.0.send(ToNetMessage::ChatMessage(cmd));
                             }
                             i += 1;
@@ -1719,18 +1720,39 @@ fn draw_debug_item_browser(
         });
 }
 
-fn debug_give_command(stack: &InventoryItemStack) -> String {
+fn debug_give_command(stack: &InventoryItemStack, target: &str) -> String {
     let item = item_registry_key(stack.item_id)
-        .map(|k| format!("minecraft:{k}"))
+        .map(str::to_string)
         .or_else(|| {
             u16::try_from(stack.item_id)
                 .ok()
                 .and_then(block_registry_key)
-                .map(|k| format!("minecraft:{k}"))
+                .map(str::to_string)
         })
         .unwrap_or_else(|| stack.item_id.to_string());
     let damage = i32::from(stack.damage.max(0));
-    format!("/give @p {item} 1 {damage}")
+    format!("/give {target} {item} 1 {damage}")
+}
+
+fn debug_give_target(state: &ConnectUiState) -> String {
+    if matches!(state.auth_mode, AuthMode::Authenticated)
+        && !state.auth_accounts.is_empty()
+        && state.selected_auth_account < state.auth_accounts.len()
+    {
+        let chosen = state.auth_accounts[state.selected_auth_account]
+            .username
+            .trim()
+            .to_string();
+        if !chosen.is_empty() {
+            return chosen;
+        }
+    }
+    let username = state.username.trim();
+    if username.is_empty() {
+        "@p".to_string()
+    } else {
+        username.to_string()
+    }
 }
 
 fn equipped_armor_points(inventory_state: &InventoryState) -> i32 {

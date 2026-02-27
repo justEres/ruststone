@@ -246,7 +246,6 @@ fn color_variant(meta: u8) -> &'static str {
 
 fn blockstate_name_candidates(block_id: u16, base_name: &str, meta: u8) -> Vec<String> {
     let mut out = Vec::with_capacity(6);
-    out.push(base_name.to_string());
     match block_id {
         1 => {
             let name = match meta {
@@ -380,6 +379,7 @@ fn blockstate_name_candidates(block_id: u16, base_name: &str, meta: u8) -> Vec<S
         }
         _ => {}
     }
+    out.push(base_name.to_string());
     dedup_keep_order(out)
 }
 
