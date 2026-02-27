@@ -90,6 +90,7 @@ pub struct RenderDebugSettings {
     pub aa_mode: AntiAliasingMode,
     pub fxaa_enabled: bool,
     pub manual_frustum_cull: bool,
+    pub occlusion_cull_enabled: bool,
     pub frustum_fov_debug: bool,
     pub frustum_fov_deg: f32,
     pub show_chunk_borders: bool,
@@ -170,6 +171,7 @@ impl Default for RenderDebugSettings {
             aa_mode: AntiAliasingMode::default(),
             fxaa_enabled: true,
             manual_frustum_cull: true,
+            occlusion_cull_enabled: true,
             frustum_fov_debug: false,
             frustum_fov_deg: 110.0,
             show_chunk_borders: false,
@@ -277,6 +279,9 @@ pub struct RenderPerfStats {
     pub apply_debug_ms: f32,
     pub gather_stats_ms: f32,
     pub manual_cull_ms: f32,
+    pub occlusion_cull_ms: f32,
+    pub visible_chunks_after_occlusion: u32,
+    pub occluded_chunks: u32,
     pub mat_pass_opaque: f32,
     pub mat_pass_cutout: f32,
     pub mat_pass_cutout_culled: f32,
@@ -289,6 +294,22 @@ pub struct RenderPerfStats {
     pub mat_unlit_cutout: bool,
     pub mat_unlit_cutout_culled: bool,
     pub mat_unlit_transparent: bool,
+}
+
+pub fn occlusion_cull_chunks(
+    settings: Res<RenderDebugSettings>,
+    mut perf: ResMut<RenderPerfStats>,
+) {
+    if !settings.occlusion_cull_enabled {
+        perf.occlusion_cull_ms = 0.0;
+        perf.visible_chunks_after_occlusion = perf.visible_chunks;
+        perf.occluded_chunks = 0;
+        return;
+    }
+    let start = std::time::Instant::now();
+    perf.visible_chunks_after_occlusion = perf.visible_chunks;
+    perf.occluded_chunks = 0;
+    perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 pub fn apply_render_debug_settings(
