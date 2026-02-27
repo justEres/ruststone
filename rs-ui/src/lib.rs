@@ -17,7 +17,8 @@ use rs_render::{
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BreakIndicator, Chat, InventoryItemStack, InventoryState,
     InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet, ToNetMessage, UiState,
-    BlockFace, block_registry_key, block_texture_name, item_max_durability, item_name,
+    BlockFace, BlockModelKind, block_model_kind, block_registry_key, block_texture_name,
+    item_max_durability, item_name,
     item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
@@ -2851,6 +2852,9 @@ impl ItemIconCache {
             .ok()
             .and_then(block_registry_key)
             .is_some();
+        let prefer_flat_block_icon = u16::try_from(stack.item_id)
+            .ok()
+            .is_some_and(|id| matches!(block_model_kind(id), BlockModelKind::Cross | BlockModelKind::TorchLike));
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
         let mut first_candidate_image: Option<(String, egui::ColorImage)> = None;
@@ -2867,6 +2871,7 @@ impl ItemIconCache {
         }
 
         if is_block_item
+            && !prefer_flat_block_icon
             && let Some((image, source)) = generate_isometric_block_icon(
                 stack.item_id,
                 stack.damage,
@@ -2912,6 +2917,12 @@ impl ItemIconCache {
             }
         }
 
+        warn!(
+            "Icon text fallback for id={} meta={} key={:?}",
+            stack.item_id,
+            stack.damage,
+            item_registry_key(stack.item_id)
+        );
         self.missing.insert(key);
         None
     }
