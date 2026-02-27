@@ -4,7 +4,7 @@ use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy::render::view::VisibilitySystems;
-use bevy::render::view::{InheritedVisibility, ViewVisibility, Visibility};
+use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
 
 mod async_mesh;
 mod block_models;
@@ -276,10 +276,16 @@ fn apply_mesh_results(
                         let handle = meshes.add(mesh);
                         commands
                             .entity(submesh.entity)
-                            .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
+                            .insert((
+                                Mesh3d(handle.clone()),
+                                mesh_layers.clone(),
+                                NoFrustumCulling,
+                            ));
                         submesh.mesh = handle;
                     }
-                    commands.entity(submesh.entity).insert(mesh_layers.clone());
+                    commands
+                        .entity(submesh.entity)
+                        .insert((mesh_layers.clone(), NoFrustumCulling));
                     if let Some((min, max)) = bounds {
                         let center = (min + max) * 0.5;
                         let half = (max - min) * 0.5 + Vec3::splat(0.75);
@@ -302,6 +308,7 @@ fn apply_mesh_results(
                             Visibility::Inherited,
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
+                            NoFrustumCulling,
                         ))
                         .id();
                     if let Some((min, max)) = bounds {
