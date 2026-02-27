@@ -19,7 +19,7 @@ mod reflection;
 mod world;
 
 pub use block_models::{BlockModelResolver, IconQuad, default_model_roots};
-pub use block_textures::Face as ModelFace;
+pub use block_textures::{AtlasBlockMapping, Face as ModelFace, build_block_texture_mapping};
 pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
