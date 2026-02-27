@@ -410,6 +410,9 @@ fn connect_ui(
                         options_changed |= ui
                             .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
                             .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.occlusion_cull_enabled, "Occlusion cull")
+                            .changed();
                         if ui.checkbox(&mut state.vsync_enabled, "VSync").changed() {
                             options_changed = true;
                             if let Ok(mut window) = window_query.get_single_mut() {
@@ -1084,6 +1087,7 @@ struct ClientOptionsFile {
     pub fxaa_enabled: bool,
     pub aa_mode: String,
     pub manual_frustum_cull: bool,
+    pub occlusion_cull_enabled: bool,
     pub vsync_enabled: bool,
     pub lighting_quality: String,
     pub shadow_quality: String,
@@ -1150,6 +1154,7 @@ impl Default for ClientOptionsFile {
             fxaa_enabled: render.fxaa_enabled,
             aa_mode: render.aa_mode.as_options_value().to_string(),
             manual_frustum_cull: render.manual_frustum_cull,
+            occlusion_cull_enabled: render.occlusion_cull_enabled,
             vsync_enabled: false,
             lighting_quality: render.lighting_quality.as_options_value().to_string(),
             shadow_quality: render.shadow_quality.as_options_value().to_string(),
@@ -1216,6 +1221,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         fxaa_enabled: render.fxaa_enabled,
         aa_mode: render.aa_mode.as_options_value().to_string(),
         manual_frustum_cull: render.manual_frustum_cull,
+        occlusion_cull_enabled: render.occlusion_cull_enabled,
         vsync_enabled: state.vsync_enabled,
         lighting_quality: render.lighting_quality.as_options_value().to_string(),
         shadow_quality: render.shadow_quality.as_options_value().to_string(),
@@ -1305,6 +1311,7 @@ fn apply_options(
         AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
     );
     render.manual_frustum_cull = options.manual_frustum_cull;
+    render.occlusion_cull_enabled = options.occlusion_cull_enabled;
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
     render.sun_azimuth_deg = options.sun_azimuth_deg.clamp(-360.0, 360.0);
     render.sun_elevation_deg = options.sun_elevation_deg.clamp(-89.0, 89.0);

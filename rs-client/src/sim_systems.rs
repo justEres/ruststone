@@ -2258,6 +2258,11 @@ pub fn debug_overlay_system(
                         fmt_pct(render_perf.manual_cull_ms)
                     ));
                     ui.label(format!(
+                        "occlusion cull ms: {:.2} {}",
+                        render_perf.occlusion_cull_ms,
+                        fmt_pct(render_perf.occlusion_cull_ms)
+                    ));
+                    ui.label(format!(
                         "render debug ms: {:.2} {}",
                         render_perf.apply_debug_ms,
                         fmt_pct(render_perf.apply_debug_ms)
@@ -2284,6 +2289,11 @@ pub fn debug_overlay_system(
                     ui.label(format!(
                         "chunks: {} / {} (distance)",
                         render_perf.visible_chunks, render_perf.total_chunks
+                    ));
+                    ui.label(format!(
+                        "chunks after occlusion: {} (occluded {})",
+                        render_perf.visible_chunks_after_occlusion,
+                        render_perf.occluded_chunks
                     ));
                     ui.separator();
                     ui.label(format!(
