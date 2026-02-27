@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
 use bevy::prelude::*;
+use bevy::prelude::Mesh3d;
 use bevy::render::view::RenderLayers;
 use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
@@ -63,6 +64,7 @@ impl Plugin for RenderPlugin {
                     .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
                 enqueue_chunk_meshes,
+                disable_engine_frustum_culling_globally,
             ),
         )
         .add_systems(
@@ -276,16 +278,10 @@ fn apply_mesh_results(
                         let handle = meshes.add(mesh);
                         commands
                             .entity(submesh.entity)
-                            .insert((
-                                Mesh3d(handle.clone()),
-                                mesh_layers.clone(),
-                                NoFrustumCulling,
-                            ));
+                            .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
                         submesh.mesh = handle;
                     }
-                    commands
-                        .entity(submesh.entity)
-                        .insert((mesh_layers.clone(), NoFrustumCulling));
+                    commands.entity(submesh.entity).insert(mesh_layers.clone());
                     if let Some((min, max)) = bounds {
                         let center = (min + max) * 0.5;
                         let half = (max - min) * 0.5 + Vec3::splat(0.75);
@@ -308,7 +304,6 @@ fn apply_mesh_results(
                             Visibility::Inherited,
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
-                            NoFrustumCulling,
                         ))
                         .id();
                     if let Some((min, max)) = bounds {
@@ -416,4 +411,13 @@ fn split_mesh_data_vertical_sections(data: chunk::MeshData) -> Vec<(u8, chunk::M
     let mut out = by_section.into_iter().collect::<Vec<_>>();
     out.sort_by_key(|(section, _)| *section);
     out
+}
+
+fn disable_engine_frustum_culling_globally(
+    mut commands: Commands,
+    meshes: Query<Entity, (With<Mesh3d>, Without<NoFrustumCulling>)>,
+) {
+    for entity in &meshes {
+        commands.entity(entity).insert(NoFrustumCulling);
+    }
 }
