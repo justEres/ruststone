@@ -201,6 +201,31 @@ impl AtlasBlockMapping {
                 8 => "flower_oxeye_daisy.png",
                 _ => "flower_rose.png",
             }),
+            43 | 44 => Some(match meta & 0x7 {
+                1 => match face {
+                    Face::PosY => "sandstone_top.png",
+                    Face::NegY => "sandstone_bottom.png",
+                    _ => "sandstone_normal.png",
+                },
+                2 => "planks_oak.png",
+                3 => "cobblestone.png",
+                4 => "brick.png",
+                5 => "stonebrick.png",
+                6 => "nether_brick.png",
+                7 => match face {
+                    Face::PosY | Face::NegY => "quartz_block_lines_top.png",
+                    _ => "quartz_block_lines.png",
+                },
+                _ => "stone.png",
+            }),
+            125 | 126 => Some(match meta & 0x7 {
+                1 => "planks_spruce.png",
+                2 => "planks_birch.png",
+                3 => "planks_jungle.png",
+                4 => "planks_acacia.png",
+                5 => "planks_big_oak.png",
+                _ => "planks_oak.png",
+            }),
             161 => Some(match meta & 0x1 {
                 1 => "leaves_big_oak.png",
                 _ => "leaves_acacia.png",
@@ -251,6 +276,24 @@ impl AtlasBlockMapping {
                     _ => "double_plant_grass_bottom.png",
                 })
             }
+            168 => Some(match meta & 0x3 {
+                1 => "prismarine_bricks.png",
+                2 => "prismarine_dark.png",
+                _ => "prismarine_rough.png",
+            }),
+            181 | 182 => Some(match meta & 0x7 {
+                1 => "red_sandstone_top.png",
+                2 => "purpur_block.png",
+                3 => "purpur_pillar.png",
+                _ => "red_sandstone_normal.png",
+            }),
+            85 => Some("planks_oak.png"),
+            113 => Some("nether_brick.png"),
+            188 => Some("planks_spruce.png"),
+            189 => Some("planks_birch.png"),
+            190 => Some("planks_jungle.png"),
+            191 => Some("planks_big_oak.png"),
+            192 => Some("planks_acacia.png"),
             60 => Some(match face {
                 Face::PosY => {
                     if (meta & 0x7) > 0 {
