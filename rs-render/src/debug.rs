@@ -301,36 +301,63 @@ pub struct RenderPerfStats {
 
 pub fn occlusion_cull_chunks(
     settings: Res<RenderDebugSettings>,
-    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
     state: Res<ChunkRenderState>,
     mut chunks: Query<(&ChunkRoot, &mut Visibility)>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
+    let distance_visible_count = chunks
+        .iter()
+        .filter(|(_, visibility)| !matches!(**visibility, Visibility::Hidden))
+        .count() as u32;
+
     if !settings.occlusion_cull_enabled {
         perf.occlusion_cull_ms = 0.0;
-        perf.visible_chunks_after_occlusion = chunks
-            .iter()
-            .filter(|(_, visibility)| !matches!(**visibility, Visibility::Hidden))
-            .count() as u32;
+        perf.visible_chunks_after_occlusion = distance_visible_count;
         perf.occluded_chunks = 0;
         return;
     }
     let start = std::time::Instant::now();
-    let Ok(cam_transform) = camera_query.get_single() else {
+    let Ok((cam_transform, projection)) = camera_query.get_single() else {
         perf.occlusion_cull_ms = 0.0;
-        perf.visible_chunks_after_occlusion = 0;
+        perf.visible_chunks_after_occlusion = distance_visible_count;
         perf.occluded_chunks = 0;
         return;
     };
+    let (fov_y, aspect, near, far) = camera_fov_params(&settings, projection);
+    let tan_y = (fov_y * 0.5).tan();
+    let tan_x = tan_y * aspect * MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER;
+    let cam_pos = cam_transform.translation();
+    let cam_forward = cam_transform.forward();
+    let cam_right = cam_transform.right();
+    let cam_up = cam_transform.up();
     let camera_chunk = (
-        (cam_transform.translation().x / 16.0).floor() as i32,
-        (cam_transform.translation().z / 16.0).floor() as i32,
+        (cam_pos.x / 16.0).floor() as i32,
+        (cam_pos.z / 16.0).floor() as i32,
     );
 
     let mut distance_visible = HashSet::new();
+    let mut frustum_candidates = HashSet::new();
     for (chunk, visibility) in &chunks {
         if !matches!(*visibility, Visibility::Hidden) {
             distance_visible.insert(chunk.key);
+            let center = Vec3::new(
+                (chunk.key.0 * 16 + 8) as f32,
+                cam_pos.y,
+                (chunk.key.1 * 16 + 8) as f32,
+            );
+            let radius = 14.0;
+            let to_center = center - cam_pos;
+            let z = to_center.dot(*cam_forward);
+            let x = to_center.dot(*cam_right).abs();
+            let y = to_center.dot(*cam_up).abs();
+            let in_frustum = z >= near - radius
+                && z <= far + radius
+                && x <= z * tan_x + radius
+                && y <= z * tan_y + radius;
+            if in_frustum {
+                frustum_candidates.insert(chunk.key);
+            }
         }
     }
     if distance_visible.is_empty() {
@@ -342,6 +369,7 @@ pub fn occlusion_cull_chunks(
 
     let mut keep_visible = HashSet::new();
     if distance_visible.contains(&camera_chunk) {
+        frustum_candidates.insert(camera_chunk);
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
         struct PortalNode {
             key: (i32, i32),
@@ -394,7 +422,7 @@ pub fn occlusion_cull_chunks(
                 let Some(neighbor_key) = neighbor_for_face(node.key, face) else {
                     continue;
                 };
-                if !distance_visible.contains(&neighbor_key) {
+                if !frustum_candidates.contains(&neighbor_key) {
                     continue;
                 }
 
@@ -417,7 +445,7 @@ pub fn occlusion_cull_chunks(
     } else {
         // Conservative fallback while crossing chunk-load boundaries:
         // if the camera chunk is not loaded yet, avoid over-culling.
-        keep_visible = distance_visible.clone();
+        keep_visible = frustum_candidates.clone();
     }
 
     for (chunk, mut visibility) in &mut chunks {
