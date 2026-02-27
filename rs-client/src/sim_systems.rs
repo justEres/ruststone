@@ -1991,6 +1991,10 @@ pub fn debug_overlay_system(
                             ui.checkbox(&mut render_debug.wireframe_enabled, "Wireframe");
                             ui.checkbox(&mut render_debug.voxel_ao_enabled, "Voxel AO");
                             ui.checkbox(&mut render_debug.voxel_ao_cutout, "Voxel AO on cutout");
+                            ui.checkbox(
+                                &mut render_debug.barrier_billboard,
+                                "Barriers as billboard sprites",
+                            );
                             ui.add(
                                 egui::Slider::new(&mut render_debug.voxel_ao_strength, 0.0..=1.0)
                                     .text("Voxel AO strength"),

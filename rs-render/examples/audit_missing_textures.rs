@@ -109,6 +109,23 @@ fn collect_texture_name_map() -> HashMap<String, u16> {
             }
         }
     }
+    names.extend(
+        [
+            "barrier_item.png",
+            "chest_normal.png",
+            "chest_trapped.png",
+            "chest_ender.png",
+            "sign_entity.png",
+            "head_player_top.png",
+            "head_player_bottom.png",
+            "head_player_front.png",
+            "head_player_back.png",
+            "head_player_left.png",
+            "head_player_right.png",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
     names.sort();
     names.dedup();
     if !names.iter().any(|n| n == "missing_texture.png") {

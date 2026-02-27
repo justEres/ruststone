@@ -106,7 +106,7 @@ pub const fn block_name(block_id: u16) -> &'static str {
 pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
     match block_id {
         8 | 9 | 10 | 11 => BlockModelKind::Fluid,
-        6 | 31 | 32 | 37 | 38 | 39 | 40 | 59 | 83 | 104 | 105 | 141 | 142 | 175 => {
+        6 | 31 | 32 | 37 | 38 | 39 | 40 | 51 | 59 | 83 | 104 | 105 | 141 | 142 | 175 => {
             BlockModelKind::Cross
         }
         44 | 126 | 182 => BlockModelKind::Slab,
@@ -116,8 +116,9 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         85 | 113 | 188 | 189 | 190 | 191 | 192 => BlockModelKind::Fence,
         101 | 102 | 160 => BlockModelKind::Pane,
         50 | 75 | 76 => BlockModelKind::TorchLike,
-        26 | 27 | 28 | 54 | 60 | 64 | 65 | 66 | 71 | 78 | 81 | 88 | 96 | 107 | 130 | 139 | 146
-        | 157 | 171 | 183 | 184 | 185 | 186 | 187 | 193 | 194 | 195 | 196 | 197 => {
+        26 | 27 | 28 | 54 | 60 | 63 | 64 | 65 | 66 | 68 | 69 | 71 | 78 | 81 | 88 | 96 | 107
+        | 130 | 139 | 140 | 144 | 146 | 157 | 166 | 171 | 183 | 184 | 185 | 186 | 187 | 193
+        | 194 | 195 | 196 | 197 => {
             BlockModelKind::Custom
         }
         _ => BlockModelKind::FullCube,
@@ -178,16 +179,9 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
             BlockFace::East | BlockFace::West => "crafting_table_front.png",
             _ => "crafting_table_side.png",
         },
-        54 | 146 => match face {
-            BlockFace::Up => "planks_oak.png",
-            BlockFace::Down => "planks_oak.png",
-            _ => "planks_oak.png",
-        },
-        130 => match face {
-            BlockFace::Up => "obsidian.png",
-            BlockFace::Down => "obsidian.png",
-            _ => "obsidian.png",
-        },
+        54 => "chest_normal.png",
+        146 => "chest_trapped.png",
+        130 => "chest_ender.png",
         60 => match face {
             BlockFace::Up => "farmland_dry.png",
             BlockFace::Down => "dirt.png",
@@ -215,6 +209,12 @@ pub const fn block_texture_name(block_id: u16, face: BlockFace) -> &'static str 
         88 => "soul_sand.png",
         89 => "glowstone.png",
         107 => "planks_oak.png",
+        166 => "barrier_item.png",
+        63 | 68 => "sign_entity.png",
+        69 => "lever.png",
+        140 => "flower_pot.png",
+        144 => "head_player_front.png",
+        51 => "fire_layer_0.png",
         139 => "cobblestone.png",
         157 => "rail_activator.png",
         96 => "trapdoor.png",
