@@ -139,6 +139,12 @@ impl BlockModelResolver {
             }
         }
 
+        if let Some(tex_ref) = guess_model_texture_ref(&model, face) {
+            if let Some(resolved) = resolve_texture_ref(&model, &tex_ref, depth + 1) {
+                return Some(append_png(resolved));
+            }
+        }
+
         if let Some(parent) = model.parent.as_deref() {
             if let Some(parent_key) = template_texture_key(parent, face) {
                 if let Some(tex_ref) = lookup_texture_key(&model, parent_key) {
@@ -534,6 +540,13 @@ fn model_face_texture_from_elements(model: &ModelFile, face: Face) -> Option<Str
             return Some(fd.texture.clone());
         }
     }
+    // For non-cube models (cross/torch/rail/etc.), just use the first face texture
+    // matching this direction before giving up.
+    for el in elements {
+        if let Some(fd) = el.faces.as_ref().and_then(|faces| faces.get(face_key)) {
+            return Some(fd.texture.clone());
+        }
+    }
     None
 }
 
@@ -572,9 +585,57 @@ fn template_texture_key(parent: &str, face: Face) -> Option<&'static str> {
             Face::PosZ => "south",
             Face::NegZ => "north",
         },
+        "orientable" | "furnace" | "dispenser" | "dropper" | "command_block" => match face {
+            Face::PosY => "top",
+            Face::NegY => "bottom",
+            _ => "side",
+        },
+        "orientable_with_bottom" => match face {
+            Face::PosY => "top",
+            Face::NegY => "bottom",
+            _ => "side",
+        },
+        "cross" | "tinted_cross" => "cross",
+        "torch" => "torch",
+        "rail_flat" | "rail_raised_ne" | "rail_raised_sw" | "rail_curved" => "rail",
+        "slab" | "half_slab" => match face {
+            Face::PosY => "top",
+            Face::NegY => "bottom",
+            _ => "side",
+        },
+        "stairs" | "inner_stairs" | "outer_stairs" => match face {
+            Face::PosY => "top",
+            Face::NegY => "bottom",
+            _ => "side",
+        },
         _ => return None,
     };
     Some(key)
+}
+
+fn guess_model_texture_ref(model: &ModelFile, face: Face) -> Option<String> {
+    let textures = model.textures.as_ref()?;
+    let mut keys: Vec<&str> = match face {
+        Face::PosY => vec!["up", "top", "end", "all", "side", "particle", "texture"],
+        Face::NegY => vec!["down", "bottom", "end", "all", "side", "particle", "texture"],
+        Face::PosX | Face::NegX | Face::PosZ | Face::NegZ => vec![
+            "side",
+            "front",
+            "all",
+            "north",
+            "south",
+            "east",
+            "west",
+            "texture",
+            "particle",
+        ],
+    };
+    for key in keys.drain(..) {
+        if let Some(v) = textures.get(key) {
+            return Some(v.clone());
+        }
+    }
+    textures.values().next().cloned()
 }
 
 #[derive(Debug, Clone, Deserialize)]
