@@ -159,8 +159,14 @@ fn run_connected_session(
 fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
     match msg {
         ToNetMessage::ChatMessage(text) => {
+            let sanitized = sanitize_outgoing_chat(&text);
+            if sanitized != text {
+                bevy::log::warn!(
+                    "Sanitized outgoing chat (removed unsupported chars and/or clamped to 100 chars)"
+                );
+            }
             let _ = conn.write_packet(
-                rs_protocol::protocol::packet::play::serverbound::ChatMessage { message: text },
+                rs_protocol::protocol::packet::play::serverbound::ChatMessage { message: sanitized },
             );
         }
         ToNetMessage::PlayerMovePosLook {
@@ -371,6 +377,19 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
             );
         }
         ToNetMessage::Connect { .. } | ToNetMessage::Disconnect | ToNetMessage::Shutdown => {}
+    }
+}
+
+fn sanitize_outgoing_chat(input: &str) -> String {
+    // 1.8 servers reject section sign and control chars in client chat.
+    let filtered: String = input
+        .chars()
+        .filter(|&ch| ch >= ' ' && ch != '\u{7f}' && ch != '§')
+        .collect();
+    if filtered.chars().count() > 100 {
+        filtered.chars().take(100).collect()
+    } else {
+        filtered
     }
 }
 
