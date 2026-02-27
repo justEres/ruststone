@@ -1,9 +1,12 @@
 use bevy::prelude::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
-use crate::chunk::{ChunkRenderAssets, ChunkStore, snapshot_for_chunk};
+use crate::chunk::{
+    ChunkFace, ChunkOcclusionData, ChunkRenderAssets, ChunkRenderState, ChunkStore,
+    snapshot_for_chunk,
+};
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, Mesh3d, Projection};
@@ -298,17 +301,138 @@ pub struct RenderPerfStats {
 
 pub fn occlusion_cull_chunks(
     settings: Res<RenderDebugSettings>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    state: Res<ChunkRenderState>,
+    mut chunks: Query<(&ChunkRoot, &mut Visibility)>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
     if !settings.occlusion_cull_enabled {
         perf.occlusion_cull_ms = 0.0;
-        perf.visible_chunks_after_occlusion = perf.visible_chunks;
+        perf.visible_chunks_after_occlusion = chunks
+            .iter()
+            .filter(|(_, visibility)| !matches!(**visibility, Visibility::Hidden))
+            .count() as u32;
         perf.occluded_chunks = 0;
         return;
     }
     let start = std::time::Instant::now();
-    perf.visible_chunks_after_occlusion = perf.visible_chunks;
-    perf.occluded_chunks = 0;
+    let Ok(cam_transform) = camera_query.get_single() else {
+        perf.occlusion_cull_ms = 0.0;
+        perf.visible_chunks_after_occlusion = 0;
+        perf.occluded_chunks = 0;
+        return;
+    };
+    let camera_chunk = (
+        (cam_transform.translation().x / 16.0).floor() as i32,
+        (cam_transform.translation().z / 16.0).floor() as i32,
+    );
+
+    let mut distance_visible = HashSet::new();
+    for (chunk, visibility) in &chunks {
+        if !matches!(*visibility, Visibility::Hidden) {
+            distance_visible.insert(chunk.key);
+        }
+    }
+    if distance_visible.is_empty() {
+        perf.visible_chunks_after_occlusion = 0;
+        perf.occluded_chunks = 0;
+        perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
+        return;
+    }
+
+    let mut keep_visible = HashSet::new();
+    if distance_visible.contains(&camera_chunk) {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+        struct PortalNode {
+            key: (i32, i32),
+            entry_face: Option<ChunkFace>,
+        }
+
+        let mut queue = VecDeque::new();
+        let mut visited = HashSet::new();
+        let start_node = PortalNode {
+            key: camera_chunk,
+            entry_face: None,
+        };
+        queue.push_back(start_node);
+        visited.insert(start_node);
+        keep_visible.insert(camera_chunk);
+
+        let chunk_occlusion_for = |key: (i32, i32)| -> ChunkOcclusionData {
+            state
+                .entries
+                .get(&key)
+                .map(|entry| entry.occlusion)
+                .unwrap_or_else(ChunkOcclusionData::fully_open)
+        };
+        let neighbor_for_face = |key: (i32, i32), face: ChunkFace| -> Option<(i32, i32)> {
+            match face {
+                ChunkFace::NegX => Some((key.0 - 1, key.1)),
+                ChunkFace::PosX => Some((key.0 + 1, key.1)),
+                ChunkFace::NegZ => Some((key.0, key.1 - 1)),
+                ChunkFace::PosZ => Some((key.0, key.1 + 1)),
+                ChunkFace::NegY | ChunkFace::PosY => None,
+            }
+        };
+
+        while let Some(node) = queue.pop_front() {
+            let occ = chunk_occlusion_for(node.key);
+            let exit_mask = if let Some(entry_face) = node.entry_face {
+                if !occ.is_face_open(entry_face) {
+                    0
+                } else {
+                    occ.face_connections[entry_face.index()] & occ.face_open_mask
+                }
+            } else {
+                occ.face_open_mask
+            };
+
+            for face in ChunkFace::ALL {
+                if (exit_mask & face.bit()) == 0 {
+                    continue;
+                }
+                let Some(neighbor_key) = neighbor_for_face(node.key, face) else {
+                    continue;
+                };
+                if !distance_visible.contains(&neighbor_key) {
+                    continue;
+                }
+
+                let neighbor_occ = chunk_occlusion_for(neighbor_key);
+                let enter_face = face.opposite();
+                if !neighbor_occ.is_face_open(enter_face) {
+                    continue;
+                }
+
+                keep_visible.insert(neighbor_key);
+                let next = PortalNode {
+                    key: neighbor_key,
+                    entry_face: Some(enter_face),
+                };
+                if visited.insert(next) {
+                    queue.push_back(next);
+                }
+            }
+        }
+    } else {
+        // Conservative fallback while crossing chunk-load boundaries:
+        // if the camera chunk is not loaded yet, avoid over-culling.
+        keep_visible = distance_visible.clone();
+    }
+
+    for (chunk, mut visibility) in &mut chunks {
+        if matches!(*visibility, Visibility::Hidden) {
+            continue;
+        }
+        if keep_visible.contains(&chunk.key) {
+            *visibility = Visibility::Visible;
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+
+    perf.visible_chunks_after_occlusion = keep_visible.len() as u32;
+    perf.occluded_chunks = distance_visible.len().saturating_sub(keep_visible.len()) as u32;
     perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
