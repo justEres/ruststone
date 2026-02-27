@@ -55,10 +55,24 @@ impl AtlasBlockMapping {
         let by_name = |name: &str| -> Option<u16> { self.name_to_index.get(name).copied() };
 
         let override_name: Option<&'static str> = match block_id {
+            1 => Some(match meta & 0x7 {
+                1 => "stone_granite.png",
+                2 => "stone_granite_smooth.png",
+                3 => "stone_diorite.png",
+                4 => "stone_diorite_smooth.png",
+                5 => "stone_andesite.png",
+                6 => "stone_andesite_smooth.png",
+                _ => "stone.png",
+            }),
             2 => Some(match face {
                 Face::PosY => "grass_top.png",
                 Face::NegY => "dirt.png",
                 _ => "grass_side.png",
+            }),
+            3 => Some(match meta & 0x3 {
+                1 => "coarse_dirt.png",
+                2 => "dirt_podzol_top.png",
+                _ => "dirt.png",
             }),
             5 => Some(match meta & 0x7 {
                 1 => "planks_spruce.png",
@@ -75,6 +89,11 @@ impl AtlasBlockMapping {
                 4 => "sapling_acacia.png",
                 5 => "sapling_roofed_oak.png",
                 _ => "sapling_oak.png",
+            }),
+            12 => Some(if (meta & 0x1) != 0 {
+                "red_sand.png"
+            } else {
+                "sand.png"
             }),
             17 => Some(match face {
                 Face::PosY | Face::NegY => match meta & 0x3 {
@@ -99,6 +118,24 @@ impl AtlasBlockMapping {
             31 => Some(match meta & 0x3 {
                 2 => "fern.png",
                 _ => "tallgrass.png",
+            }),
+            35 => Some(match meta & 0xF {
+                1 => "wool_colored_orange.png",
+                2 => "wool_colored_magenta.png",
+                3 => "wool_colored_light_blue.png",
+                4 => "wool_colored_yellow.png",
+                5 => "wool_colored_lime.png",
+                6 => "wool_colored_pink.png",
+                7 => "wool_colored_gray.png",
+                8 => "wool_colored_silver.png",
+                9 => "wool_colored_cyan.png",
+                10 => "wool_colored_purple.png",
+                11 => "wool_colored_blue.png",
+                12 => "wool_colored_brown.png",
+                13 => "wool_colored_green.png",
+                14 => "wool_colored_red.png",
+                15 => "wool_colored_black.png",
+                _ => "wool_colored_white.png",
             }),
             38 => Some(match meta & 0xF {
                 1 => "flower_blue_orchid.png",
@@ -259,6 +296,50 @@ impl AtlasBlockMapping {
                 "cobblestone_mossy.png"
             } else {
                 "cobblestone.png"
+            }),
+            155 => Some(match meta & 0x7 {
+                1 => "quartz_block_chiseled.png",
+                2 => match face {
+                    Face::PosY | Face::NegY => "quartz_block_lines_top.png",
+                    _ => "quartz_block_lines.png",
+                },
+                _ => "quartz_block_side.png",
+            }),
+            159 => Some(match meta & 0xF {
+                1 => "hardened_clay_stained_orange.png",
+                2 => "hardened_clay_stained_magenta.png",
+                3 => "hardened_clay_stained_light_blue.png",
+                4 => "hardened_clay_stained_yellow.png",
+                5 => "hardened_clay_stained_lime.png",
+                6 => "hardened_clay_stained_pink.png",
+                7 => "hardened_clay_stained_gray.png",
+                8 => "hardened_clay_stained_silver.png",
+                9 => "hardened_clay_stained_cyan.png",
+                10 => "hardened_clay_stained_purple.png",
+                11 => "hardened_clay_stained_blue.png",
+                12 => "hardened_clay_stained_brown.png",
+                13 => "hardened_clay_stained_green.png",
+                14 => "hardened_clay_stained_red.png",
+                15 => "hardened_clay_stained_black.png",
+                _ => "hardened_clay_stained_white.png",
+            }),
+            95 | 160 => Some(match meta & 0xF {
+                1 => "glass_orange.png",
+                2 => "glass_magenta.png",
+                3 => "glass_light_blue.png",
+                4 => "glass_yellow.png",
+                5 => "glass_lime.png",
+                6 => "glass_pink.png",
+                7 => "glass_gray.png",
+                8 => "glass_silver.png",
+                9 => "glass_cyan.png",
+                10 => "glass_purple.png",
+                11 => "glass_blue.png",
+                12 => "glass_brown.png",
+                13 => "glass_green.png",
+                14 => "glass_red.png",
+                15 => "glass_black.png",
+                _ => "glass_white.png",
             }),
             171 => Some(match meta & 0xF {
                 1 => "wool_colored_orange.png",
