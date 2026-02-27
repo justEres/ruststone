@@ -959,11 +959,16 @@ pub fn draw_remote_entity_names(
             &RemoteEntityName,
             &RemoteVisual,
             &RemoteEntity,
+            &ViewVisibility,
         ),
         With<RemoteEntity>,
     >,
     collision_map: Res<WorldCollisionMap>,
 ) {
+    const NON_PLAYER_NAME_MAX_DISTANCE: f32 = 5.0;
+    const PLAYER_NAME_ALPHA: u8 = 210;
+    const NON_PLAYER_NAME_ALPHA: u8 = 120;
+
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
     };
@@ -974,9 +979,21 @@ pub fn draw_remote_entity_names(
     ));
 
     let cam_pos = camera_transform.translation();
-    for (transform, name, visual, remote) in &names_query {
+    for (transform, name, visual, remote, view_visibility) in &names_query {
+        // Modeled entities already carry strong visual identity and their labels
+        // add unnecessary clutter.
+        if entity_kind_uses_model(remote.kind) && remote.kind != NetEntityKind::Player {
+            continue;
+        }
+
         let world_pos = transform.translation() + Vec3::Y * visual.name_y_offset;
         let through_walls = remote.kind == NetEntityKind::Player;
+        if !through_walls && !view_visibility.get() {
+            continue;
+        }
+        if !through_walls && transform.translation().distance(cam_pos) > NON_PLAYER_NAME_MAX_DISTANCE {
+            continue;
+        }
         if !through_walls && line_of_sight_blocked(&collision_map, cam_pos, world_pos) {
             continue;
         }
@@ -989,8 +1006,20 @@ pub fn draw_remote_entity_names(
             egui::Align2::CENTER_BOTTOM,
             &name.0,
             egui::TextStyle::Body.resolve(&ctx.style()),
-            egui::Color32::WHITE,
+            if through_walls {
+                egui::Color32::from_white_alpha(PLAYER_NAME_ALPHA)
+            } else {
+                egui::Color32::from_white_alpha(NON_PLAYER_NAME_ALPHA)
+            },
         );
+    }
+}
+
+fn entity_kind_uses_model(kind: NetEntityKind) -> bool {
+    match kind {
+        NetEntityKind::Player => true,
+        NetEntityKind::Mob(mob) => mob_uses_entity_model(mob),
+        _ => false,
     }
 }
 
