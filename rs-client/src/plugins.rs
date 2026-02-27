@@ -180,8 +180,10 @@ impl Plugin for ClientEntityPlugin {
                     .before(entities::animate_local_player_model_system),
                 entities::first_person_viewmodel_system
                     .after(entities::sync_local_player_skin_model_system),
-                entities::animate_first_person_viewmodel_system
+                entities::suppress_first_person_viewmodel_near_geometry_system
                     .after(entities::first_person_viewmodel_system),
+                entities::animate_first_person_viewmodel_system
+                    .after(entities::suppress_first_person_viewmodel_near_geometry_system),
                 entities::animate_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
             ),

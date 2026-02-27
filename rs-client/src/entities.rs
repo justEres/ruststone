@@ -1682,6 +1682,41 @@ pub fn animate_first_person_viewmodel_system(
     }
 }
 
+pub fn suppress_first_person_viewmodel_near_geometry_system(
+    collision_map: Res<WorldCollisionMap>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut viewmodel_query: Query<&mut Visibility, With<FirstPersonViewModel>>,
+) {
+    let Ok(camera_transform) = camera_query.get_single() else {
+        return;
+    };
+    let Ok(mut visibility) = viewmodel_query.get_single_mut() else {
+        return;
+    };
+
+    let camera_pos = camera_transform.translation();
+    let camera_rot = camera_transform.compute_transform().rotation;
+    // Probe the arm/item volume in camera-local space.
+    let probes = [
+        Vec3::new(0.05, -0.05, 0.12),
+        Vec3::new(0.30, -0.18, -0.38),
+        Vec3::new(0.55, -0.24, -0.58),
+        Vec3::new(0.78, -0.34, -0.82),
+    ];
+
+    let colliding = probes.into_iter().any(|probe| {
+        let world = camera_pos + camera_rot * probe;
+        let cell = world.floor().as_ivec3();
+        is_solid(collision_map.block_at(cell.x, cell.y, cell.z))
+    });
+
+    *visibility = if colliding {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+}
+
 pub fn animate_local_player_model_system(
     time: Res<Time>,
     input: Res<crate::sim::CurrentInput>,
