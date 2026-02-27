@@ -131,6 +131,11 @@ fn water_reflection_mode(settings: &RenderDebugSettings, fixed_debug: bool) -> f
     }
 }
 
+fn sun_color_from_warmth(warmth: f32) -> Color {
+    let t = warmth.clamp(0.0, 1.0);
+    Color::srgb(1.0, 1.0 - 0.18 * t, 1.0 - 0.38 * t)
+}
+
 pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
@@ -446,16 +451,21 @@ pub fn apply_lighting_quality(
 
     let allow_shadows = settings.shadows_enabled && settings.shadow_cascades > 0;
     let is_fancy = uses_shadowed_pbr_path(&settings);
+    let shadow_opacity = settings.shadow_opacity.clamp(0.0, 1.0);
+    let sun_color = sun_color_from_warmth(settings.sun_warmth);
+    let fill_boost = 1.0 + (1.0 - shadow_opacity) * 1.2;
     let az = settings.sun_azimuth_deg.to_radians();
     let el = settings.sun_elevation_deg.to_radians();
     let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero();
     let sun_travel_dir = -sun_dir;
-    ambient.brightness = settings.ambient_brightness;
+    ambient.brightness =
+        (settings.ambient_brightness + (1.0 - shadow_opacity) * 0.45).clamp(0.0, 3.0);
 
     for (mut light, mut light_transform, shadow_light, cascade_cfg) in &mut lights {
         if shadow_light.is_some() {
             light.shadows_enabled = allow_shadows;
             light.illuminance = settings.sun_illuminance;
+            light.color = sun_color;
             light.shadow_depth_bias = settings.shadow_depth_bias;
             light.shadow_normal_bias = settings.shadow_normal_bias;
             light_transform.look_to(sun_travel_dir, Vec3::Y);
@@ -475,7 +485,8 @@ pub fn apply_lighting_quality(
                 settings.fill_illuminance
             } else {
                 settings.fill_illuminance * 0.95
-            };
+            } * fill_boost;
+            light.color = sun_color_from_warmth(settings.sun_warmth * 0.35);
             light_transform.look_to(
                 Vec3::new(-sun_travel_dir.x, sun_travel_dir.y, -sun_travel_dir.z),
                 Vec3::Y,

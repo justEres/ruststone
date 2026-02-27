@@ -1816,6 +1816,14 @@ pub fn debug_overlay_system(
                                     .text("Sun strength"),
                             );
                             ui.add(
+                                egui::Slider::new(&mut render_debug.sun_warmth, 0.0..=1.0)
+                                    .text("Sun warmth"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut render_debug.shadow_opacity, 0.0..=1.0)
+                                    .text("Shadow opacity"),
+                            );
+                            ui.add(
                                 egui::Slider::new(&mut render_debug.ambient_strength, 0.0..=2.0)
                                     .text("Ambient strength"),
                             );
