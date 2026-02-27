@@ -42,6 +42,14 @@ impl BlockModelResolver {
             .and_then(|faces| faces[face.index()].clone())
     }
 
+    pub fn face_texture_name_for_meta(&mut self, block_id: u16, meta: u8, face: Face) -> Option<String> {
+        let registry_key = block_registry_key(block_id)?;
+        let name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        let blockstate = self.load_blockstate_best(block_id, name, meta)?;
+        let model_name = pick_model_name(&blockstate)?;
+        self.resolve_face_from_model(&model_name, face, 0)
+    }
+
     pub fn icon_quads(&mut self, block_id: u16) -> Option<Vec<IconQuad>> {
         self.icon_quads_for_meta(block_id, 0)
     }
