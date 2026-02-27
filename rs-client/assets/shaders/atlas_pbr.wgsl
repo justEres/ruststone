@@ -360,6 +360,16 @@ fn apply_color_grading(rgb_in: vec3<f32>) -> vec3<f32> {
     return clamp(rgb, vec3(0.0), vec3(1.0));
 }
 
+fn apply_near_camera_damp(lit_rgb: vec3<f32>, base_rgb: vec3<f32>, view_z: f32) -> vec3<f32> {
+    let near_fade = clamp((view_z - 0.25) / 1.5, 0.0, 1.0);
+    let near_damp = 1.0 - near_fade;
+    if near_damp <= 0.0 {
+        return lit_rgb;
+    }
+    let base_lit = base_rgb * (lighting_uniform.ambient_and_fog.x + 0.25);
+    return mix(lit_rgb, base_lit, near_damp * 0.30);
+}
+
 @fragment
 fn fragment(
 #ifdef MESHLET_MESH_MATERIAL_PASS
@@ -618,14 +628,6 @@ fn fragment(
             water_scene_reflection,
             water_scene_reflection_valid,
         );
-        // Damp near-camera specular washout that can appear when geometry gets very close.
-        let near_fade = clamp((abs(in.position.w) - 0.25) / 1.5, 0.0, 1.0);
-        let near_damp = 1.0 - near_fade;
-        if near_damp > 0.0 {
-            let base_lit = pbr_input.material.base_color.rgb
-                * (lighting_uniform.ambient_and_fog.x + 0.25);
-            out.color.rgb = mix(out.color.rgb, base_lit, near_damp * 0.30);
-        }
     } else {
         out.color = apply_voxel_lighting(
             pbr_input.material.base_color,
@@ -637,6 +639,14 @@ fn fragment(
             water_scene_reflection_valid,
         );
     }
+    out.color = vec4(
+        apply_near_camera_damp(
+            out.color.rgb,
+            pbr_input.material.base_color.rgb,
+            abs(in.position.w),
+        ),
+        out.color.a,
+    );
     if !fixed_debug_state {
         out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
     }
