@@ -43,19 +43,6 @@ pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
             .with(CHUNK_TRANSPARENT_RENDER_LAYER),
     ));
 
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: false,
-            illuminance: 3_500.0,
-            ..default()
-        },
-        Transform::from_xyz(-6.0, 10.0, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::layer(MAIN_RENDER_LAYER)
-            .with(CHUNK_OPAQUE_RENDER_LAYER)
-            .with(CHUNK_CUTOUT_RENDER_LAYER)
-            .with(CHUNK_TRANSPARENT_RENDER_LAYER),
-    ));
-
     commands.insert_resource(AmbientLight {
         color: Color::srgb(0.6, 0.6, 0.65),
         brightness: 0.9,
