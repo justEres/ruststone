@@ -233,7 +233,6 @@ fn apply_voxel_lighting(
         rgb = mix(rgb * (1.0 - absorption), water_tint, fresnel * (0.24 + fresnel_boost));
         if lighting_uniform.water_effects.x > 0.5 {
             let user_strength = clamp(lighting_uniform.water_controls.x, 0.0, 3.0);
-            let near_boost = clamp(lighting_uniform.water_controls.z, 0.0, 1.0);
             let blue_tint_strength = clamp(lighting_uniform.water_controls.w, 0.0, 1.0);
             let sun_dir_reflect = safe_normalize(-sun_dir, vec3(0.0, 1.0, 0.0));
             let reflected = reflect(-view_dir, normal);
@@ -250,7 +249,7 @@ fn apply_voxel_lighting(
             let sun_glint = pow(max(dot(reflected, sun_dir_reflect), 0.0), 96.0) * 0.65;
             let refl_strength = select(0.82, 0.94, terrain_enabled);
             let boost = 0.25 + user_strength * 1.45;
-            let min_mirror = clamp((user_strength - 1.0) * 0.40 + near_boost * 0.65, 0.0, 0.85);
+            let min_mirror = clamp((user_strength - 1.0) * 0.40, 0.0, 0.85);
             let reflected_color = env_reflection + vec3(sun_glint);
             let tinted_reflection = mix(
                 reflected_color,
@@ -304,7 +303,6 @@ fn apply_fancy_post_lighting(
         rgb = mix(rgb * (1.0 - absorption), water_tint, fresnel * (0.22 + fresnel_boost));
         if lighting_uniform.water_effects.x > 0.5 {
             let user_strength = clamp(lighting_uniform.water_controls.x, 0.0, 3.0);
-            let near_boost = clamp(lighting_uniform.water_controls.z, 0.0, 1.0);
             let blue_tint_strength = clamp(lighting_uniform.water_controls.w, 0.0, 1.0);
             let sun_dir = safe_normalize(lighting_uniform.sun_dir_and_strength.xyz, vec3(0.0, 1.0, 0.0));
             let reflected = reflect(-view_dir, normal);
@@ -321,7 +319,7 @@ fn apply_fancy_post_lighting(
             let sun_glint = pow(max(dot(reflected, safe_normalize(-sun_dir, vec3(0.0, 1.0, 0.0))), 0.0), 96.0) * 0.65;
             let refl_strength = select(0.82, 0.94, terrain_enabled);
             let boost = 0.25 + user_strength * 1.45;
-            let min_mirror = clamp((user_strength - 1.0) * 0.40 + near_boost * 0.65, 0.0, 0.85);
+            let min_mirror = clamp((user_strength - 1.0) * 0.40, 0.0, 0.85);
             let reflected_color = env_reflection + vec3(sun_glint);
             let tinted_reflection = mix(
                 reflected_color,

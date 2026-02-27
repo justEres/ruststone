@@ -62,7 +62,10 @@ impl AtlasBlockMapping {
                 4 => "stone_diorite_smooth.png",
                 5 => "stone_andesite.png",
                 6 => "stone_andesite_smooth.png",
-                _ => "stone.png",
+                _ => match face {
+                    Face::PosY | Face::NegY => "stone_slab_top.png",
+                    _ => "stone_slab_side.png",
+                },
             }),
             2 => Some(match face {
                 Face::PosY => "grass_top.png",
@@ -216,7 +219,10 @@ impl AtlasBlockMapping {
                     Face::PosY | Face::NegY => "quartz_block_lines_top.png",
                     _ => "quartz_block_lines.png",
                 },
-                _ => "stone.png",
+                _ => match face {
+                    Face::PosY | Face::NegY => "stone_slab_top.png",
+                    _ => "stone_slab_side.png",
+                },
             }),
             125 | 126 => Some(match meta & 0x7 {
                 1 => "planks_spruce.png",
@@ -281,11 +287,21 @@ impl AtlasBlockMapping {
                 2 => "prismarine_dark.png",
                 _ => "prismarine_rough.png",
             }),
+            174 => Some("ice_packed.png"),
             181 | 182 => Some(match meta & 0x7 {
-                1 => "red_sandstone_top.png",
+                1 => match face {
+                    Face::PosY | Face::NegY => "red_sandstone_top.png",
+                    _ => "red_sandstone_normal.png",
+                },
                 2 => "purpur_block.png",
-                3 => "purpur_pillar.png",
-                _ => "red_sandstone_normal.png",
+                3 => match face {
+                    Face::PosY | Face::NegY => "purpur_pillar_top.png",
+                    _ => "purpur_pillar.png",
+                },
+                _ => match face {
+                    Face::PosY | Face::NegY => "red_sandstone_top.png",
+                    _ => "red_sandstone_normal.png",
+                },
             }),
             85 => Some("planks_oak.png"),
             113 => Some("nether_brick.png"),
