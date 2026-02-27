@@ -1,5 +1,6 @@
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::fxaa::{Fxaa, Sensitivity};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::render::view::RenderLayers;
@@ -34,7 +35,12 @@ pub fn spawn_player(
         .with_children(|parent| {
             parent.spawn((
                 Camera3d::default(),
+                Camera {
+                    hdr: false,
+                    ..default()
+                },
                 PlayerCamera,
+                Tonemapping::None,
                 Fxaa {
                     enabled: matches!(
                         debug_settings.aa_mode,
@@ -51,6 +57,8 @@ pub fn spawn_player(
                 },
                 Projection::Perspective(PerspectiveProjection {
                     fov: debug_settings.fov_deg.to_radians(),
+                    near: 0.03,
+                    far: 2000.0,
                     ..Default::default()
                 }),
                 RenderLayers::layer(MAIN_RENDER_LAYER)
