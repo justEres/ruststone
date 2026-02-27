@@ -92,13 +92,19 @@ pub struct ChunkRenderState {
 
 pub struct ChunkEntry {
     pub entity: Entity,
-    pub submeshes: HashMap<MaterialGroup, SubmeshEntry>,
+    pub submeshes: HashMap<SubmeshKey, SubmeshEntry>,
     pub occlusion: ChunkOcclusionData,
 }
 
 pub struct SubmeshEntry {
     pub entity: Entity,
     pub mesh: Handle<Mesh>,
+}
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct SubmeshKey {
+    pub group: MaterialGroup,
+    pub section: u8,
 }
 
 #[derive(Resource, Default)]

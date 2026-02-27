@@ -29,6 +29,8 @@ pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
 
 pub struct RenderPlugin;
 
+const VERTICAL_CULL_SECTION_HEIGHT: f32 = 16.0;
+
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -239,62 +241,65 @@ fn apply_mesh_results(
                     RenderLayers::layer(reflection::CHUNK_TRANSPARENT_RENDER_LAYER)
                 }
             };
-            active_keys.insert(group);
-            let (mesh, bounds) = chunk::build_mesh_from_data(data);
+            for (section, section_data) in split_mesh_data_vertical_sections(data) {
+                let submesh_key = chunk::SubmeshKey { group, section };
+                active_keys.insert(submesh_key);
+                let (mesh, bounds) = chunk::build_mesh_from_data(section_data);
 
-            if let Some(submesh) = entry.submeshes.get_mut(&group) {
-                if let Some(existing) = meshes.get_mut(&submesh.mesh) {
-                    *existing = mesh;
+                if let Some(submesh) = entry.submeshes.get_mut(&submesh_key) {
+                    if let Some(existing) = meshes.get_mut(&submesh.mesh) {
+                        *existing = mesh;
+                    } else {
+                        let handle = meshes.add(mesh);
+                        commands
+                            .entity(submesh.entity)
+                            .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
+                        submesh.mesh = handle;
+                    }
+                    commands.entity(submesh.entity).insert(mesh_layers.clone());
+                    if let Some((min, max)) = bounds {
+                        let center = (min + max) * 0.5;
+                        let half = (max - min) * 0.5 + Vec3::splat(0.75);
+                        commands
+                            .entity(submesh.entity)
+                            .insert(bevy::render::primitives::Aabb {
+                                center: center.into(),
+                                half_extents: half.into(),
+                            });
+                    }
                 } else {
                     let handle = meshes.add(mesh);
-                    commands
-                        .entity(submesh.entity)
-                        .insert((Mesh3d(handle.clone()), mesh_layers.clone()));
-                    submesh.mesh = handle;
+                    let child = commands
+                        .spawn((
+                            Mesh3d(handle.clone()),
+                            MeshMaterial3d(material.clone()),
+                            mesh_layers.clone(),
+                            Transform::default(),
+                            GlobalTransform::default(),
+                            Visibility::Inherited,
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                        ))
+                        .id();
+                    if let Some((min, max)) = bounds {
+                        let center = (min + max) * 0.5;
+                        let half = (max - min) * 0.5 + Vec3::splat(0.75);
+                        commands
+                            .entity(child)
+                            .insert(bevy::render::primitives::Aabb {
+                                center: center.into(),
+                                half_extents: half.into(),
+                            });
+                    }
+                    commands.entity(entry.entity).add_child(child);
+                    entry.submeshes.insert(
+                        submesh_key,
+                        chunk::SubmeshEntry {
+                            entity: child,
+                            mesh: handle,
+                        },
+                    );
                 }
-                commands.entity(submesh.entity).insert(mesh_layers.clone());
-                if let Some((min, max)) = bounds {
-                    let center = (min + max) * 0.5;
-                    let half = (max - min) * 0.5 + Vec3::splat(0.75);
-                    commands
-                        .entity(submesh.entity)
-                        .insert(bevy::render::primitives::Aabb {
-                            center: center.into(),
-                            half_extents: half.into(),
-                        });
-                }
-            } else {
-                let handle = meshes.add(mesh);
-                let child = commands
-                    .spawn((
-                        Mesh3d(handle.clone()),
-                        MeshMaterial3d(material),
-                        mesh_layers,
-                        Transform::default(),
-                        GlobalTransform::default(),
-                        Visibility::Inherited,
-                        InheritedVisibility::default(),
-                        ViewVisibility::default(),
-                    ))
-                    .id();
-                if let Some((min, max)) = bounds {
-                    let center = (min + max) * 0.5;
-                    let half = (max - min) * 0.5 + Vec3::splat(0.75);
-                    commands
-                        .entity(child)
-                        .insert(bevy::render::primitives::Aabb {
-                            center: center.into(),
-                            half_extents: half.into(),
-                        });
-                }
-                commands.entity(entry.entity).add_child(child);
-                entry.submeshes.insert(
-                    group,
-                    chunk::SubmeshEntry {
-                        entity: child,
-                        mesh: handle,
-                    },
-                );
             }
         }
 
@@ -345,4 +350,39 @@ fn apply_mesh_results(
     };
     perf.last_meshes_applied = applied;
     perf.in_flight = in_flight.chunks.len() as u32;
+}
+
+fn split_mesh_data_vertical_sections(data: chunk::MeshData) -> Vec<(u8, chunk::MeshData)> {
+    use std::collections::HashMap;
+
+    let mut by_section: HashMap<u8, chunk::MeshData> = HashMap::new();
+    for tri in data.indices.chunks_exact(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+        let y0 = data.positions[i0][1];
+        let y1 = data.positions[i1][1];
+        let y2 = data.positions[i2][1];
+        let center_y = (y0 + y1 + y2) / 3.0;
+        let section = ((center_y / VERTICAL_CULL_SECTION_HEIGHT).floor() as i32).clamp(0, 15) as u8;
+        let section_mesh = by_section
+            .entry(section)
+            .or_insert_with(chunk::MeshData::empty);
+
+        for &src in &[i0, i1, i2] {
+            section_mesh.push_pos(data.positions[src]);
+            section_mesh.normals.push(data.normals[src]);
+            section_mesh.uvs.push(data.uvs[src]);
+            section_mesh.uvs_b.push(data.uvs_b[src]);
+            section_mesh.colors.push(data.colors[src]);
+        }
+        let base = section_mesh.positions.len() as u32 - 3;
+        section_mesh
+            .indices
+            .extend_from_slice(&[base, base + 1, base + 2]);
+    }
+
+    let mut out = by_section.into_iter().collect::<Vec<_>>();
+    out.sort_by_key(|(section, _)| *section);
+    out
 }
