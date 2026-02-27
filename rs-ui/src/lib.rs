@@ -2809,6 +2809,7 @@ struct ItemIconCache {
     block_texture_images: HashMap<String, Option<egui::ColorImage>>,
     logged_stone_fallback: HashSet<(i32, i16)>,
     logged_model_fallback: HashSet<(i32, i16)>,
+    logged_resolution_path: HashSet<(i32, i16)>,
 }
 
 impl Default for ItemIconCache {
@@ -2820,6 +2821,7 @@ impl Default for ItemIconCache {
             block_texture_images: HashMap::new(),
             logged_stone_fallback: HashSet::new(),
             logged_model_fallback: HashSet::new(),
+            logged_resolution_path: HashSet::new(),
         }
     }
 }
@@ -2850,6 +2852,7 @@ impl ItemIconCache {
             &mut self.block_texture_images,
             &mut self.logged_stone_fallback,
             &mut self.logged_model_fallback,
+            &mut self.logged_resolution_path,
         ) {
             let texture_name = format!("item_icon_iso_{}_{}", stack.item_id, stack.damage);
             let handle = ctx.load_texture(texture_name, image, egui::TextureOptions::NEAREST);
@@ -2893,6 +2896,7 @@ fn generate_isometric_block_icon(
     texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
     logged_stone_fallback: &mut HashSet<(i32, i16)>,
     logged_model_fallback: &mut HashSet<(i32, i16)>,
+    logged_resolution_path: &mut HashSet<(i32, i16)>,
 ) -> Option<egui::ColorImage> {
     let block_id = u16::try_from(item_id).ok()?;
     if block_registry_key(block_id).is_none() {
@@ -2921,6 +2925,14 @@ fn generate_isometric_block_icon(
             raster_iso_quad(&mut out, &mut depth, &quad, &tex, tint);
         }
         if rendered_any {
+            if logged_resolution_path.insert((item_id, damage)) {
+                eprintln!(
+                    "[isometric-debug] path=id:{} meta:{} source:blockstate-model key={:?}",
+                    item_id,
+                    damage,
+                    block_registry_key(block_id)
+                );
+            }
             return Some(out);
         }
         if logged_model_fallback.insert((item_id, damage)) {
@@ -2930,6 +2942,34 @@ fn generate_isometric_block_icon(
                 damage,
                 block_registry_key(block_id)
             );
+        }
+    }
+
+    if let Some(quads) = resolver.block_item_icon_quads(block_id, damage as u8) {
+        let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
+        let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
+        let mut rendered_any = false;
+        for quad in quads {
+            let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
+                continue;
+            };
+            rendered_any = true;
+            let tint = quad
+                .tint_index
+                .and_then(|_| icon_tint_color(block_id, damage))
+                .unwrap_or([255, 255, 255]);
+            raster_iso_quad(&mut out, &mut depth, &quad, &tex, tint);
+        }
+        if rendered_any {
+            if logged_resolution_path.insert((item_id, damage)) {
+                eprintln!(
+                    "[isometric-debug] path=id:{} meta:{} source:item-model key={:?}",
+                    item_id,
+                    damage,
+                    block_registry_key(block_id)
+                );
+            }
+            return Some(out);
         }
     }
 
@@ -3012,6 +3052,14 @@ fn generate_isometric_block_icon(
     ];
     for (quad, tex) in &cube_faces {
         raster_iso_quad(&mut out, &mut depth, quad, tex, [255, 255, 255]);
+    }
+    if logged_resolution_path.insert((item_id, damage)) {
+        eprintln!(
+            "[isometric-debug] path=id:{} meta:{} source:manual-cube-fallback key={:?}",
+            item_id,
+            damage,
+            block_registry_key(block_id)
+        );
     }
     Some(out)
 }

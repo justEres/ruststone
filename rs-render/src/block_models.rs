@@ -62,29 +62,23 @@ impl BlockModelResolver {
         let blockstate = self.load_blockstate_best(block_id, name, meta)?;
         let model_name = pick_model_name(&blockstate)?;
         let model = self.resolve_model(&model_name, 0)?;
+        Some(quads_from_resolved_model(&model))
+    }
 
-        let mut quads = Vec::new();
-        for el in &model.elements {
-            let Some(faces) = &el.faces else {
+    pub fn block_item_icon_quads(&mut self, block_id: u16, meta: u8) -> Option<Vec<IconQuad>> {
+        let registry_key = block_registry_key(block_id)?;
+        let base_name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        for name in block_item_model_name_candidates(block_id, base_name, meta) {
+            let model_key = format!("item/{name}");
+            let Some(model) = self.resolve_model(&model_key, 0) else {
                 continue;
             };
-            for (dir, face) in faces {
-                let Some(texture_path) = resolve_texture_ref_map(&model.textures, &face.texture, 0)
-                else {
-                    continue;
-                };
-                let Some(vertices) = face_vertices(el.from, el.to, dir.as_str()) else {
-                    continue;
-                };
-                quads.push(IconQuad {
-                    vertices,
-                    uv: face_uvs(face),
-                    texture_path: append_png(texture_path),
-                    tint_index: face.tintindex.map(|v| v as u8),
-                });
+            let quads = quads_from_resolved_model(&model);
+            if !quads.is_empty() {
+                return Some(quads);
             }
         }
-        Some(quads)
+        None
     }
 
     fn load_blockstate_best(&mut self, block_id: u16, base_name: &str, meta: u8) -> Option<BlockstateFile> {
@@ -407,6 +401,59 @@ fn dedup_keep_order(input: Vec<String>) -> Vec<String> {
     out
 }
 
+fn block_item_model_name_candidates(block_id: u16, base_name: &str, meta: u8) -> Vec<String> {
+    let mut out = blockstate_name_candidates(block_id, base_name, meta);
+    match base_name {
+        "tallgrass" => {
+            out.push("tall_grass".to_string());
+            out.push(if (meta & 0x3) == 2 { "fern" } else { "grass" }.to_string());
+        }
+        "deadbush" => out.push("dead_bush".to_string()),
+        "yellow_flower" => out.push("dandelion".to_string()),
+        "red_flower" => {
+            out.push(
+                match meta {
+                    1 => "blue_orchid",
+                    2 => "allium",
+                    3 => "houstonia",
+                    4 => "red_tulip",
+                    5 => "orange_tulip",
+                    6 => "white_tulip",
+                    7 => "pink_tulip",
+                    8 => "oxeye_daisy",
+                    _ => "poppy",
+                }
+                .to_string(),
+            );
+        }
+        "fence" => out.push("oak_fence".to_string()),
+        "fence_gate" => out.push("oak_fence_gate".to_string()),
+        "standing_sign" | "wall_sign" => out.push("sign".to_string()),
+        "wooden_door" => out.push("oak_door".to_string()),
+        "unpowered_repeater" | "powered_repeater" => out.push("repeater".to_string()),
+        "unpowered_comparator" | "powered_comparator" => out.push("comparator".to_string()),
+        "lit_redstone_lamp" => out.push("redstone_lamp".to_string()),
+        "daylight_detector_inverted" => out.push("daylight_detector".to_string()),
+        "double_stone_slab" | "double_stone_slab2" => out.push("stone_slab".to_string()),
+        "double_wooden_slab" | "wooden_slab" => out.push("oak_slab".to_string()),
+        "piston_head" | "piston_extension" => out.push("piston".to_string()),
+        "monster_egg" => out.push(
+            match meta {
+                1 => "cobblestone_monster_egg",
+                2 => "stone_brick_monster_egg",
+                3 => "mossy_brick_monster_egg",
+                4 => "cracked_brick_monster_egg",
+                5 => "chiseled_brick_monster_egg",
+                _ => "stone_monster_egg",
+            }
+            .to_string(),
+        ),
+        "standing_banner" | "wall_banner" => out.push("banner".to_string()),
+        _ => {}
+    }
+    dedup_keep_order(out)
+}
+
 fn append_png(mut s: String) -> String {
     if !s.ends_with(".png") {
         s.push_str(".png");
@@ -509,6 +556,31 @@ fn face_uvs(face: &ModelFace) -> [[f32; 2]; 4] {
     let mut uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     rotate_uvs(&mut uv, face.rotation.unwrap_or(0));
     uv
+}
+
+fn quads_from_resolved_model(model: &ResolvedModel) -> Vec<IconQuad> {
+    let mut quads = Vec::new();
+    for el in &model.elements {
+        let Some(faces) = &el.faces else {
+            continue;
+        };
+        for (dir, face) in faces {
+            let Some(texture_path) = resolve_texture_ref_map(&model.textures, &face.texture, 0)
+            else {
+                continue;
+            };
+            let Some(vertices) = face_vertices(el.from, el.to, dir.as_str()) else {
+                continue;
+            };
+            quads.push(IconQuad {
+                vertices,
+                uv: face_uvs(face),
+                texture_path: append_png(texture_path),
+                tint_index: face.tintindex.map(|v| v as u8),
+            });
+        }
+    }
+    quads
 }
 
 fn rotate_uvs(uv: &mut [[f32; 2]; 4], rotation: i32) {
