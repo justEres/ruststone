@@ -352,7 +352,9 @@ fn add_key_candidates(out: &mut Vec<String>, key: &str) {
         }
         "carrots" => push_candidate(out, "blocks/carrots_stage_3.png".to_string()),
         "potatoes" => push_candidate(out, "blocks/potatoes_stage_3.png".to_string()),
-        "double_plant" => push_candidate(out, "blocks/double_plant_sunflower_bottom.png".to_string()),
+        "double_plant" => {
+            push_candidate(out, "blocks/double_plant_sunflower_bottom.png".to_string())
+        }
         "slime_ball" => push_candidate(out, "items/slimeball.png".to_string()),
         "fermented_spider_eye" => push_candidate(out, "items/spider_eye_fermented.png".to_string()),
         "golden_carrot" => push_candidate(out, "items/carrot_golden.png".to_string()),

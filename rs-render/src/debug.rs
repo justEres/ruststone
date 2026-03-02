@@ -10,15 +10,8 @@ use crate::chunk::{
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::{ChildOf, Mesh3d, Projection};
-use bevy::render::primitives::Aabb;
 use bevy::render::view::ViewVisibility;
 
-use crate::lighting::{LightingQualityPreset, ShadowQualityPreset};
-
-const MANUAL_CULL_NEAR_DISABLE_DISTANCE: f32 = 8.0;
-const MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.30;
-const MANUAL_CULL_PAD_BASE: f32 = 6.0;
-const MANUAL_CULL_PAD_SHADOW_EXTRA: f32 = 12.0;
 const OCCLUSION_CULL_HORIZONTAL_FOV_MULTIPLIER: f32 = 1.85;
 const OCCLUSION_CULL_VERTICAL_FOV_MULTIPLIER: f32 = 1.60;
 const OCCLUSION_CULL_RADIUS: f32 = 20.0;
@@ -96,9 +89,9 @@ pub struct RenderDebugSettings {
     pub use_greedy_meshing: bool,
     pub wireframe_enabled: bool,
     pub aa_mode: AntiAliasingMode,
-    pub fxaa_enabled: bool,
-    pub manual_frustum_cull: bool,
     pub occlusion_cull_enabled: bool,
+    pub occlusion_anchor_player: bool,
+    pub cull_guard_chunk_radius: i32,
     pub frustum_fov_debug: bool,
     pub frustum_fov_deg: f32,
     pub show_chunk_borders: bool,
@@ -109,8 +102,6 @@ pub struct RenderDebugSettings {
     pub render_held_items: bool,
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
-    pub lighting_quality: LightingQualityPreset,
-    pub shadow_quality: ShadowQualityPreset,
     pub shader_quality_mode: u8, // 0 fast .. 3 fancy
     pub enable_pbr_terrain_lighting: bool,
     pub sun_azimuth_deg: f32,
@@ -118,6 +109,7 @@ pub struct RenderDebugSettings {
     pub sun_strength: f32,
     pub sun_warmth: f32,
     pub shadow_opacity: f32,
+    pub player_shadow_opacity: f32,
     pub ambient_strength: f32,
     pub ambient_brightness: f32,
     pub sun_illuminance: f32,
@@ -154,7 +146,6 @@ pub struct RenderDebugSettings {
     pub water_wave_detail_scale: f32,
     pub water_wave_detail_speed: f32,
     pub water_reflection_edge_fade: f32,
-    pub water_reflection_overscan: f32,
     pub water_reflection_sky_fill: f32,
     pub water_reflection_screen_space: bool,
     pub water_ssr_steps: u8,
@@ -182,9 +173,9 @@ impl Default for RenderDebugSettings {
             use_greedy_meshing: true,
             wireframe_enabled: false,
             aa_mode: AntiAliasingMode::default(),
-            fxaa_enabled: true,
-            manual_frustum_cull: true,
             occlusion_cull_enabled: true,
+            occlusion_anchor_player: false,
+            cull_guard_chunk_radius: 1,
             frustum_fov_debug: false,
             frustum_fov_deg: 110.0,
             show_chunk_borders: false,
@@ -195,8 +186,6 @@ impl Default for RenderDebugSettings {
             render_held_items: true,
             render_first_person_arms: true,
             render_self_model: true,
-            lighting_quality: LightingQualityPreset::Standard,
-            shadow_quality: ShadowQualityPreset::Medium,
             shader_quality_mode: 2,
             enable_pbr_terrain_lighting: false,
             sun_azimuth_deg: 62.0,
@@ -204,6 +193,7 @@ impl Default for RenderDebugSettings {
             sun_strength: 0.56,
             sun_warmth: 0.18,
             shadow_opacity: 1.0,
+            player_shadow_opacity: 1.0,
             ambient_strength: 0.52,
             ambient_brightness: 0.80,
             sun_illuminance: 11_500.0,
@@ -240,7 +230,6 @@ impl Default for RenderDebugSettings {
             water_wave_detail_scale: 2.4,
             water_wave_detail_speed: 1.7,
             water_reflection_edge_fade: 0.22,
-            water_reflection_overscan: 1.30,
             water_reflection_sky_fill: 0.55,
             water_reflection_screen_space: false,
             water_ssr_steps: 28,
@@ -298,7 +287,6 @@ pub struct RenderPerfStats {
     pub visible_chunks: u32,
     pub apply_debug_ms: f32,
     pub gather_stats_ms: f32,
-    pub manual_cull_ms: f32,
     pub occlusion_cull_ms: f32,
     pub visible_chunks_after_occlusion: u32,
     pub occluded_chunks: u32,
@@ -319,10 +307,12 @@ pub struct RenderPerfStats {
 pub fn occlusion_cull_chunks(
     settings: Res<RenderDebugSettings>,
     camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
+    player_query: Query<&GlobalTransform, With<Player>>,
     state: Res<ChunkRenderState>,
     mut chunks: Query<(&ChunkRoot, &mut Visibility)>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
+    let guard_radius = settings.cull_guard_chunk_radius.clamp(0, 5);
     let distance_visible_count = chunks
         .iter()
         .filter(|(_, visibility)| !matches!(**visibility, Visibility::Hidden))
@@ -345,25 +335,60 @@ pub fn occlusion_cull_chunks(
     let tan_y = (fov_y * 0.5).tan() * OCCLUSION_CULL_VERTICAL_FOV_MULTIPLIER;
     let tan_x = tan_y * aspect * OCCLUSION_CULL_HORIZONTAL_FOV_MULTIPLIER;
     let cam_pos = cam_transform.translation();
-    let cam_forward = cam_transform.forward();
-    let cam_right = cam_transform.right();
-    let cam_up = cam_transform.up();
     let camera_chunk = (
         (cam_pos.x / 16.0).floor() as i32,
         (cam_pos.z / 16.0).floor() as i32,
     );
+    let (cull_pos, cull_forward, cull_right, cull_up, anchor_chunk) =
+        if settings.occlusion_anchor_player {
+            player_query
+                .get_single()
+                .map(|player_transform| {
+                    let p = player_transform.translation();
+                    (
+                        p,
+                        player_transform.forward(),
+                        player_transform.right(),
+                        player_transform.up(),
+                        ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32),
+                    )
+                })
+                .unwrap_or((
+                    cam_pos,
+                    cam_transform.forward(),
+                    cam_transform.right(),
+                    cam_transform.up(),
+                    camera_chunk,
+                ))
+        } else {
+            (
+                cam_pos,
+                cam_transform.forward(),
+                cam_transform.right(),
+                cam_transform.up(),
+                camera_chunk,
+            )
+        };
 
     let mut distance_visible = HashSet::new();
     let mut frustum_candidates = HashSet::new();
+    let mut guard_visible = HashSet::new();
     for (chunk, visibility) in &chunks {
         if !matches!(*visibility, Visibility::Hidden) {
             distance_visible.insert(chunk.key);
+            let near_guard = (chunk.key.0 - anchor_chunk.0).abs() <= guard_radius
+                && (chunk.key.1 - anchor_chunk.1).abs() <= guard_radius;
+            if near_guard {
+                guard_visible.insert(chunk.key);
+                frustum_candidates.insert(chunk.key);
+                continue;
+            }
             if chunk_key_in_coarse_frustum(
                 chunk.key,
-                cam_pos,
-                *cam_forward,
-                *cam_right,
-                *cam_up,
+                cull_pos,
+                *cull_forward,
+                *cull_right,
+                *cull_up,
                 tan_x,
                 tan_y,
                 near,
@@ -381,8 +406,9 @@ pub fn occlusion_cull_chunks(
     }
 
     let mut keep_visible = HashSet::new();
-    if distance_visible.contains(&camera_chunk) {
-        frustum_candidates.insert(camera_chunk);
+    keep_visible.extend(guard_visible.iter().copied());
+    if distance_visible.contains(&anchor_chunk) {
+        frustum_candidates.insert(anchor_chunk);
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
         struct PortalNode {
             key: (i32, i32),
@@ -392,12 +418,12 @@ pub fn occlusion_cull_chunks(
         let mut queue = VecDeque::new();
         let mut visited = HashSet::new();
         let start_node = PortalNode {
-            key: camera_chunk,
+            key: anchor_chunk,
             entry_face: None,
         };
         queue.push_back(start_node);
         visited.insert(start_node);
-        keep_visible.insert(camera_chunk);
+        keep_visible.insert(anchor_chunk);
 
         let chunk_occlusion_for = |key: (i32, i32)| -> ChunkOcclusionData {
             state
@@ -664,87 +690,6 @@ pub fn gather_render_stats(
     perf.total_chunks = total_chunks;
     perf.visible_chunks = visible_chunks;
     perf.gather_stats_ms = start.elapsed().as_secs_f32() * 1000.0;
-}
-
-pub fn manual_frustum_cull(
-    settings: Res<RenderDebugSettings>,
-    camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
-    mut params: ParamSet<(
-        Query<(Entity, &Visibility), With<ChunkRoot>>,
-        Query<(&ChildOf, &GlobalTransform, &Aabb, &mut Visibility), With<Mesh3d>>,
-    )>,
-    mut perf: ResMut<RenderPerfStats>,
-) {
-    if !settings.manual_frustum_cull {
-        perf.manual_cull_ms = 0.0;
-        return;
-    }
-    let start = std::time::Instant::now();
-    let Ok((cam_transform, projection)) = camera_query.get_single() else {
-        return;
-    };
-    let (fov_y, aspect, near, far) = camera_fov_params(&settings, projection);
-    let (forward, right, up, cam_pos) = (
-        cam_transform.forward(),
-        cam_transform.right(),
-        cam_transform.up(),
-        cam_transform.translation(),
-    );
-    let tan_y = (fov_y * 0.5).tan();
-    let tan_x = tan_y * aspect * MANUAL_CULL_HORIZONTAL_FOV_MULTIPLIER;
-    let chunk_visibility: HashMap<Entity, Visibility> = {
-        let chunks = params.p0();
-        let mut map = HashMap::new();
-        for (entity, vis) in chunks.iter() {
-            map.insert(entity, *vis);
-        }
-        map
-    };
-
-    for (parent, transform, aabb, mut visibility) in &mut params.p1() {
-        if let Some(parent_vis) = chunk_visibility.get(&parent.parent()) {
-            if matches!(parent_vis, Visibility::Hidden) {
-                *visibility = Visibility::Hidden;
-                continue;
-            }
-        }
-
-        // Fast path: chunk sub-meshes are unscaled, so use translation directly.
-        let center = transform.translation() + Vec3::from(aabb.center);
-        let half = Vec3::from(aabb.half_extents);
-        let cull_pad = MANUAL_CULL_PAD_BASE
-            + if settings.shadows_enabled {
-                MANUAL_CULL_PAD_SHADOW_EXTRA
-            } else {
-                0.0
-            };
-        let radius = half.length() + cull_pad;
-        let to_center = center - cam_pos;
-        if to_center.length_squared()
-            <= (MANUAL_CULL_NEAR_DISABLE_DISTANCE + radius)
-                * (MANUAL_CULL_NEAR_DISABLE_DISTANCE + radius)
-        {
-            *visibility = Visibility::Inherited;
-            continue;
-        }
-        let z = to_center.dot(*forward);
-        if z < -radius - cull_pad * 2.0 {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let x = to_center.dot(*right).abs();
-        let y = to_center.dot(*up).abs();
-        let visible = x <= z * tan_x + radius
-            && y <= z * tan_y + radius
-            && z <= far + radius + cull_pad * 2.0
-            && z >= near - radius - cull_pad * 2.0;
-        *visibility = if visible {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
-    perf.manual_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
 }
 
 fn camera_fov_params(

@@ -280,6 +280,7 @@ fn apply_voxel_lighting(
 
 fn apply_fancy_post_lighting(
     base: vec4<f32>,
+    base_albedo: vec3<f32>,
     normal: vec3<f32>,
     view_z: f32,
     view_dir: vec3<f32>,
@@ -289,6 +290,18 @@ fn apply_fancy_post_lighting(
 ) -> vec4<f32> {
     let quality_mode = lighting_uniform.quality_and_water.x;
     var rgb = base.rgb;
+    let shadow_opacity = clamp(lighting_uniform.debug_flags.z, 0.0, 1.0);
+
+    if quality_mode >= 2.0 && shadow_opacity < 0.999 {
+        let luma_weights = vec3(0.2126, 0.7152, 0.0722);
+        let base_luma = max(dot(base_albedo, luma_weights), 0.0001);
+        let lit_luma = max(dot(rgb, luma_weights), 0.0);
+        let shadow_mask = clamp(1.0 - lit_luma / (base_luma * 1.05), 0.0, 1.0);
+        let lift_strength = (1.0 - shadow_opacity) * shadow_mask;
+        let ambient_strength = clamp(lighting_uniform.ambient_and_fog.x, 0.0, 2.0);
+        let shadow_floor = base_albedo * (0.16 + ambient_strength * 0.22);
+        rgb = mix(rgb, max(rgb, shadow_floor), lift_strength);
+    }
 
     if quality_mode >= 3.0 {
         // Slightly soften hard contrasts after PBR shading in highest quality.
@@ -626,6 +639,7 @@ fn fragment(
         out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(
             out.color,
+            pbr_input.material.base_color.rgb,
             normal,
             view_z,
             view_dir,

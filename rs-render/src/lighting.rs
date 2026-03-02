@@ -280,7 +280,7 @@ pub fn lighting_uniform_for_mode(
         debug_flags: Vec4::new(
             settings.cutout_debug_mode as f32,
             settings.water_reflection_sky_fill,
-            0.0,
+            settings.shadow_opacity.clamp(0.0, 1.0),
             0.0,
         ),
         grass_overlay_info: Vec4::new(f32::NAN, f32::NAN, f32::NAN, f32::NAN),
@@ -603,7 +603,7 @@ pub fn update_water_animation(
             mat.extension.lighting.debug_flags = Vec4::new(
                 settings.cutout_debug_mode as f32,
                 settings.water_reflection_sky_fill,
-                0.0,
+                settings.shadow_opacity.clamp(0.0, 1.0),
                 0.0,
             );
             mat.extension.lighting.grass_overlay_info = assets.grass_overlay_info;

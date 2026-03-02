@@ -88,6 +88,7 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(sim::MovementPacketState::default())
             .insert_resource(sim::DebugUiState::default())
             .insert_resource(sim::ZoomState::default())
+            .insert_resource(sim::FreecamState::default())
             .insert_resource(sim::CameraPerspectiveState::default())
             .insert_resource(sim::CameraPerspectiveAltHold::default())
             .insert_resource(sim::LocalArmSwing::default())
@@ -164,6 +165,7 @@ impl Plugin for ClientEntityPlugin {
                     .after(item_textures::item_texture_cache_tick),
                 entities::apply_entity_model_textures_system
                     .after(entity_model::entity_texture_cache_tick),
+                entities::apply_player_shadow_opacity_material_system,
             ),
         )
         .add_systems(
@@ -204,11 +206,14 @@ impl Plugin for ClientSimPlugin {
                     sim_systems::camera_perspective_toggle_system,
                     sim_systems::camera_perspective_alt_hold_system,
                     sim_systems::input_collect_system,
+                    sim_systems::freecam_toggle_system.after(sim_systems::input_collect_system),
+                    sim_systems::freecam_move_system.after(sim_systems::freecam_toggle_system),
                     sim_systems::camera_zoom_system
                         .after(rs_render::debug::apply_render_debug_settings),
                     entity_model::entity_texture_cache_tick,
                     sim_systems::visual_smoothing_system,
-                    sim_systems::apply_visual_transform_system,
+                    sim_systems::apply_visual_transform_system
+                        .after(sim_systems::freecam_move_system),
                 ),
             )
             .add_systems(

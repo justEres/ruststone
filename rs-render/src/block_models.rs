@@ -42,9 +42,16 @@ impl BlockModelResolver {
             .and_then(|faces| faces[face.index()].clone())
     }
 
-    pub fn face_texture_name_for_meta(&mut self, block_id: u16, meta: u8, face: Face) -> Option<String> {
+    pub fn face_texture_name_for_meta(
+        &mut self,
+        block_id: u16,
+        meta: u8,
+        face: Face,
+    ) -> Option<String> {
         let registry_key = block_registry_key(block_id)?;
-        let name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        let name = registry_key
+            .strip_prefix("minecraft:")
+            .unwrap_or(registry_key);
         let blockstate = self.load_blockstate_best(block_id, name, meta)?;
         let model_name = pick_model_name(&blockstate)?;
         self.resolve_face_from_model(&model_name, face, 0)
@@ -58,7 +65,9 @@ impl BlockModelResolver {
         let Some(registry_key) = block_registry_key(block_id) else {
             return None;
         };
-        let name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        let name = registry_key
+            .strip_prefix("minecraft:")
+            .unwrap_or(registry_key);
         let blockstate = self.load_blockstate_best(block_id, name, meta)?;
         let model_name = pick_model_name(&blockstate)?;
         let model = self.resolve_model(&model_name, 0)?;
@@ -67,7 +76,9 @@ impl BlockModelResolver {
 
     pub fn block_item_icon_quads(&mut self, block_id: u16, meta: u8) -> Option<Vec<IconQuad>> {
         let registry_key = block_registry_key(block_id)?;
-        let base_name = registry_key.strip_prefix("minecraft:").unwrap_or(registry_key);
+        let base_name = registry_key
+            .strip_prefix("minecraft:")
+            .unwrap_or(registry_key);
         for name in block_item_model_name_candidates(block_id, base_name, meta) {
             let model_key = format!("item/{name}");
             let Some(model) = self.resolve_model(&model_key, 0) else {
@@ -81,7 +92,12 @@ impl BlockModelResolver {
         None
     }
 
-    fn load_blockstate_best(&mut self, block_id: u16, base_name: &str, meta: u8) -> Option<BlockstateFile> {
+    fn load_blockstate_best(
+        &mut self,
+        block_id: u16,
+        base_name: &str,
+        meta: u8,
+    ) -> Option<BlockstateFile> {
         for name in blockstate_name_candidates(block_id, base_name, meta) {
             if let Some(state) = self.load_blockstate(&name) {
                 return Some(state);
@@ -689,17 +705,11 @@ fn guess_model_texture_ref(model: &ModelFile, face: Face) -> Option<String> {
     let textures = model.textures.as_ref()?;
     let mut keys: Vec<&str> = match face {
         Face::PosY => vec!["up", "top", "end", "all", "side", "particle", "texture"],
-        Face::NegY => vec!["down", "bottom", "end", "all", "side", "particle", "texture"],
+        Face::NegY => vec![
+            "down", "bottom", "end", "all", "side", "particle", "texture",
+        ],
         Face::PosX | Face::NegX | Face::PosZ | Face::NegZ => vec![
-            "side",
-            "front",
-            "all",
-            "north",
-            "south",
-            "east",
-            "west",
-            "texture",
-            "particle",
+            "side", "front", "all", "north", "south", "east", "west", "texture", "particle",
         ],
     };
     for key in keys.drain(..) {

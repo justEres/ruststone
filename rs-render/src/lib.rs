@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use bevy::pbr::{MaterialPlugin, wireframe::WireframePlugin};
-use bevy::prelude::*;
 use bevy::prelude::Mesh3d;
+use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
@@ -28,6 +28,11 @@ pub use components::{
 };
 pub use debug::{AntiAliasingMode, RenderDebugSettings};
 pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
+pub const MAIN_RENDER_LAYER: usize = reflection::MAIN_RENDER_LAYER;
+pub const CHUNK_OPAQUE_RENDER_LAYER: usize = reflection::CHUNK_OPAQUE_RENDER_LAYER;
+pub const CHUNK_CUTOUT_RENDER_LAYER: usize = reflection::CHUNK_CUTOUT_RENDER_LAYER;
+pub const CHUNK_TRANSPARENT_RENDER_LAYER: usize = reflection::CHUNK_TRANSPARENT_RENDER_LAYER;
+pub const LOCAL_PLAYER_RENDER_LAYER: usize = reflection::LOCAL_PLAYER_RENDER_LAYER;
 
 pub struct RenderPlugin;
 
@@ -588,7 +593,11 @@ fn is_light_blocking_geometry(block_state: u16) -> bool {
     )
 }
 
-fn is_camera_to_light_occluded(store: &chunk::ChunkStore, camera_pos: Vec3, light_pos: Vec3) -> bool {
+fn is_camera_to_light_occluded(
+    store: &chunk::ChunkStore,
+    camera_pos: Vec3,
+    light_pos: Vec3,
+) -> bool {
     let to_light = light_pos - camera_pos;
     let dist = to_light.length();
     if dist <= 0.05 {
@@ -638,8 +647,8 @@ fn update_dynamic_block_lights(
         for z in
             (cam_pos.z - DYNAMIC_LIGHT_SCAN_RADIUS_XZ)..=(cam_pos.z + DYNAMIC_LIGHT_SCAN_RADIUS_XZ)
         {
-            for x in
-                (cam_pos.x - DYNAMIC_LIGHT_SCAN_RADIUS_XZ)..=(cam_pos.x + DYNAMIC_LIGHT_SCAN_RADIUS_XZ)
+            for x in (cam_pos.x - DYNAMIC_LIGHT_SCAN_RADIUS_XZ)
+                ..=(cam_pos.x + DYNAMIC_LIGHT_SCAN_RADIUS_XZ)
             {
                 let pos = IVec3::new(x, y, z);
                 let state_id = chunk_block_state_at(&store, pos);
@@ -649,8 +658,7 @@ fn update_dynamic_block_lights(
                 if !is_exposed_light_block(&store, pos) {
                     continue;
                 }
-                let world =
-                    Vec3::new(x as f32 + 0.5, y as f32 + spec.y_offset, z as f32 + 0.5);
+                let world = Vec3::new(x as f32 + 0.5, y as f32 + spec.y_offset, z as f32 + 0.5);
                 if is_camera_to_light_occluded(&store, camera.translation(), world) {
                     continue;
                 }

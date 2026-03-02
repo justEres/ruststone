@@ -11,8 +11,8 @@ use bevy_egui::{
     egui::{self},
 };
 use rs_render::{
-    AntiAliasingMode, BlockModelResolver, IconQuad, LightingQualityPreset, ModelFace,
-    RenderDebugSettings, ShadowQualityPreset, default_model_roots,
+    AntiAliasingMode, BlockModelResolver, IconQuad, ModelFace, RenderDebugSettings,
+    default_model_roots,
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,
@@ -470,19 +470,22 @@ fn connect_ui(
                             });
                         if selected_aa_mode != render_debug.aa_mode {
                             render_debug.aa_mode = selected_aa_mode;
-                            render_debug.fxaa_enabled = matches!(
-                                render_debug.aa_mode,
-                                AntiAliasingMode::Fxaa
-                                    | AntiAliasingMode::Msaa4
-                                    | AntiAliasingMode::Msaa8
-                            );
                             options_changed = true;
                         }
                         options_changed |= ui
                             .checkbox(&mut render_debug.occlusion_cull_enabled, "Occlusion cull")
                             .changed();
                         options_changed |= ui
-                            .checkbox(&mut render_debug.manual_frustum_cull, "Manual frustum cull")
+                            .checkbox(
+                                &mut render_debug.occlusion_anchor_player,
+                                "Anchor occlusion to player",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.cull_guard_chunk_radius, 0..=5)
+                                    .text("Cull guard radius (chunks)"),
+                            )
                             .changed();
                         options_changed |= ui
                             .checkbox(
@@ -607,6 +610,15 @@ fn connect_ui(
                             .add(
                                 egui::Slider::new(&mut render_debug.shadow_opacity, 0.0..=1.0)
                                     .text("Shadow opacity"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.player_shadow_opacity,
+                                    0.0..=1.0,
+                                )
+                                .text("Player shadow opacity"),
                             )
                             .changed();
                         options_changed |= ui
@@ -757,15 +769,6 @@ fn connect_ui(
                                     0.0..=1.0,
                                 )
                                 .text("Reflection sky fallback"),
-                            )
-                            .changed();
-                        options_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut render_debug.water_reflection_overscan,
-                                    1.0..=3.0,
-                                )
-                                .text("Reflection overscan"),
                             )
                             .changed();
                         options_changed |= ui
@@ -1199,10 +1202,10 @@ struct ClientOptionsFile {
     pub render_distance_chunks: i32,
     pub shadows_enabled: bool,
     pub shadow_distance_scale: f32,
-    pub fxaa_enabled: bool,
     pub aa_mode: String,
-    pub manual_frustum_cull: bool,
     pub occlusion_cull_enabled: bool,
+    pub occlusion_anchor_player: bool,
+    pub cull_guard_chunk_radius: i32,
     pub frustum_fov_debug: bool,
     pub frustum_fov_deg: f32,
     pub vsync_enabled: bool,
@@ -1212,8 +1215,6 @@ struct ClientOptionsFile {
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
     pub show_chunk_borders: bool,
-    pub lighting_quality: String,
-    pub shadow_quality: String,
     pub shader_quality_mode: u8,
     pub enable_pbr_terrain_lighting: bool,
     pub sun_azimuth_deg: f32,
@@ -1221,6 +1222,7 @@ struct ClientOptionsFile {
     pub sun_strength: f32,
     pub sun_warmth: f32,
     pub shadow_opacity: f32,
+    pub player_shadow_opacity: f32,
     pub ambient_strength: f32,
     pub ambient_brightness: f32,
     pub sun_illuminance: f32,
@@ -1257,7 +1259,6 @@ struct ClientOptionsFile {
     pub water_wave_detail_scale: f32,
     pub water_wave_detail_speed: f32,
     pub water_reflection_edge_fade: f32,
-    pub water_reflection_overscan: f32,
     pub water_reflection_sky_fill: f32,
     pub water_ssr_steps: u8,
     pub water_ssr_thickness: f32,
@@ -1278,10 +1279,10 @@ impl Default for ClientOptionsFile {
             render_distance_chunks: render.render_distance_chunks,
             shadows_enabled: render.shadows_enabled,
             shadow_distance_scale: render.shadow_distance_scale,
-            fxaa_enabled: render.fxaa_enabled,
             aa_mode: render.aa_mode.as_options_value().to_string(),
-            manual_frustum_cull: render.manual_frustum_cull,
             occlusion_cull_enabled: render.occlusion_cull_enabled,
+            occlusion_anchor_player: render.occlusion_anchor_player,
+            cull_guard_chunk_radius: render.cull_guard_chunk_radius,
             frustum_fov_debug: render.frustum_fov_debug,
             frustum_fov_deg: render.frustum_fov_deg,
             vsync_enabled: false,
@@ -1291,8 +1292,6 @@ impl Default for ClientOptionsFile {
             render_first_person_arms: render.render_first_person_arms,
             render_self_model: render.render_self_model,
             show_chunk_borders: render.show_chunk_borders,
-            lighting_quality: render.lighting_quality.as_options_value().to_string(),
-            shadow_quality: render.shadow_quality.as_options_value().to_string(),
             shader_quality_mode: render.shader_quality_mode,
             enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
             sun_azimuth_deg: render.sun_azimuth_deg,
@@ -1300,6 +1299,7 @@ impl Default for ClientOptionsFile {
             sun_strength: render.sun_strength,
             sun_warmth: render.sun_warmth,
             shadow_opacity: render.shadow_opacity,
+            player_shadow_opacity: render.player_shadow_opacity,
             ambient_strength: render.ambient_strength,
             ambient_brightness: render.ambient_brightness,
             sun_illuminance: render.sun_illuminance,
@@ -1336,7 +1336,6 @@ impl Default for ClientOptionsFile {
             water_wave_detail_scale: render.water_wave_detail_scale,
             water_wave_detail_speed: render.water_wave_detail_speed,
             water_reflection_edge_fade: render.water_reflection_edge_fade,
-            water_reflection_overscan: render.water_reflection_overscan,
             water_reflection_sky_fill: render.water_reflection_sky_fill,
             water_ssr_steps: render.water_ssr_steps,
             water_ssr_thickness: render.water_ssr_thickness,
@@ -1357,10 +1356,10 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         render_distance_chunks: render.render_distance_chunks,
         shadows_enabled: render.shadows_enabled,
         shadow_distance_scale: render.shadow_distance_scale,
-        fxaa_enabled: render.fxaa_enabled,
         aa_mode: render.aa_mode.as_options_value().to_string(),
-        manual_frustum_cull: render.manual_frustum_cull,
         occlusion_cull_enabled: render.occlusion_cull_enabled,
+        occlusion_anchor_player: render.occlusion_anchor_player,
+        cull_guard_chunk_radius: render.cull_guard_chunk_radius,
         frustum_fov_debug: render.frustum_fov_debug,
         frustum_fov_deg: render.frustum_fov_deg,
         vsync_enabled: state.vsync_enabled,
@@ -1370,8 +1369,6 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         render_first_person_arms: render.render_first_person_arms,
         render_self_model: render.render_self_model,
         show_chunk_borders: render.show_chunk_borders,
-        lighting_quality: render.lighting_quality.as_options_value().to_string(),
-        shadow_quality: render.shadow_quality.as_options_value().to_string(),
         shader_quality_mode: render.shader_quality_mode,
         enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
         sun_azimuth_deg: render.sun_azimuth_deg,
@@ -1379,6 +1376,7 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         sun_strength: render.sun_strength,
         sun_warmth: render.sun_warmth,
         shadow_opacity: render.shadow_opacity,
+        player_shadow_opacity: render.player_shadow_opacity,
         ambient_strength: render.ambient_strength,
         ambient_brightness: render.ambient_brightness,
         sun_illuminance: render.sun_illuminance,
@@ -1415,7 +1413,6 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_wave_detail_scale: render.water_wave_detail_scale,
         water_wave_detail_speed: render.water_wave_detail_speed,
         water_reflection_edge_fade: render.water_reflection_edge_fade,
-        water_reflection_overscan: render.water_reflection_overscan,
         water_reflection_sky_fill: render.water_reflection_sky_fill,
         water_ssr_steps: render.water_ssr_steps,
         water_ssr_thickness: render.water_ssr_thickness,
@@ -1437,32 +1434,16 @@ fn apply_options(
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
     render.render_distance_chunks = options.render_distance_chunks.clamp(2, 32);
-    if let Some(preset) = LightingQualityPreset::from_options_value(&options.lighting_quality) {
-        render.lighting_quality = preset;
-    }
-    if let Some(preset) = ShadowQualityPreset::from_options_value(&options.shadow_quality) {
-        render.shadow_quality = preset;
-    }
     render.shader_quality_mode = options.shader_quality_mode.clamp(0, 3);
     if let Some(mode) = AntiAliasingMode::from_options_value(&options.aa_mode) {
         render.aa_mode = mode;
-    } else {
-        // Backward compatibility for older options files without aa_mode.
-        render.aa_mode = if options.fxaa_enabled {
-            AntiAliasingMode::Fxaa
-        } else {
-            AntiAliasingMode::Off
-        };
     }
     // Explicit toggles in options file override preset defaults.
     render.shadows_enabled = options.shadows_enabled;
     render.shadow_distance_scale = options.shadow_distance_scale.clamp(0.25, 20.0);
-    render.fxaa_enabled = matches!(
-        render.aa_mode,
-        AntiAliasingMode::Fxaa | AntiAliasingMode::Msaa4 | AntiAliasingMode::Msaa8
-    );
-    render.manual_frustum_cull = options.manual_frustum_cull;
     render.occlusion_cull_enabled = options.occlusion_cull_enabled;
+    render.occlusion_anchor_player = options.occlusion_anchor_player;
+    render.cull_guard_chunk_radius = options.cull_guard_chunk_radius.clamp(0, 5);
     render.frustum_fov_debug = options.frustum_fov_debug;
     render.frustum_fov_deg = options.frustum_fov_deg.clamp(30.0, 140.0);
     render.use_greedy_meshing = options.use_greedy_meshing;
@@ -1477,6 +1458,7 @@ fn apply_options(
     render.sun_strength = options.sun_strength.clamp(0.0, 2.0);
     render.sun_warmth = options.sun_warmth.clamp(0.0, 1.0);
     render.shadow_opacity = options.shadow_opacity.clamp(0.0, 1.0);
+    render.player_shadow_opacity = options.player_shadow_opacity.clamp(0.0, 1.0);
     render.ambient_strength = options.ambient_strength.clamp(0.0, 2.0);
     render.ambient_brightness = options.ambient_brightness.clamp(0.0, 2.0);
     render.sun_illuminance = options.sun_illuminance.clamp(0.0, 50_000.0);
@@ -1514,7 +1496,6 @@ fn apply_options(
     render.water_wave_detail_scale = options.water_wave_detail_scale.clamp(1.0, 8.0);
     render.water_wave_detail_speed = options.water_wave_detail_speed.clamp(0.0, 4.0);
     render.water_reflection_edge_fade = options.water_reflection_edge_fade.clamp(0.01, 0.5);
-    render.water_reflection_overscan = options.water_reflection_overscan.clamp(1.0, 3.0);
     render.water_reflection_sky_fill = options.water_reflection_sky_fill.clamp(0.0, 1.0);
     render.water_ssr_steps = options.water_ssr_steps.clamp(4, 64);
     render.water_ssr_thickness = options.water_ssr_thickness.clamp(0.02, 2.0);

@@ -166,7 +166,9 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 );
             }
             let _ = conn.write_packet(
-                rs_protocol::protocol::packet::play::serverbound::ChatMessage { message: sanitized },
+                rs_protocol::protocol::packet::play::serverbound::ChatMessage {
+                    message: sanitized,
+                },
             );
         }
         ToNetMessage::PlayerMovePosLook {

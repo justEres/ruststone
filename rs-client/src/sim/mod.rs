@@ -150,6 +150,21 @@ impl Default for ZoomState {
     }
 }
 
+#[derive(Debug, Resource, Clone, Copy)]
+pub struct FreecamState {
+    pub active: bool,
+    pub position: Vec3,
+}
+
+impl Default for FreecamState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            position: Vec3::ZERO,
+        }
+    }
+}
+
 #[derive(Debug, Resource)]
 pub struct DebugUiState {
     pub open: bool,

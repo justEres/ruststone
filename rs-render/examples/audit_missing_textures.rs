@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use rs_render::{ModelFace as Face, build_block_texture_mapping};
 use rs_render::default_model_roots;
+use rs_render::{ModelFace as Face, build_block_texture_mapping};
 use rs_utils::{block_registry_key, ruststone_assets_root};
 
 const TEXTURE_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
@@ -15,7 +15,9 @@ fn main() {
 
     let mut fully_missing = Vec::new();
     let mut partial_missing = Vec::new();
-    let stone_index = mapping.texture_index_by_name("stone.png").unwrap_or(mapping.missing_index);
+    let stone_index = mapping
+        .texture_index_by_name("stone.png")
+        .unwrap_or(mapping.missing_index);
     let mut all_stone_meta0 = Vec::new();
 
     for block_id in 0u16..=4095u16 {
@@ -88,7 +90,10 @@ fn main() {
     for (id, key) in &all_stone_meta0 {
         println!("  id={id:>4} key={key}");
     }
-    println!("Total all-stone(meta0) registered ids: {}", all_stone_meta0.len());
+    println!(
+        "Total all-stone(meta0) registered ids: {}",
+        all_stone_meta0.len()
+    );
 }
 
 fn collect_texture_name_map() -> HashMap<String, u16> {

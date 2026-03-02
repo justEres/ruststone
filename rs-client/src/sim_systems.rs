@@ -17,8 +17,8 @@ use crate::sim::movement::{
 use crate::sim::predict::PredictionBuffer;
 use crate::sim::{
     CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
-    CurrentInput, DebugStats, DebugUiState, LocalArmSwing, MovementPacketState, PredictedFrame,
-    SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
+    CurrentInput, DebugStats, DebugUiState, FreecamState, LocalArmSwing, MovementPacketState,
+    PredictedFrame, SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
@@ -108,11 +108,19 @@ fn client_abilities_flags(player_status: &rs_utils::PlayerStatus) -> u8 {
     flags
 }
 
+fn yaw_pitch_from_forward(forward: Vec3) -> (f32, f32) {
+    let f = forward.normalize_or_zero();
+    let yaw = (-f.x).atan2(-f.z);
+    let pitch = f.y.clamp(-1.0, 1.0).asin().clamp(-1.54, 1.54);
+    (yaw, pitch)
+}
+
 pub fn input_collect_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut motion_events: EventReader<MouseMotion>,
     mut input: ResMut<CurrentInput>,
     perspective: Res<CameraPerspectiveState>,
+    freecam: Res<FreecamState>,
     app_state: Res<AppState>,
     ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
@@ -162,7 +170,7 @@ pub fn input_collect_system(
         input.0.strafe -= 1.0;
     }
 
-    if matches!(perspective.mode, CameraPerspectiveMode::ThirdPersonFront) {
+    if !freecam.active && matches!(perspective.mode, CameraPerspectiveMode::ThirdPersonFront) {
         // Front-facing third-person camera is rotated 180deg around the player.
         // Map movement to camera-relative controls for this view.
         input.0.forward = -input.0.forward;
@@ -173,6 +181,14 @@ pub fn input_collect_system(
 
     input.0.sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     input.0.sneak = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if freecam.active {
+        // Keep look deltas for freecam, but never drive player simulation while detached.
+        input.0.forward = 0.0;
+        input.0.strafe = 0.0;
+        input.0.jump = false;
+        input.0.sprint = false;
+        input.0.sneak = false;
+    }
     timings.input_collect_ms = timer.ms();
 }
 
@@ -468,6 +484,113 @@ pub fn camera_perspective_alt_hold_system(
     } else if let Some(saved) = alt_hold.saved_mode.take() {
         perspective.mode = saved;
     }
+}
+
+pub fn freecam_toggle_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    ui_state: Res<UiState>,
+    app_state: Res<AppState>,
+    mut freecam: ResMut<FreecamState>,
+    mut perspective: ResMut<CameraPerspectiveState>,
+    mut alt_hold: ResMut<CameraPerspectiveAltHold>,
+    mut input: ResMut<CurrentInput>,
+    mut player_query: Query<(&GlobalTransform, &mut LookAngles), With<Player>>,
+    camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
+) {
+    if ui_state.chat_open || ui_state.inventory_open || ui_state.paused {
+        return;
+    }
+    if !matches!(app_state.0, ApplicationState::Connected) || !keys.just_pressed(KeyCode::F4) {
+        return;
+    }
+
+    let Ok(camera_gt) = camera_query.get_single() else {
+        return;
+    };
+    let camera_forward = camera_gt.forward().as_vec3();
+    let (yaw, pitch) = yaw_pitch_from_forward(camera_forward);
+    perspective.mode = CameraPerspectiveMode::FirstPerson;
+    alt_hold.saved_mode = None;
+
+    if !freecam.active {
+        freecam.active = true;
+        freecam.position = camera_gt.translation();
+        input.0.yaw = yaw;
+        input.0.pitch = pitch;
+        return;
+    }
+
+    freecam.active = false;
+    if let Ok((_player_gt, mut look)) = player_query.get_single_mut() {
+        look.yaw = yaw;
+        look.pitch = pitch;
+    }
+    input.0.yaw = yaw;
+    input.0.pitch = pitch;
+}
+
+pub fn freecam_move_system(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    input: Res<CurrentInput>,
+    mut freecam: ResMut<FreecamState>,
+    player_query: Query<&GlobalTransform, With<Player>>,
+    mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+) {
+    if !freecam.active {
+        return;
+    }
+
+    let Ok(player_gt) = player_query.get_single() else {
+        return;
+    };
+    let Ok(mut camera_local) = camera_query.get_single_mut() else {
+        return;
+    };
+
+    let dt = time.delta_secs().clamp(0.0, 0.05);
+    let yaw_rot = Quat::from_axis_angle(Vec3::Y, input.0.yaw);
+    let pitch_rot = Quat::from_axis_angle(Vec3::X, input.0.pitch);
+    let world_rot = yaw_rot * pitch_rot;
+    let forward = world_rot * -Vec3::Z;
+    let right = world_rot * Vec3::X;
+
+    let mut move_forward = 0.0;
+    let mut move_strafe = 0.0;
+    if keys.pressed(KeyCode::KeyW) {
+        move_forward += 1.0;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        move_forward -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        move_strafe += 1.0;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        move_strafe -= 1.0;
+    }
+    let vertical = if keys.pressed(KeyCode::Space) {
+        1.0
+    } else {
+        0.0
+    } - if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        1.0
+    } else {
+        0.0
+    };
+
+    let mut wish = forward * move_forward + right * move_strafe + Vec3::Y * vertical;
+    if wish.length_squared() > 1.0 {
+        wish = wish.normalize();
+    }
+    let sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let speed = if sprint { 26.0 } else { 11.0 };
+    freecam.position += wish * speed * dt;
+
+    let player_world = player_gt.compute_transform();
+    let inv_player_rot = player_world.rotation.inverse();
+    camera_local.translation = inv_player_rot * (freecam.position - player_world.translation);
+    camera_local.rotation = inv_player_rot * world_rot;
 }
 
 pub fn fixed_sim_tick_system(
@@ -828,6 +951,7 @@ pub fn apply_visual_transform_system(
     sim_state: Res<SimState>,
     offset: Res<VisualCorrectionOffset>,
     collision_map: Res<WorldCollisionMap>,
+    freecam: Res<FreecamState>,
     mut player_query: Query<(&mut Transform, &mut LookAngles), With<Player>>,
     mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
     mut eye_height: Local<f32>,
@@ -841,10 +965,16 @@ pub fn apply_visual_transform_system(
         let interpolated = sim_render.previous.pos.lerp(sim_state.current.pos, alpha);
         let pos = interpolated + offset.0;
         player_transform.translation = pos;
-        look.yaw = input.0.yaw;
-        look.pitch = input.0.pitch;
+        if !freecam.active {
+            look.yaw = input.0.yaw;
+            look.pitch = input.0.pitch;
+        }
         player_transform.rotation = Quat::from_axis_angle(Vec3::Y, look.yaw);
         if let Ok(mut camera_transform) = camera_query.get_single_mut() {
+            if freecam.active {
+                timings.apply_transform_ms = timer.ms();
+                return;
+            }
             let target_eye_height = if input.0.sneak {
                 EYE_HEIGHT_SNEAK
             } else {
@@ -1466,6 +1596,7 @@ pub fn draw_chunk_debug_system(
     render_debug: Res<RenderDebugSettings>,
     app_state: Res<AppState>,
     break_indicator: Res<BreakIndicator>,
+    freecam: Res<FreecamState>,
     player_status: Res<rs_utils::PlayerStatus>,
     collision_map: Res<WorldCollisionMap>,
     chunks: Query<(&ChunkRoot, &Visibility)>,
@@ -1498,7 +1629,7 @@ pub fn draw_chunk_debug_system(
         gizmos.line(origin, end, Color::srgba(1.0, 0.2, 0.2, 1.0));
     }
 
-    if render_debug.show_target_block_outline {
+    if render_debug.show_target_block_outline && !freecam.active {
         let Ok(cam) = camera.get_single() else {
             return;
         };

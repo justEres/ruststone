@@ -3082,9 +3082,9 @@ fn ao_factor(side1: bool, side2: bool, corner: bool) -> f32 {
     }
 }
 
-fn light_factor_from_level(level: f32) -> f32 {
-    // Keep a minimum floor so caves are dark but not pure black.
-    (0.18 + (level / 15.0) * 0.82).clamp(0.0, 1.0)
+fn light_factor_from_level_with_floor(level: f32, floor: f32) -> f32 {
+    let floor = floor.clamp(0.0, 0.95);
+    (floor + (level / 15.0) * (1.0 - floor)).clamp(0.0, 1.0)
 }
 
 fn quantize_shade_4bit(shade: f32) -> u16 {
@@ -3252,7 +3252,7 @@ fn face_vertex_light_ao(
         + f32::from(l2.block.max(l2.sky))
         + f32::from(l3.block.max(l3.sky)))
         * 0.25;
-    let light = light_factor_from_level(level);
+    let light = light_factor_from_level_with_floor(level, 0.18);
     (ao, light)
 }
 
@@ -3354,7 +3354,7 @@ fn face_light_factor(
     let a = light_at(snapshot, chunk_x, chunk_z, x, y, z);
     let b = light_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz);
     let level = (f32::from(a.block.max(a.sky)) + f32::from(b.block.max(b.sky))) * 0.5;
-    light_factor_from_level(level)
+    light_factor_from_level_with_floor(level, 0.18)
 }
 
 fn block_light_factor(
@@ -3368,7 +3368,7 @@ fn block_light_factor(
     let l0 = light_at(snapshot, chunk_x, chunk_z, x, y, z);
     let l1 = light_at(snapshot, chunk_x, chunk_z, x, y + 1, z);
     let level = (f32::from(l0.block.max(l0.sky)) + f32::from(l1.block.max(l1.sky))) * 0.5;
-    light_factor_from_level(level)
+    light_factor_from_level_with_floor(level, 0.18)
 }
 
 fn block_type(block_state: u16) -> u16 {

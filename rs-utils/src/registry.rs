@@ -118,9 +118,7 @@ pub const fn block_model_kind(block_id: u16) -> BlockModelKind {
         50 | 75 | 76 => BlockModelKind::TorchLike,
         26 | 27 | 28 | 54 | 60 | 63 | 64 | 65 | 66 | 68 | 69 | 71 | 78 | 81 | 88 | 96 | 107
         | 130 | 139 | 140 | 144 | 146 | 157 | 166 | 171 | 183 | 184 | 185 | 186 | 187 | 193
-        | 194 | 195 | 196 | 197 => {
-            BlockModelKind::Custom
-        }
+        | 194 | 195 | 196 | 197 => BlockModelKind::Custom,
         _ => BlockModelKind::FullCube,
     }
 }

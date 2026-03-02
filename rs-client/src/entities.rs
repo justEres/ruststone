@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::thread;
 
 use crate::sim::collision::{WorldCollisionMap, is_solid};
+use bevy::color::LinearRgba;
 use bevy::ecs::system::SystemParam;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
@@ -9,9 +10,13 @@ use bevy::render::mesh::Indices;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::view::RenderLayers;
 use bevy_egui::{EguiContexts, egui};
 use crossbeam::channel::{Receiver, Sender, unbounded};
-use rs_render::PlayerCamera;
+use rs_render::{
+    CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
+    LOCAL_PLAYER_RENDER_LAYER, MAIN_RENDER_LAYER, PlayerCamera,
+};
 use rs_utils::{
     AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
     NetEntityMessage, ObjectKind, PlayerSkinModel,
@@ -27,7 +32,7 @@ use crate::entity_model::{
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
-use crate::sim::{CameraPerspectiveMode, CameraPerspectiveState, LocalArmSwing};
+use crate::sim::{CameraPerspectiveMode, CameraPerspectiveState, FreecamState, LocalArmSwing};
 use rs_render::RenderDebugSettings;
 use rs_render::{LookAngles, Player};
 use rs_ui::ConnectUiState;
@@ -51,6 +56,14 @@ const ORB_NAME_Y_OFFSET: f32 = 0.45;
 const OBJECT_SCALE: Vec3 = Vec3::splat(0.28);
 const OBJECT_Y_OFFSET: f32 = 0.28;
 const OBJECT_NAME_Y_OFFSET: f32 = 0.65;
+
+fn player_shadow_emissive_strength(player_shadow_opacity: f32) -> LinearRgba {
+    // Separate curve from terrain shadows: this keeps skin colors readable without
+    // requiring excessively low opacity values.
+    let t = 1.0 - player_shadow_opacity.clamp(0.0, 1.0);
+    let lift = t * 0.32;
+    LinearRgba::rgb(lift, lift, lift)
+}
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteItemSprite;
@@ -1167,9 +1180,11 @@ pub fn remote_skin_download_tick(
 pub fn apply_remote_player_skins(
     registry: Res<RemoteEntityRegistry>,
     downloader: Res<RemoteSkinDownloader>,
+    render_debug: Res<RenderDebugSettings>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     player_query: Query<(&RemoteEntityUuid, &RemotePlayerSkinMaterials), With<RemotePlayer>>,
 ) {
+    let emissive = player_shadow_emissive_strength(render_debug.player_shadow_opacity);
     for (uuid, player_mats) in &player_query {
         let Some(skin_url) = registry.player_skin_url_by_uuid.get(&uuid.0) else {
             continue;
@@ -1183,10 +1198,12 @@ pub fn apply_remote_player_skins(
             };
             if material.base_color_texture.as_ref() != Some(&texture_handle) {
                 material.base_color_texture = Some(texture_handle.clone());
-                material.base_color = Color::WHITE;
+                material.emissive_texture = Some(texture_handle.clone());
                 material.alpha_mode = AlphaMode::Mask(0.5);
                 material.unlit = false;
             }
+            material.base_color = Color::WHITE;
+            material.emissive = emissive;
         }
     }
 }
@@ -1256,7 +1273,9 @@ pub fn spawn_local_player_model_system(
         } else {
             Color::srgb(0.85, 0.78, 0.72)
         },
-        base_color_texture: skin_handle,
+        base_color_texture: skin_handle.clone(),
+        emissive_texture: skin_handle,
+        emissive: player_shadow_emissive_strength(render_debug.player_shadow_opacity),
         alpha_mode: AlphaMode::Mask(0.5),
         perceptual_roughness: 0.95,
         metallic: 0.0,
@@ -1305,18 +1324,20 @@ pub fn spawn_local_player_model_system(
 }
 
 pub fn apply_local_player_model_visibility_system(
+    mut commands: Commands,
     render_debug: Res<RenderDebugSettings>,
     perspective: Res<CameraPerspectiveState>,
+    freecam: Res<FreecamState>,
     children_query: Query<&Children>,
     mut vis_query: Query<&mut Visibility>,
+    mut camera_layers_query: Query<&mut RenderLayers, With<PlayerCamera>>,
     model_query: Query<Entity, With<LocalPlayerModel>>,
 ) {
     let Ok(model_root) = model_query.get_single() else {
         return;
     };
 
-    let should_show = render_debug.render_self_model
-        && !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson);
+    let should_show = render_debug.render_self_model;
     let target = if should_show {
         Visibility::Inherited
     } else {
@@ -1330,11 +1351,27 @@ pub fn apply_local_player_model_visibility_system(
         if let Ok(mut v) = vis_query.get_mut(e) {
             *v = target;
         }
+        commands
+            .entity(e)
+            .insert(RenderLayers::layer(LOCAL_PLAYER_RENDER_LAYER));
         if let Ok(children) = children_query.get(e) {
             for child in children.iter() {
                 stack.push(child);
             }
         }
+    }
+
+    let should_render_local_model_in_camera = render_debug.render_self_model
+        && (freecam.active || !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson));
+    let mut camera_layers = RenderLayers::layer(MAIN_RENDER_LAYER)
+        .with(CHUNK_OPAQUE_RENDER_LAYER)
+        .with(CHUNK_CUTOUT_RENDER_LAYER)
+        .with(CHUNK_TRANSPARENT_RENDER_LAYER);
+    if should_render_local_model_in_camera {
+        camera_layers = camera_layers.with(LOCAL_PLAYER_RENDER_LAYER);
+    }
+    for mut layers in &mut camera_layers_query {
+        *layers = camera_layers.clone();
     }
 }
 
@@ -1342,6 +1379,7 @@ pub fn update_local_player_skin_system(
     app_state: Res<AppState>,
     connect_ui: Res<ConnectUiState>,
     registry: Res<RemoteEntityRegistry>,
+    render_debug: Res<RenderDebugSettings>,
     mut downloader: ResMut<RemoteSkinDownloader>,
     mut entity_textures: ResMut<EntityTextureCache>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1389,8 +1427,36 @@ pub fn update_local_player_skin_system(
         return;
     };
     if material.base_color_texture.as_ref() != Some(&desired) {
-        material.base_color_texture = Some(desired);
+        material.base_color_texture = Some(desired.clone());
+        material.emissive_texture = Some(desired);
         material.base_color = Color::WHITE;
+    }
+    material.base_color = Color::WHITE;
+    material.emissive = player_shadow_emissive_strength(render_debug.player_shadow_opacity);
+}
+
+pub fn apply_player_shadow_opacity_material_system(
+    render_debug: Res<RenderDebugSettings>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    local_player: Query<&LocalPlayerSkinMaterial, With<LocalPlayerModel>>,
+    remote_players: Query<&RemotePlayerSkinMaterials, With<RemotePlayer>>,
+) {
+    if !render_debug.is_changed() {
+        return;
+    }
+    let emissive = player_shadow_emissive_strength(render_debug.player_shadow_opacity);
+
+    if let Ok(local_skin) = local_player.get_single()
+        && let Some(material) = materials.get_mut(&local_skin.0)
+    {
+        material.emissive = emissive;
+    }
+    for mats in &remote_players {
+        for mat in &mats.0 {
+            if let Some(material) = materials.get_mut(mat) {
+                material.emissive = emissive;
+            }
+        }
     }
 }
 

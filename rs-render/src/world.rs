@@ -5,7 +5,7 @@ use bevy::render::view::RenderLayers;
 use crate::components::{ShadowCasterLight, WorldRoot};
 use crate::reflection::{
     CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
-    MAIN_RENDER_LAYER,
+    LOCAL_PLAYER_RENDER_LAYER, MAIN_RENDER_LAYER,
 };
 
 #[derive(Resource)]
@@ -40,7 +40,8 @@ pub fn setup_world(mut commands: Commands, _settings: Res<WorldSettings>) {
         RenderLayers::layer(MAIN_RENDER_LAYER)
             .with(CHUNK_OPAQUE_RENDER_LAYER)
             .with(CHUNK_CUTOUT_RENDER_LAYER)
-            .with(CHUNK_TRANSPARENT_RENDER_LAYER),
+            .with(CHUNK_TRANSPARENT_RENDER_LAYER)
+            .with(LOCAL_PLAYER_RENDER_LAYER),
     ));
 
     commands.insert_resource(AmbientLight {
