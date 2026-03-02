@@ -393,6 +393,7 @@ fn fragment(
 #endif
 
     var in = vertex_output;
+    let view_dist = length(position_world_to_view(in.world_position.xyz).xyz);
 
     // If we're in the crossfade section of a visibility range, conditionally
     // discard the fragment according to the visibility pattern.
@@ -509,7 +510,7 @@ fn fragment(
         } else if shader_debug_view == 4 {
             debug_rgb = vertex_tint_rgb;
         } else if shader_debug_view == 5 {
-            let depth_norm = clamp(abs(in.position.w) / max(lighting_uniform.ambient_and_fog.w, 1.0), 0.0, 1.0);
+            let depth_norm = clamp(view_dist / max(lighting_uniform.ambient_and_fog.w, 1.0), 0.0, 1.0);
             debug_rgb = vec3<f32>(depth_norm, depth_norm, depth_norm);
         } else if shader_debug_view == 6 {
             // Pass flag diagnostics:
@@ -622,7 +623,7 @@ fn fragment(
         out.color = apply_fancy_post_lighting(
             out.color,
             normal,
-            abs(in.position.w),
+            view_dist,
             view_dir,
             is_water_surface,
             water_scene_reflection,
@@ -632,7 +633,7 @@ fn fragment(
         out.color = apply_voxel_lighting(
             pbr_input.material.base_color,
             normal,
-            abs(in.position.w),
+            view_dist,
             view_dir,
             is_water_surface,
             water_scene_reflection,
@@ -643,7 +644,7 @@ fn fragment(
         apply_near_camera_damp(
             out.color.rgb,
             pbr_input.material.base_color.rgb,
-            abs(in.position.w),
+            view_dist,
         ),
         out.color.a,
     );
