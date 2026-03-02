@@ -445,7 +445,8 @@ fn disable_engine_frustum_culling_globally(
     meshes: Query<Entity, (With<Mesh3d>, Without<NoFrustumCulling>)>,
 ) {
     for entity in &meshes {
-        commands.entity(entity).insert(NoFrustumCulling);
+        // Mesh entities can be despawned in the same frame; avoid panicking on stale targets.
+        commands.entity(entity).try_insert(NoFrustumCulling);
     }
 }
 
