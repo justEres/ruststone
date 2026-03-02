@@ -262,7 +262,8 @@ fn apply_voxel_lighting(
     }
 
     if quality_mode >= 2.0 {
-        let fog_density = lighting_uniform.ambient_and_fog.y;
+        // Calibrate authored fog density to world-space meters now that depth is correct.
+        let fog_density = lighting_uniform.ambient_and_fog.y * 0.1;
         let fog_start = lighting_uniform.ambient_and_fog.z;
         let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
         let fog_color = vec3(0.66, 0.73, 0.87);
@@ -332,7 +333,8 @@ fn apply_fancy_post_lighting(
     }
 
     if quality_mode >= 2.0 {
-        let fog_density = lighting_uniform.ambient_and_fog.y;
+        // Calibrate authored fog density to world-space meters now that depth is correct.
+        let fog_density = lighting_uniform.ambient_and_fog.y * 0.1;
         let fog_start = lighting_uniform.ambient_and_fog.z;
         let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
         let fog_color = vec3(0.66, 0.73, 0.87);
