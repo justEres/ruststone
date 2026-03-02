@@ -165,12 +165,20 @@ pub fn lighting_uniform_for_mode(
             if fixed_debug {
                 10_000.0
             } else {
-                settings.fog_start
+                if settings.fog_enabled {
+                    settings.fog_start
+                } else {
+                    10_000.0
+                }
             },
             if fixed_debug {
                 10_001.0
             } else {
-                settings.fog_end
+                if settings.fog_enabled {
+                    settings.fog_end
+                } else {
+                    10_001.0
+                }
             },
         ),
         quality_and_water: Vec4::new(

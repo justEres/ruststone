@@ -268,9 +268,10 @@ fn apply_voxel_lighting(
         let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
         let fog_color = vec3(0.66, 0.73, 0.87);
         let dist = max(view_z, 0.0);
-        let fog_range = clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0);
-        let fog_exp = 1.0 - exp(-dist * fog_density);
-        let fog = max(fog_range, fog_exp);
+        let dist_from_start = max(dist - fog_start, 0.0);
+        let fog_range = clamp(dist_from_start / (fog_end - fog_start), 0.0, 1.0);
+        let fog_exp = 1.0 - exp(-dist_from_start * fog_density);
+        let fog = clamp(fog_range * fog_exp, 0.0, 1.0);
         rgb = mix(rgb, fog_color, fog);
     }
 
@@ -339,9 +340,10 @@ fn apply_fancy_post_lighting(
         let fog_end = max(lighting_uniform.ambient_and_fog.w, fog_start + 1.0);
         let fog_color = vec3(0.66, 0.73, 0.87);
         let dist = max(view_z, 0.0);
-        let fog_range = clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0);
-        let fog_exp = 1.0 - exp(-dist * fog_density);
-        let fog = max(fog_range, fog_exp);
+        let dist_from_start = max(dist - fog_start, 0.0);
+        let fog_range = clamp(dist_from_start / (fog_end - fog_start), 0.0, 1.0);
+        let fog_exp = 1.0 - exp(-dist_from_start * fog_density);
+        let fog = clamp(fog_range * fog_exp, 0.0, 1.0);
         rgb = mix(rgb, fog_color, fog);
     }
 
