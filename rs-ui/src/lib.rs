@@ -631,6 +631,15 @@ fn connect_ui(
                             )
                             .changed();
                         options_changed |= ui
+                            .checkbox(&mut render_debug.fog_enabled, "Fog enabled")
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.fog_intensity, 0.0..=2.0)
+                                    .text("Fog intensity"),
+                            )
+                            .changed();
+                        options_changed |= ui
                             .add(
                                 egui::Slider::new(&mut render_debug.fog_density, 0.0..=0.08)
                                     .text("Fog density"),
@@ -1216,6 +1225,8 @@ struct ClientOptionsFile {
     pub ambient_brightness: f32,
     pub sun_illuminance: f32,
     pub fill_illuminance: f32,
+    pub fog_enabled: bool,
+    pub fog_intensity: f32,
     pub fog_density: f32,
     pub fog_start: f32,
     pub fog_end: f32,
@@ -1293,6 +1304,8 @@ impl Default for ClientOptionsFile {
             ambient_brightness: render.ambient_brightness,
             sun_illuminance: render.sun_illuminance,
             fill_illuminance: render.fill_illuminance,
+            fog_enabled: render.fog_enabled,
+            fog_intensity: render.fog_intensity,
             fog_density: render.fog_density,
             fog_start: render.fog_start,
             fog_end: render.fog_end,
@@ -1370,6 +1383,8 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         ambient_brightness: render.ambient_brightness,
         sun_illuminance: render.sun_illuminance,
         fill_illuminance: render.fill_illuminance,
+        fog_enabled: render.fog_enabled,
+        fog_intensity: render.fog_intensity,
         fog_density: render.fog_density,
         fog_start: render.fog_start,
         fog_end: render.fog_end,
@@ -1466,6 +1481,8 @@ fn apply_options(
     render.ambient_brightness = options.ambient_brightness.clamp(0.0, 2.0);
     render.sun_illuminance = options.sun_illuminance.clamp(0.0, 50_000.0);
     render.fill_illuminance = options.fill_illuminance.clamp(0.0, 10_000.0);
+    render.fog_enabled = options.fog_enabled;
+    render.fog_intensity = options.fog_intensity.clamp(0.0, 2.0);
     render.fog_density = options.fog_density.clamp(0.0, 0.1);
     render.fog_start = options.fog_start.clamp(0.0, 1_000.0);
     render.fog_end = options.fog_end.clamp(0.0, 2_000.0);

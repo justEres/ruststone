@@ -156,7 +156,11 @@ pub fn lighting_uniform_for_mode(
             if fixed_debug {
                 0.0
             } else {
-                settings.fog_density
+                if settings.fog_enabled {
+                    settings.fog_density * settings.fog_intensity.clamp(0.0, 2.0)
+                } else {
+                    0.0
+                }
             },
             if fixed_debug {
                 10_000.0
