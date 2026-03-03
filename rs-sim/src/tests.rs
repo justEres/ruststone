@@ -130,6 +130,52 @@ fn sprint_requires_strong_forward_input() {
     assert!(effective_sprint(&input));
 }
 
+#[test]
+fn airborne_sprint_acceleration_is_higher_than_walk() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -1, 1, -1, 1, 0);
+    let world = WorldCollision::with_map(&map);
+    let prev = PlayerSimState {
+        pos: Vec3::new(0.0, 10.0, 0.0),
+        vel: Vec3::ZERO,
+        on_ground: false,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+
+    let walk = simulate_tick(
+        &prev,
+        &InputState {
+            forward: 1.0,
+            sprint: false,
+            yaw: 0.0,
+            ..Default::default()
+        },
+        &world,
+    );
+    let sprint = simulate_tick(
+        &prev,
+        &InputState {
+            forward: 1.0,
+            sprint: true,
+            yaw: 0.0,
+            ..Default::default()
+        },
+        &world,
+    );
+
+    let walk_h = Vec3::new(walk.vel.x, 0.0, walk.vel.z).length();
+    let sprint_h = Vec3::new(sprint.vel.x, 0.0, sprint.vel.z).length();
+    assert!(
+        sprint_h > walk_h * 1.25,
+        "expected higher airborne accel while sprinting, walk_h={}, sprint_h={}",
+        walk_h,
+        sprint_h
+    );
+}
+
 fn block_state(block_id: u16, meta: u16) -> u16 {
     (block_id << 4) | (meta & 0xF)
 }

@@ -1366,14 +1366,19 @@ pub fn simulate_tick(
     };
 
     let f = 0.16277136 / (f4 * f4 * f4);
+    let jump_movement_factor = if sprinting {
+        SPEED_IN_AIR * 1.3
+    } else {
+        SPEED_IN_AIR
+    };
     let f5 = if in_water {
         WATER_MOVE_SPEED
     } else if on_ground_for_move {
         move_speed * f
     } else {
-        // Vanilla 1.8: airborne strafe acceleration uses jumpMovementFactor
-        // (base 0.02) and is not multiplied by sprint each tick.
-        SPEED_IN_AIR
+        // Vanilla 1.8 player parity: jumpMovementFactor is speedInAir (0.02)
+        // and increases by +30% while sprinting.
+        jump_movement_factor
     };
 
     move_flying(&mut state.vel, wish.x, wish.z, f5, state.yaw);
