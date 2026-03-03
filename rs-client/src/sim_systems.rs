@@ -675,20 +675,22 @@ pub fn fixed_sim_tick_system(
     };
     input_snapshot.jump_boost_amplifier = player_status.jump_boost_amplifier;
 
-    // Vanilla-like sprint state latching:
-    // - start requires strong forward input and movement
-    // - while already sprinting, keep sprint as long as sprint key is held and moving forward
-    // This avoids rapid sprint state flapping around sprint-jumps.
-    let can_start_sprint = input_snapshot.sprint
-        && !input_snapshot.sneak
-        && !sim_state.current.collided_horizontally
-        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
-    let can_keep_sprint = action_state.sprinting
-        && input_snapshot.sprint
-        && !input_snapshot.sneak
-        && !sim_state.current.collided_horizontally
-        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
-    let sprinting_state = can_start_sprint || can_keep_sprint;
+    // Vanilla 1.8 sprint latching parity:
+    // - sprint start via sprint key requires strong forward input and sprint eligibility
+    // - sprint cancel happens on weak forward input, horizontal collision, or low food
+    let sprint_key_down = input_snapshot.sprint;
+    let forward_strong = input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
+    let sprint_eligible = player_status.food > 6 || player_status.can_fly;
+    let mut sprinting_state = action_state.sprinting;
+    if !sprinting_state && sprint_key_down && forward_strong && sprint_eligible && !input_snapshot.sneak
+    {
+        sprinting_state = true;
+    }
+    if sprinting_state
+        && (!forward_strong || sim_state.current.collided_horizontally || !sprint_eligible)
+    {
+        sprinting_state = false;
+    }
     input_snapshot.sprint = sprinting_state;
 
     sim_render.previous = sim_state.current;
