@@ -240,6 +240,11 @@ pub enum NetEntityMessage {
         entity_id: i32,
         stack: Option<InventoryItemStack>,
     },
+    SheepAppearance {
+        entity_id: i32,
+        fleece_color: u8,
+        sheared: bool,
+    },
     Animation {
         entity_id: i32,
         animation: NetEntityAnimation,

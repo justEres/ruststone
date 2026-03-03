@@ -28,7 +28,7 @@ use crate::entity_model::{
     BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, COW_MODEL_TEX32, CREEPER_MODEL_TEX64, EntityTextureCache,
     EntityTexturePath, PIG_MODEL_TEX32, QUADRUPED_BODY, QUADRUPED_HEAD, QUADRUPED_LEG_BACK_LEFT,
     QUADRUPED_LEG_BACK_RIGHT, QUADRUPED_LEG_FRONT_LEFT, QUADRUPED_LEG_FRONT_RIGHT,
-    SHEEP_MODEL_TEX32, spawn_model,
+    SHEEP_MODEL_TEX32, SHEEP_WOOL_MODEL_TEX32, part_mesh, spawn_model,
 };
 
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
@@ -56,6 +56,7 @@ const ORB_NAME_Y_OFFSET: f32 = 0.45;
 const OBJECT_SCALE: Vec3 = Vec3::splat(0.28);
 const OBJECT_Y_OFFSET: f32 = 0.28;
 const OBJECT_NAME_Y_OFFSET: f32 = 0.65;
+const SHEEP_WOOL_TEXTURE_PATH: &str = "entity/sheep/sheep_fur.png";
 
 fn player_shadow_emissive_strength(player_shadow_opacity: f32) -> LinearRgba {
     // Separate curve from terrain shadows: this keeps skin colors readable without
@@ -301,6 +302,18 @@ pub struct RemoteQuadrupedAnimation {
 pub struct RemoteQuadrupedAnimTuning {
     pub body_pitch: f32,
     pub leg_swing_scale: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct RemoteSheepWoolLayer {
+    pub mesh_entities: [Entity; 6],
+    pub material: Handle<StandardMaterial>,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteSheepAppearance {
+    pub fleece_color: u8,
+    pub sheared: bool,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -636,6 +649,35 @@ pub fn apply_remote_entity_events(
                             },
                             mob_quadruped_anim_tuning(mob),
                         ));
+                        if mob == MobKind::Sheep {
+                            let wool_material = materials.add(StandardMaterial {
+                                base_color: Color::WHITE,
+                                alpha_mode: AlphaMode::Mask(0.5),
+                                unlit: true,
+                                perceptual_roughness: 1.0,
+                                metallic: 0.0,
+                                ..Default::default()
+                            });
+                            entity_textures.request(SHEEP_WOOL_TEXTURE_PATH);
+                            let wool_mesh_entities = spawn_sheep_wool_layer(
+                                &mut commands,
+                                &mut meshes,
+                                spawned.parts,
+                                wool_material.clone(),
+                            );
+                            commands.entity(root).insert((
+                                RemoteSheepWoolLayer {
+                                    mesh_entities: wool_mesh_entities,
+                                    material: wool_material,
+                                },
+                                // Vanilla initializes sheep metadata byte (index 16) to 0:
+                                // white fleece and not sheared.
+                                RemoteSheepAppearance {
+                                    fleece_color: 0,
+                                    sheared: false,
+                                },
+                            ));
+                        }
                     } else {
                         let mesh = meshes.add(match spec.mesh {
                             VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
@@ -697,6 +739,24 @@ pub fn apply_remote_entity_events(
                             commands_entity.remove::<ItemSpriteStack>();
                         }
                     }
+                }
+            }
+            NetEntityMessage::SheepAppearance {
+                entity_id,
+                fleece_color,
+                sheared,
+            } => {
+                let Some(entity) = registry.by_server_id.get(&entity_id).copied() else {
+                    continue;
+                };
+                if let Ok((remote, _look)) = params.entity_query.get_mut(entity)
+                    && remote.kind == NetEntityKind::Mob(MobKind::Sheep)
+                    && let Ok(mut commands_entity) = commands.get_entity(entity)
+                {
+                    commands_entity.insert(RemoteSheepAppearance {
+                        fleece_color,
+                        sheared,
+                    });
                 }
             }
             NetEntityMessage::MoveDelta {
@@ -1058,6 +1118,41 @@ pub fn apply_entity_model_textures_system(
         if let Some(handle) = cache.material(path.0) {
             if material.0 != handle {
                 material.0 = handle;
+            }
+        }
+    }
+}
+
+pub fn update_remote_sheep_wool_system(
+    mut cache: ResMut<EntityTextureCache>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<(&RemoteSheepWoolLayer, &RemoteSheepAppearance)>,
+    mut visibility_query: Query<&mut Visibility>,
+) {
+    cache.request(SHEEP_WOOL_TEXTURE_PATH);
+    let wool_texture = cache.texture(SHEEP_WOOL_TEXTURE_PATH);
+
+    for (wool, appearance) in &query {
+        if let Some(material) = materials.get_mut(&wool.material) {
+            if let Some(texture) = wool_texture.clone() {
+                if material.base_color_texture.as_ref() != Some(&texture) {
+                    material.base_color_texture = Some(texture);
+                }
+            }
+            let [r, g, b] = sheep_fleece_rgb(appearance.fleece_color);
+            material.base_color = Color::srgb(r, g, b);
+            material.alpha_mode = AlphaMode::Mask(0.5);
+            material.unlit = true;
+        }
+
+        let target_visibility = if appearance.sheared {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        for mesh_entity in wool.mesh_entities {
+            if let Ok(mut visibility) = visibility_query.get_mut(mesh_entity) {
+                *visibility = target_visibility;
             }
         }
     }
@@ -2241,6 +2336,56 @@ pub fn animate_remote_quadruped_models(
     }
 }
 
+fn spawn_sheep_wool_layer(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    quadruped_parts: Vec<Entity>,
+    material: Handle<StandardMaterial>,
+) -> [Entity; 6] {
+    let mut wool_mesh_entities = [Entity::PLACEHOLDER; 6];
+    for (idx, part) in SHEEP_WOOL_MODEL_TEX32.parts.iter().enumerate() {
+        let target_part = quadruped_parts[idx];
+        let mesh = meshes.add(part_mesh(&SHEEP_WOOL_MODEL_TEX32, part));
+        let wool_mesh_entity = commands
+            .spawn((
+                Name::new(format!("EntityModelMesh[{}]", part.name)),
+                Mesh3d(mesh),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                GlobalTransform::default(),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+            ))
+            .id();
+        commands.entity(target_part).add_child(wool_mesh_entity);
+        wool_mesh_entities[idx] = wool_mesh_entity;
+    }
+    wool_mesh_entities
+}
+
+fn sheep_fleece_rgb(fleece_color: u8) -> [f32; 3] {
+    match fleece_color & 0x0F {
+        0 => [1.0, 1.0, 1.0],
+        1 => [0.85, 0.5, 0.2],
+        2 => [0.7, 0.3, 0.85],
+        3 => [0.4, 0.6, 0.85],
+        4 => [0.9, 0.9, 0.2],
+        5 => [0.5, 0.8, 0.1],
+        6 => [0.95, 0.5, 0.65],
+        7 => [0.3, 0.3, 0.3],
+        8 => [0.6, 0.6, 0.6],
+        9 => [0.3, 0.5, 0.6],
+        10 => [0.5, 0.25, 0.7],
+        11 => [0.2, 0.3, 0.7],
+        12 => [0.4, 0.3, 0.2],
+        13 => [0.4, 0.5, 0.2],
+        14 => [0.6, 0.2, 0.2],
+        15 => [0.1, 0.1, 0.1],
+        _ => [1.0, 1.0, 1.0],
+    }
+}
+
 fn spawn_remote_player_model(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -3324,15 +3469,15 @@ fn mob_quadruped_anim_tuning(mob: MobKind) -> RemoteQuadrupedAnimTuning {
             leg_swing_scale: 0.95,
         },
         MobKind::Chicken | MobKind::Rabbit => RemoteQuadrupedAnimTuning {
-            body_pitch: std::f32::consts::FRAC_PI_2,
+            body_pitch: -std::f32::consts::FRAC_PI_2,
             leg_swing_scale: 1.2,
         },
         MobKind::Horse => RemoteQuadrupedAnimTuning {
-            body_pitch: std::f32::consts::FRAC_PI_2,
+            body_pitch: -std::f32::consts::FRAC_PI_2,
             leg_swing_scale: 0.82,
         },
         _ => RemoteQuadrupedAnimTuning {
-            body_pitch: std::f32::consts::FRAC_PI_2,
+            body_pitch: -std::f32::consts::FRAC_PI_2,
             leg_swing_scale: 1.0,
         },
     }

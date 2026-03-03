@@ -120,6 +120,61 @@ pub static SHEEP_MODEL_TEX32: ModelDef = ModelDef {
     ],
 };
 
+pub static SHEEP_WOOL_MODEL_TEX32: ModelDef = ModelDef {
+    tex_size: [64, 32],
+    root_offset_px: [0.0, 24.0, 0.0],
+    parts: &[
+        part! {
+            name: "head_wool",
+            parent: None,
+            pivot: (0.0, 6.0, -8.0),
+            cubes: [
+                cube! { uv: (0, 0), from: (-3.0, -4.0, -4.0), size: (6.0, 6.0, 6.0), inflate: 0.6, mirror: false },
+            ],
+        },
+        part! {
+            name: "body_wool",
+            parent: None,
+            pivot: (0.0, 5.0, 2.0),
+            cubes: [
+                cube! { uv: (28, 8), from: (-4.0, -10.0, -7.0), size: (8.0, 16.0, 6.0), inflate: 1.75, mirror: false },
+            ],
+        },
+        part! {
+            name: "leg_front_right_wool",
+            parent: None,
+            pivot: (-3.0, 12.0, 7.0),
+            cubes: [
+                cube! { uv: (0, 16), from: (-2.0, 0.0, -2.0), size: (4.0, 6.0, 4.0), inflate: 0.5, mirror: false },
+            ],
+        },
+        part! {
+            name: "leg_front_left_wool",
+            parent: None,
+            pivot: (3.0, 12.0, 7.0),
+            cubes: [
+                cube! { uv: (0, 16), from: (-2.0, 0.0, -2.0), size: (4.0, 6.0, 4.0), inflate: 0.5, mirror: true },
+            ],
+        },
+        part! {
+            name: "leg_back_right_wool",
+            parent: None,
+            pivot: (-3.0, 12.0, -5.0),
+            cubes: [
+                cube! { uv: (0, 16), from: (-2.0, 0.0, -2.0), size: (4.0, 6.0, 4.0), inflate: 0.5, mirror: false },
+            ],
+        },
+        part! {
+            name: "leg_back_left_wool",
+            parent: None,
+            pivot: (3.0, 12.0, -5.0),
+            cubes: [
+                cube! { uv: (0, 16), from: (-2.0, 0.0, -2.0), size: (4.0, 6.0, 4.0), inflate: 0.5, mirror: true },
+            ],
+        },
+    ],
+};
+
 pub static COW_MODEL_TEX32: ModelDef = ModelDef {
     tex_size: [64, 32],
     root_offset_px: [0.0, 24.0, 0.0],

@@ -927,6 +927,16 @@ fn handle_entity_metadata(
             }));
         }
     }
+
+    if let Some(MetadataValue::Byte(sheep_flags)) = metadata.get_raw(16) {
+        let fleece_color = (*sheep_flags & 0x0F) as u8;
+        let sheared = (*sheep_flags & 0x10) != 0;
+        let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SheepAppearance {
+            entity_id,
+            fleece_color,
+            sheared,
+        }));
+    }
 }
 
 fn component_to_legacy(component: &Component) -> String {

@@ -83,10 +83,40 @@
 
     - Lods (optional, very late in development, experimental)
 
-    - Entitys: 
-        - 🚧 other animals with animations
-            - ✅ pig, sheep, cow, creeper, enderman model/scaffold support added (plus existing zombie/skeleton/player)
-            - ⬜ remaining vanilla entity model/animation coverage
+    - Entitys:
+        - 🚧 vanilla mob model/animation coverage checklist
+            - ✅ Zombie
+            - ✅ Skeleton
+            - ✅ Pig Zombie
+            - ✅ Villager
+            - ✅ Enderman
+            - ✅ Creeper
+            - ✅ Pig
+            - ✅ Sheep (base + wool layer)
+            - ✅ Cow
+            - ✅ Mooshroom
+            - ✅ Chicken (temporary quadruped scaffold)
+            - ✅ Wolf (temporary quadruped scaffold)
+            - ✅ Ocelot (temporary quadruped scaffold)
+            - ✅ Horse (temporary quadruped scaffold)
+            - ✅ Rabbit (temporary quadruped scaffold)
+            - ⬜ Spider
+            - ⬜ Cave Spider
+            - ⬜ Giant
+            - ⬜ Slime
+            - ⬜ Magma Cube
+            - ⬜ Ghast
+            - ⬜ Blaze
+            - ⬜ Silverfish
+            - ⬜ Endermite
+            - ⬜ Bat
+            - ⬜ Witch
+            - ⬜ Wither
+            - ⬜ Ender Dragon
+            - ⬜ Guardian
+            - ⬜ Squid
+            - ⬜ Snow Golem
+            - ⬜ Iron Golem
 
 - Debugging:
     - ✅ looked-at block debug info in overlay (pos/id/state/meta/model kind/registry/collision boxes)

@@ -165,6 +165,8 @@ impl Plugin for ClientEntityPlugin {
                     .after(item_textures::item_texture_cache_tick),
                 entities::apply_entity_model_textures_system
                     .after(entity_model::entity_texture_cache_tick),
+                entities::update_remote_sheep_wool_system
+                    .after(entity_model::entity_texture_cache_tick),
                 entities::apply_player_shadow_opacity_material_system,
             ),
         )
