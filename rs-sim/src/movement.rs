@@ -1279,6 +1279,7 @@ pub fn simulate_tick(
     if !world.has_chunk_at_pos(state.pos) {
         state.vel = Vec3::ZERO;
         state.on_ground = true;
+        state.collided_horizontally = false;
         return state;
     }
     let sprinting = effective_sprint(input);
@@ -1307,10 +1308,12 @@ pub fn simulate_tick(
             state.vel.y += fly_speed * FLY_VERTICAL_ACCEL_MULT;
         }
 
-        let (pos, vel, on_ground, _) = world.resolve(state.pos, state.vel, state.on_ground);
+        let (pos, vel, on_ground, collided_horizontally) =
+            world.resolve(state.pos, state.vel, state.on_ground);
         state.pos = pos;
         state.vel = vel;
         state.on_ground = on_ground;
+        state.collided_horizontally = collided_horizontally;
 
         state.vel.x *= FLY_HORIZONTAL_DAMPING;
         state.vel.z *= FLY_HORIZONTAL_DAMPING;
@@ -1318,12 +1321,13 @@ pub fn simulate_tick(
         return state;
     }
 
-    if !in_water && state.on_ground && input.jump {
+    let on_ground_for_move = state.on_ground;
+
+    if !in_water && on_ground_for_move && input.jump {
         let jump_boost = input
             .jump_boost_amplifier
             .map_or(0.0, |amp| 0.1 * (f32::from(amp) + 1.0));
         state.vel.y = JUMP_VEL + jump_boost;
-        state.on_ground = false;
         if sprinting {
             let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
             let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
@@ -1348,7 +1352,7 @@ pub fn simulate_tick(
     let move_speed =
         BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
 
-    let mut f4 = if state.on_ground {
+    let mut f4 = if on_ground_for_move {
         world.ground_slipperiness(state.pos) * 0.91
     } else {
         0.91
@@ -1357,7 +1361,7 @@ pub fn simulate_tick(
     let f = 0.16277136 / (f4 * f4 * f4);
     let f5 = if in_water {
         WATER_MOVE_SPEED
-    } else if state.on_ground {
+    } else if on_ground_for_move {
         move_speed * f
     } else {
         // Vanilla 1.8: airborne strafe acceleration uses jumpMovementFactor
@@ -1367,7 +1371,7 @@ pub fn simulate_tick(
 
     move_flying(&mut state.vel, wish.x, wish.z, f5, state.yaw);
 
-    if state.on_ground && input.sneak {
+    if on_ground_for_move && input.sneak {
         let clamped = world.clamp_sneak_edge_velocity(state.pos, state.vel);
         state.vel.x = clamped.x;
         state.vel.z = clamped.z;
@@ -1375,10 +1379,11 @@ pub fn simulate_tick(
 
     let pre_move_y = state.pos.y;
     let (pos, vel, on_ground, collided_horizontally) =
-        world.resolve(state.pos, state.vel, state.on_ground);
+        world.resolve(state.pos, state.vel, on_ground_for_move);
     state.pos = pos;
     state.vel = vel;
     state.on_ground = on_ground;
+    state.collided_horizontally = collided_horizontally;
 
     // Vanilla soul sand applies a strong horizontal slowdown when colliding with it.
     if state.on_ground && world.is_on_soul_sand(state.pos) {

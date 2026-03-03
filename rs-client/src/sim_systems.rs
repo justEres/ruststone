@@ -681,10 +681,12 @@ pub fn fixed_sim_tick_system(
     // This avoids rapid sprint state flapping around sprint-jumps.
     let can_start_sprint = input_snapshot.sprint
         && !input_snapshot.sneak
+        && !sim_state.current.collided_horizontally
         && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let can_keep_sprint = action_state.sprinting
         && input_snapshot.sprint
         && !input_snapshot.sneak
+        && !sim_state.current.collided_horizontally
         && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let sprinting_state = can_start_sprint || can_keep_sprint;
     input_snapshot.sprint = sprinting_state;
@@ -885,6 +887,7 @@ pub fn net_event_apply_system(
             pos,
             vel: Vec3::ZERO,
             on_ground,
+            collided_horizontally: false,
             yaw,
             pitch,
         };

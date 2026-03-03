@@ -286,6 +286,7 @@ fn diagonal_stair_sprint_regression_stays_stable() {
         pos: Vec3::new(0.2, 1.0, 0.5),
         vel: Vec3::ZERO,
         on_ground: true,
+        collided_horizontally: false,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };
@@ -315,6 +316,55 @@ fn diagonal_stair_sprint_regression_stays_stable() {
 }
 
 #[test]
+fn sprint_jump_into_stair_preserves_forward_progress() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -2, 6, -3, 3, 0);
+    apply_blocks(&mut map, &[(1, 1, 0, block_state(53, 1))]);
+    let world = WorldCollision::with_map(&map);
+
+    let mut state = PlayerSimState {
+        pos: Vec3::new(0.2, 1.0, 0.5),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        collided_horizontally: false,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+    let mut input = InputState {
+        forward: 1.0,
+        strafe: 0.0,
+        jump: true,
+        sprint: true,
+        sneak: false,
+        can_fly: false,
+        flying: false,
+        flying_speed: 0.05,
+        speed_multiplier: 1.0,
+        jump_boost_amplifier: None,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+
+    for tick in 0..8 {
+        state = simulate_tick(&state, &input, &world);
+        if tick == 0 {
+            input.jump = false;
+        }
+    }
+
+    assert!(
+        state.pos.x > 1.05,
+        "expected sprint-jump stair entry progress, got x={}",
+        state.pos.x
+    );
+    assert!(
+        state.vel.x > 0.01,
+        "unexpected forward velocity drop while stair-jumping, vel.x={}",
+        state.vel.x
+    );
+}
+
+#[test]
 fn closed_door_and_gate_block_forward_motion() {
     let mut map = WorldCollisionMap::default();
     lay_floor(&mut map, -2, 8, -2, 2, 0);
@@ -331,6 +381,7 @@ fn closed_door_and_gate_block_forward_motion() {
         pos: Vec3::new(0.2, 1.0, 0.5),
         vel: Vec3::ZERO,
         on_ground: true,
+        collided_horizontally: false,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };
@@ -373,6 +424,7 @@ fn open_fence_gate_allows_forward_motion() {
         pos: Vec3::new(0.5, 1.0, -0.8),
         vel: Vec3::ZERO,
         on_ground: true,
+        collided_horizontally: false,
         yaw: std::f32::consts::PI,
         pitch: 0.0,
     };
@@ -414,6 +466,7 @@ fn open_door_allows_forward_motion() {
         pos: Vec3::new(0.2, 1.0, 0.5),
         vel: Vec3::ZERO,
         on_ground: true,
+        collided_horizontally: false,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };

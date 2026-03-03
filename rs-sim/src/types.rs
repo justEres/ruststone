@@ -40,6 +40,7 @@ pub struct PlayerSimState {
     pub pos: Vec3,
     pub vel: Vec3,
     pub on_ground: bool,
+    pub collided_horizontally: bool,
     pub yaw: f32,
     pub pitch: f32,
 }
@@ -50,6 +51,7 @@ impl Default for PlayerSimState {
             pos: Vec3::ZERO,
             vel: Vec3::ZERO,
             on_ground: false,
+            collided_horizontally: false,
             yaw: 0.0,
             pitch: 0.0,
         }
