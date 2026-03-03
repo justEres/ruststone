@@ -679,12 +679,9 @@ pub fn fixed_sim_tick_system(
     // - start requires strong forward input and movement
     // - while already sprinting, keep sprint as long as sprint key is held and moving forward
     // This avoids rapid sprint state flapping around sprint-jumps.
-    let horizontal_speed_sq = sim_state.current.vel.x * sim_state.current.vel.x
-        + sim_state.current.vel.z * sim_state.current.vel.z;
     let can_start_sprint = input_snapshot.sprint
         && !input_snapshot.sneak
-        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD
-        && horizontal_speed_sq > 1.0e-5;
+        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let can_keep_sprint = action_state.sprinting
         && input_snapshot.sprint
         && !input_snapshot.sneak
