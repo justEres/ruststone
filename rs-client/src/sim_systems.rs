@@ -1055,7 +1055,7 @@ fn clip_camera_to_world(world: &WorldCollisionMap, anchor: Vec3, desired: Vec3) 
 }
 
 
-#[path = "sim_interaction.rs"]
+#[path = "sim_interaction/mod.rs"]
 mod sim_interaction;
 
 pub use sim_interaction::{
