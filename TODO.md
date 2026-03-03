@@ -26,6 +26,7 @@
 - Movement:
     - 🚧 sprinting still feels "different" and more sticky than original minecraft
         - ✅ phase 1: ground friction now uses vanilla-style per-block slipperiness (ice/slime/packed ice)
+        - ✅ phase 2: sprint start/keep now requires strong forward input threshold (vanilla-like `>= 0.8`)
     - 🚧 must be exactly the same as original minecraft in every aspect. Browse original source code if needed for constants and timing or logic.
     - 🚧 same with collision
         - ✅ custom block collision boxes added for many non-full blocks (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)

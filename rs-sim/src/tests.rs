@@ -1,6 +1,7 @@
 use super::collision::WorldCollisionMap;
 use super::movement::{
-    WorldCollision, collision_parity_expected_box_count, debug_block_collision_boxes, simulate_tick,
+    WorldCollision, collision_parity_expected_box_count, debug_block_collision_boxes,
+    effective_sprint, simulate_tick,
 };
 use super::predict::PredictionBuffer;
 use super::reconcile::reconcile;
@@ -108,6 +109,25 @@ fn ring_buffer_integrity() {
     assert!(buffer.get_by_tick(0).is_none());
     assert!(buffer.get_by_tick(12).is_some());
     assert!(buffer.get_by_tick(19).is_some());
+}
+
+#[test]
+fn sprint_requires_strong_forward_input() {
+    let input = InputState {
+        sprint: true,
+        sneak: false,
+        forward: 0.79,
+        ..Default::default()
+    };
+    assert!(!effective_sprint(&input));
+
+    let input = InputState {
+        sprint: true,
+        sneak: false,
+        forward: 0.8,
+        ..Default::default()
+    };
+    assert!(effective_sprint(&input));
 }
 
 fn block_state(block_id: u16, meta: u16) -> u16 {

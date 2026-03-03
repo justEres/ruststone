@@ -30,6 +30,7 @@ const FLY_HORIZONTAL_DAMPING: f32 = 0.91;
 const FLY_VERTICAL_DAMPING: f32 = 0.6;
 const FLY_SPRINT_MULT: f32 = 2.0;
 const SOUL_SAND_SLOWDOWN: f32 = 0.4;
+const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -1443,7 +1444,7 @@ fn move_flying(vel: &mut Vec3, strafe: f32, forward: f32, friction: f32, yaw: f3
 
 pub fn effective_sprint(input: &InputState) -> bool {
     // `input.sprint` is treated as sprint-state (not raw key) by sim systems.
-    input.sprint && !input.sneak && input.forward > 0.0
+    input.sprint && !input.sneak && input.forward >= SPRINT_FORWARD_THRESHOLD
 }
 
 fn step_toward_zero(v: f32) -> f32 {

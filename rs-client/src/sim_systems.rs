@@ -82,6 +82,7 @@ const SURVIVAL_BLOCK_REACH: f32 = 4.5;
 const CREATIVE_BLOCK_REACH: f32 = 5.0;
 const SURVIVAL_ENTITY_REACH: f32 = 3.0;
 const CREATIVE_ENTITY_REACH: f32 = 5.0;
+const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
 
 fn gameplay_input_allowed(
     app_state: &AppState,
@@ -682,12 +683,12 @@ pub fn fixed_sim_tick_system(
         + sim_state.current.vel.z * sim_state.current.vel.z;
     let can_start_sprint = input_snapshot.sprint
         && !input_snapshot.sneak
-        && input_snapshot.forward >= 0.8
+        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD
         && horizontal_speed_sq > 1.0e-5;
     let can_keep_sprint = action_state.sprinting
         && input_snapshot.sprint
         && !input_snapshot.sneak
-        && input_snapshot.forward > 0.0;
+        && input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let sprinting_state = can_start_sprint || can_keep_sprint;
     input_snapshot.sprint = sprinting_state;
 
