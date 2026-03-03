@@ -840,56 +840,139 @@ fn max_stack_for_item(item_id: i32) -> u8 {
     if is_single_stack_item(item_id) { 1 } else { 64 }
 }
 
+#[derive(Clone, Copy)]
+struct ItemProperties {
+    durability: Option<i16>,
+    single_stack: bool,
+}
+
+fn item_properties(item_id: i32) -> ItemProperties {
+    match item_id {
+        256 | 269 | 273 | 277 | 284 => ItemProperties {
+            durability: Some(59),
+            single_stack: true,
+        },
+        257 | 270 | 274 | 278 | 285 => ItemProperties {
+            durability: Some(131),
+            single_stack: true,
+        },
+        258 | 271 | 275 | 279 | 286 => ItemProperties {
+            durability: Some(250),
+            single_stack: true,
+        },
+        259 => ItemProperties {
+            durability: Some(64),
+            single_stack: true,
+        },
+        261 => ItemProperties {
+            durability: Some(384),
+            single_stack: true,
+        },
+        267 | 272 | 276 | 283 => ItemProperties {
+            durability: Some(32),
+            single_stack: true,
+        },
+        268 => ItemProperties {
+            durability: Some(59),
+            single_stack: true,
+        },
+        290 | 291 | 292 | 294 => ItemProperties {
+            durability: Some(59),
+            single_stack: true,
+        },
+        293 => ItemProperties {
+            durability: Some(131),
+            single_stack: true,
+        },
+        298 => ItemProperties {
+            durability: Some(55),
+            single_stack: true,
+        },
+        299 => ItemProperties {
+            durability: Some(80),
+            single_stack: true,
+        },
+        300 => ItemProperties {
+            durability: Some(75),
+            single_stack: true,
+        },
+        301 => ItemProperties {
+            durability: Some(65),
+            single_stack: true,
+        },
+        302 => ItemProperties {
+            durability: Some(165),
+            single_stack: true,
+        },
+        303 => ItemProperties {
+            durability: Some(240),
+            single_stack: true,
+        },
+        304 => ItemProperties {
+            durability: Some(225),
+            single_stack: true,
+        },
+        305 => ItemProperties {
+            durability: Some(195),
+            single_stack: true,
+        },
+        306 | 310 => ItemProperties {
+            durability: Some(363),
+            single_stack: true,
+        },
+        307 | 311 => ItemProperties {
+            durability: Some(528),
+            single_stack: true,
+        },
+        308 | 312 => ItemProperties {
+            durability: Some(495),
+            single_stack: true,
+        },
+        309 | 313 => ItemProperties {
+            durability: Some(429),
+            single_stack: true,
+        },
+        314 => ItemProperties {
+            durability: Some(77),
+            single_stack: true,
+        },
+        315 => ItemProperties {
+            durability: Some(112),
+            single_stack: true,
+        },
+        316 => ItemProperties {
+            durability: Some(105),
+            single_stack: true,
+        },
+        317 => ItemProperties {
+            durability: Some(91),
+            single_stack: true,
+        },
+        346 => ItemProperties {
+            durability: Some(64),
+            single_stack: true,
+        },
+        359 => ItemProperties {
+            durability: Some(238),
+            single_stack: true,
+        },
+        326..=330 => ItemProperties {
+            durability: None,
+            single_stack: true,
+        },
+        _ => ItemProperties {
+            durability: None,
+            single_stack: false,
+        },
+    }
+}
+
 pub fn item_max_durability(item_id: i32) -> Option<i16> {
-    Some(match item_id {
-        256 | 269 | 273 | 277 | 284 => 59,
-        257 | 270 | 274 | 278 | 285 => 131,
-        258 | 271 | 275 | 279 | 286 => 250,
-        259 => 64,
-        261 => 384,
-        267 | 272 | 276 | 283 => 32,
-        268 => 59,
-        290 | 291 | 292 | 294 => 59,
-        293 => 131,
-        298 => 55,
-        299 => 80,
-        300 => 75,
-        301 => 65,
-        302 => 165,
-        303 => 240,
-        304 => 225,
-        305 => 195,
-        306 => 363,
-        307 => 528,
-        308 => 495,
-        309 => 429,
-        310 => 363,
-        311 => 528,
-        312 => 495,
-        313 => 429,
-        314 => 77,
-        315 => 112,
-        316 => 105,
-        317 => 91,
-        346 => 64,
-        359 => 238,
-        _ => return None,
-    })
+    item_properties(item_id).durability
 }
 
 fn is_single_stack_item(item_id: i32) -> bool {
-    matches!(
-        item_id,
-        256..=259
-            | 261
-            | 267..=279
-            | 283..=286
-            | 290..=294
-            | 298..=317
-            | 326..=330
-            | 346
-            | 359
-    )
+    item_properties(item_id).single_stack
 }
 
 pub enum ToNetMessage {

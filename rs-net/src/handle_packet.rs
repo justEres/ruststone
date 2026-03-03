@@ -13,6 +13,53 @@ use tracing::{debug, warn};
 
 use crate::chunk_decode;
 
+fn send_join_game(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    entity_id: i32,
+    gamemode: u8,
+) {
+    let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
+        entity_id,
+    }));
+    let _ = to_main.send(FromNetMessage::GameMode { gamemode });
+}
+
+fn send_player_position(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    position: Option<(f64, f64, f64)>,
+    yaw: Option<f32>,
+    pitch: Option<f32>,
+    flags: Option<u8>,
+    on_ground: Option<bool>,
+) {
+    let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
+        position,
+        yaw,
+        pitch,
+        flags,
+        on_ground,
+    }));
+}
+
+fn send_spawn_player(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    entity_id: i32,
+    uuid: Option<rs_protocol::protocol::UUID>,
+    pos: bevy::prelude::Vec3,
+    yaw_i8: i8,
+    pitch_i8: i8,
+) {
+    let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
+        entity_id,
+        uuid,
+        kind: NetEntityKind::Player,
+        pos,
+        yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(yaw_i8)),
+        pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(pitch_i8)),
+        on_ground: None,
+    }));
+}
+
 pub fn handle_packet(
     pkt: Packet,
     to_main: &crossbeam::channel::Sender<FromNetMessage>,
@@ -20,38 +67,10 @@ pub fn handle_packet(
 ) {
     use rs_protocol::protocol::packet::Packet;
     match pkt {
-        Packet::JoinGame_i8(jg) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
-                entity_id: jg.entity_id,
-            }));
-            let _ = to_main.send(FromNetMessage::GameMode {
-                gamemode: jg.gamemode,
-            });
-        }
-        Packet::JoinGame_i8_NoDebug(jg) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
-                entity_id: jg.entity_id,
-            }));
-            let _ = to_main.send(FromNetMessage::GameMode {
-                gamemode: jg.gamemode,
-            });
-        }
-        Packet::JoinGame_i32(jg) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
-                entity_id: jg.entity_id,
-            }));
-            let _ = to_main.send(FromNetMessage::GameMode {
-                gamemode: jg.gamemode,
-            });
-        }
-        Packet::JoinGame_i32_ViewDistance(jg) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
-                entity_id: jg.entity_id,
-            }));
-            let _ = to_main.send(FromNetMessage::GameMode {
-                gamemode: jg.gamemode,
-            });
-        }
+        Packet::JoinGame_i8(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i32(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i32_ViewDistance(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
         Packet::ChunkData(cd) => {
             let bitmask = cd.bitmask.0 as u16;
             match chunk_decode::decode_chunk(
@@ -92,135 +111,117 @@ pub fn handle_packet(
                 }
             }
         }
-        Packet::TeleportPlayer_NoConfirm(tp) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((tp.x, tp.y, tp.z)),
-                yaw: Some(tp.yaw),
-                pitch: Some(tp.pitch),
-                flags: Some(tp.flags),
-                on_ground: None,
-            }));
-        }
+        Packet::TeleportPlayer_NoConfirm(tp) => send_player_position(
+            to_main,
+            Some((tp.x, tp.y, tp.z)),
+            Some(tp.yaw),
+            Some(tp.pitch),
+            Some(tp.flags),
+            None,
+        ),
         Packet::TeleportPlayer_WithConfirm(tp) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((tp.x, tp.y, tp.z)),
-                yaw: Some(tp.yaw),
-                pitch: Some(tp.pitch),
-                flags: Some(tp.flags),
-                on_ground: None,
-            }));
+            send_player_position(
+                to_main,
+                Some((tp.x, tp.y, tp.z)),
+                Some(tp.yaw),
+                Some(tp.pitch),
+                Some(tp.flags),
+                None,
+            );
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::TeleportConfirm {
                     teleport_id: tp.teleport_id,
                 },
             );
         }
-        Packet::TeleportPlayer_OnGround(tp) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((tp.x, tp.eyes_y, tp.z)),
-                yaw: Some(tp.yaw),
-                pitch: Some(tp.pitch),
-                flags: None,
-                on_ground: Some(tp.on_ground),
-            }));
-        }
-        Packet::PlayerPosition(position) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((position.x, position.y, position.z)),
-                yaw: None,
-                pitch: None,
-                flags: None,
-                on_ground: Some(position.on_ground),
-            }));
-        }
-        Packet::PlayerPosition_HeadY(position) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((position.x, position.feet_y, position.z)),
-                yaw: None,
-                pitch: None,
-                flags: None,
-                on_ground: Some(position.on_ground),
-            }));
-        }
-        Packet::PlayerPositionLook(position) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((position.x, position.y, position.z)),
-                yaw: Some(position.yaw),
-                pitch: Some(position.pitch),
-                flags: None,
-                on_ground: Some(position.on_ground),
-            }));
-        }
-        Packet::PlayerPositionLook_HeadY(position) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: Some((position.x, position.feet_y, position.z)),
-                yaw: Some(position.yaw),
-                pitch: Some(position.pitch),
-                flags: None,
-                on_ground: Some(position.on_ground),
-            }));
-        }
-        Packet::PlayerLook(position) => {
-            let _ = to_main.send(FromNetMessage::PlayerPosition(PlayerPosition {
-                position: None,
-                yaw: Some(position.yaw),
-                pitch: Some(position.pitch),
-                flags: None,
-                on_ground: Some(position.on_ground),
-            }));
-        }
-        Packet::SpawnPlayer_i32_HeldItem(sp) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
-                entity_id: sp.entity_id.0,
-                uuid: Some(sp.uuid),
-                kind: NetEntityKind::Player,
-                pos: bevy::prelude::Vec3::new(
-                    f64::from(sp.x) as f32,
-                    f64::from(sp.y) as f32,
-                    f64::from(sp.z) as f32,
-                ),
-                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sp.yaw)),
-                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sp.pitch)),
-                on_ground: None,
-            }));
-        }
-        Packet::SpawnPlayer_i32(sp) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
-                entity_id: sp.entity_id.0,
-                uuid: Some(sp.uuid),
-                kind: NetEntityKind::Player,
-                pos: bevy::prelude::Vec3::new(
-                    f64::from(sp.x) as f32,
-                    f64::from(sp.y) as f32,
-                    f64::from(sp.z) as f32,
-                ),
-                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sp.yaw)),
-                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sp.pitch)),
-                on_ground: None,
-            }));
-        }
-        Packet::SpawnPlayer_f64(sp) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
-                entity_id: sp.entity_id.0,
-                uuid: Some(sp.uuid),
-                kind: NetEntityKind::Player,
-                pos: bevy::prelude::Vec3::new(sp.x as f32, sp.y as f32, sp.z as f32),
-                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sp.yaw)),
-                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sp.pitch)),
-                on_ground: None,
-            }));
-        }
-        Packet::SpawnPlayer_f64_NoMeta(sp) => {
-            let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
-                entity_id: sp.entity_id.0,
-                uuid: Some(sp.uuid),
-                kind: NetEntityKind::Player,
-                pos: bevy::prelude::Vec3::new(sp.x as f32, sp.y as f32, sp.z as f32),
-                yaw: server_yaw_to_client_yaw(angle_i8_to_degrees(sp.yaw)),
-                pitch: server_pitch_to_client_pitch(angle_i8_to_degrees(sp.pitch)),
-                on_ground: None,
-            }));
-        }
+        Packet::TeleportPlayer_OnGround(tp) => send_player_position(
+            to_main,
+            Some((tp.x, tp.eyes_y, tp.z)),
+            Some(tp.yaw),
+            Some(tp.pitch),
+            None,
+            Some(tp.on_ground),
+        ),
+        Packet::PlayerPosition(position) => send_player_position(
+            to_main,
+            Some((position.x, position.y, position.z)),
+            None,
+            None,
+            None,
+            Some(position.on_ground),
+        ),
+        Packet::PlayerPosition_HeadY(position) => send_player_position(
+            to_main,
+            Some((position.x, position.feet_y, position.z)),
+            None,
+            None,
+            None,
+            Some(position.on_ground),
+        ),
+        Packet::PlayerPositionLook(position) => send_player_position(
+            to_main,
+            Some((position.x, position.y, position.z)),
+            Some(position.yaw),
+            Some(position.pitch),
+            None,
+            Some(position.on_ground),
+        ),
+        Packet::PlayerPositionLook_HeadY(position) => send_player_position(
+            to_main,
+            Some((position.x, position.feet_y, position.z)),
+            Some(position.yaw),
+            Some(position.pitch),
+            None,
+            Some(position.on_ground),
+        ),
+        Packet::PlayerLook(position) => send_player_position(
+            to_main,
+            None,
+            Some(position.yaw),
+            Some(position.pitch),
+            None,
+            Some(position.on_ground),
+        ),
+        Packet::SpawnPlayer_i32_HeldItem(sp) => send_spawn_player(
+            to_main,
+            sp.entity_id.0,
+            Some(sp.uuid),
+            bevy::prelude::Vec3::new(
+                f64::from(sp.x) as f32,
+                f64::from(sp.y) as f32,
+                f64::from(sp.z) as f32,
+            ),
+            sp.yaw,
+            sp.pitch,
+        ),
+        Packet::SpawnPlayer_i32(sp) => send_spawn_player(
+            to_main,
+            sp.entity_id.0,
+            Some(sp.uuid),
+            bevy::prelude::Vec3::new(
+                f64::from(sp.x) as f32,
+                f64::from(sp.y) as f32,
+                f64::from(sp.z) as f32,
+            ),
+            sp.yaw,
+            sp.pitch,
+        ),
+        Packet::SpawnPlayer_f64(sp) => send_spawn_player(
+            to_main,
+            sp.entity_id.0,
+            Some(sp.uuid),
+            bevy::prelude::Vec3::new(sp.x as f32, sp.y as f32, sp.z as f32),
+            sp.yaw,
+            sp.pitch,
+        ),
+        Packet::SpawnPlayer_f64_NoMeta(sp) => send_spawn_player(
+            to_main,
+            sp.entity_id.0,
+            Some(sp.uuid),
+            bevy::prelude::Vec3::new(sp.x as f32, sp.y as f32, sp.z as f32),
+            sp.yaw,
+            sp.pitch,
+        ),
         Packet::SpawnPlayer_i32_HeldItem_String(sp) => {
             let parsed_uuid = sp.uuid.parse::<rs_protocol::protocol::UUID>().ok();
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {

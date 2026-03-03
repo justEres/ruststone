@@ -83,6 +83,18 @@ const CREATIVE_BLOCK_REACH: f32 = 5.0;
 const SURVIVAL_ENTITY_REACH: f32 = 3.0;
 const CREATIVE_ENTITY_REACH: f32 = 5.0;
 
+fn gameplay_input_allowed(
+    app_state: &AppState,
+    ui_state: &UiState,
+    player_status: &rs_utils::PlayerStatus,
+) -> bool {
+    matches!(app_state.0, ApplicationState::Connected)
+        && !ui_state.chat_open
+        && !ui_state.paused
+        && !ui_state.inventory_open
+        && !player_status.dead
+}
+
 fn wrap_degrees(mut deg: f32) -> f32 {
     while deg <= -180.0 {
         deg += 360.0;
@@ -127,12 +139,7 @@ pub fn input_collect_system(
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
-    if !matches!(app_state.0, ApplicationState::Connected)
-        || ui_state.chat_open
-        || ui_state.paused
-        || ui_state.inventory_open
-        || player_status.dead
-    {
+    if !gameplay_input_allowed(&app_state, &ui_state, &player_status) {
         motion_events.clear();
         input.0.forward = 0.0;
         input.0.strafe = 0.0;
@@ -209,11 +216,7 @@ pub fn camera_zoom_system(
         wheel_delta += ev.y;
     }
 
-    let input_allowed = matches!(app_state.0, ApplicationState::Connected)
-        && !ui_state.chat_open
-        && !ui_state.paused
-        && !ui_state.inventory_open
-        && !player_status.dead;
+    let input_allowed = gameplay_input_allowed(&app_state, &ui_state, &player_status);
 
     const BASE_ZOOM_FACTOR: f32 = 2.0; // 200% zoom
     const MIN_ZOOM_FACTOR: f32 = 1.1;

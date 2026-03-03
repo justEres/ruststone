@@ -4,6 +4,18 @@ use rs_utils::{
     AppState, ApplicationState, InventoryState, PlayerStatus, ToNet, ToNetMessage, UiState,
 };
 
+const HOTBAR_DIGIT_KEYS: [(KeyCode, u8); 9] = [
+    (KeyCode::Digit1, 0),
+    (KeyCode::Digit2, 1),
+    (KeyCode::Digit3, 2),
+    (KeyCode::Digit4, 3),
+    (KeyCode::Digit5, 4),
+    (KeyCode::Digit6, 5),
+    (KeyCode::Digit7, 6),
+    (KeyCode::Digit8, 7),
+    (KeyCode::Digit9, 8),
+];
+
 pub fn hotbar_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut mouse_wheel_events: EventReader<MouseWheel>,
@@ -36,27 +48,9 @@ pub fn hotbar_input_system(
         // Number keys should still work while zooming, so don't early-return before that logic.
     }
 
-    let selected = if keys.just_pressed(KeyCode::Digit1) {
-        Some(0)
-    } else if keys.just_pressed(KeyCode::Digit2) {
-        Some(1)
-    } else if keys.just_pressed(KeyCode::Digit3) {
-        Some(2)
-    } else if keys.just_pressed(KeyCode::Digit4) {
-        Some(3)
-    } else if keys.just_pressed(KeyCode::Digit5) {
-        Some(4)
-    } else if keys.just_pressed(KeyCode::Digit6) {
-        Some(5)
-    } else if keys.just_pressed(KeyCode::Digit7) {
-        Some(6)
-    } else if keys.just_pressed(KeyCode::Digit8) {
-        Some(7)
-    } else if keys.just_pressed(KeyCode::Digit9) {
-        Some(8)
-    } else {
-        None
-    };
+    let selected = HOTBAR_DIGIT_KEYS
+        .iter()
+        .find_map(|(key, slot)| keys.just_pressed(*key).then_some(*slot));
 
     let Some(slot) = selected else {
         if keys.pressed(KeyCode::KeyC) {

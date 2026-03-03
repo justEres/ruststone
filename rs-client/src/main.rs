@@ -10,16 +10,17 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod embedded_assets;
-mod entities;
-mod entity_model;
 mod inventory_systems;
-mod item_textures;
 mod message_handler;
 mod net;
 mod plugins;
-mod sim;
 mod sim_systems;
 mod timing;
+
+pub use rs_entity as entities;
+pub use rs_entity::item_textures;
+pub use rs_entity::model as entity_model;
+pub use rs_sim as sim;
 
 use plugins::{
     ClientCorePlugin, ClientEntityPlugin, ClientInventoryPlugin, ClientItemTexturePlugin,

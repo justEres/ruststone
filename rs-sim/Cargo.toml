@@ -1,0 +1,8 @@
+[package]
+name = "rs-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.16.0"
+rs-utils = { version = "0.1.0", path = "../rs-utils" }
