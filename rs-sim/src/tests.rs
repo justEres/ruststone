@@ -340,3 +340,85 @@ fn closed_door_and_gate_block_forward_motion() {
         state.pos.x
     );
 }
+
+#[test]
+fn open_fence_gate_allows_forward_motion() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -2, 8, -2, 2, 0);
+    // Open gate (meta bit 0x4 set).
+    apply_blocks(&mut map, &[(0, 1, 0, block_state(107, 0x4))]);
+    let world = WorldCollision::with_map(&map);
+
+    let mut state = PlayerSimState {
+        pos: Vec3::new(0.5, 1.0, -0.8),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        yaw: std::f32::consts::PI,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        strafe: 0.0,
+        jump: false,
+        sprint: true,
+        sneak: false,
+        can_fly: false,
+        flying: false,
+        flying_speed: 0.05,
+        speed_multiplier: 1.0,
+        jump_boost_amplifier: None,
+        yaw: std::f32::consts::PI,
+        pitch: 0.0,
+    };
+
+    for _ in 0..80 {
+        state = simulate_tick(&state, &input, &world);
+        assert!(state.pos.is_finite());
+    }
+    assert!(
+        state.pos.z > 1.2,
+        "expected passing through open gate, z={}",
+        state.pos.z
+    );
+}
+
+#[test]
+fn open_door_allows_forward_motion() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -2, 8, -2, 2, 0);
+    // Open door lower-half metadata (facing east + open bit).
+    apply_blocks(&mut map, &[(1, 1, 0, block_state(64, 0x4))]);
+    let world = WorldCollision::with_map(&map);
+
+    let mut state = PlayerSimState {
+        pos: Vec3::new(0.2, 1.0, 0.5),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        strafe: 0.0,
+        jump: false,
+        sprint: true,
+        sneak: false,
+        can_fly: false,
+        flying: false,
+        flying_speed: 0.05,
+        speed_multiplier: 1.0,
+        jump_boost_amplifier: None,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+
+    for _ in 0..80 {
+        state = simulate_tick(&state, &input, &world);
+        assert!(state.pos.is_finite());
+    }
+    assert!(
+        state.pos.x > 1.6,
+        "expected passing through open door, x={}",
+        state.pos.x
+    );
+}

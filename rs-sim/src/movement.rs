@@ -1008,18 +1008,14 @@ fn append_block_collision_boxes(
                 let rail_min = 0.375;
                 let rail_max = 0.625;
 
-                let (panel_min, panel_max) = if !is_open {
-                    if x_aligned {
+                if !is_open {
+                    let (panel_min, panel_max) = if x_aligned {
                         ([0.0, 0.0, rail_min], [1.0, 1.0, rail_max])
                     } else {
                         ([rail_min, 0.0, 0.0], [rail_max, 1.0, 1.0])
-                    }
-                } else if x_aligned {
-                    ([rail_min, 0.0, 0.0], [rail_max, 1.0, 1.0])
-                } else {
-                    ([0.0, 0.0, rail_min], [1.0, 1.0, rail_max])
-                };
-                append_box(block_x, block_y, block_z, panel_min, panel_max, out);
+                    };
+                    append_box(block_x, block_y, block_z, panel_min, panel_max, out);
+                }
 
                 if x_aligned {
                     append_box(
@@ -1191,6 +1187,7 @@ pub fn collision_parity_expected_box_count(
     block_z: i32,
 ) -> Option<usize> {
     let block_id = block_state_id(block_state);
+    let meta = block_state_meta(block_state);
     match block_model_kind(block_id) {
         BlockModelKind::Stairs => Some(match stair_shape(world, block_state, block_x, block_y, block_z) {
             StairShape::InnerLeft | StairShape::InnerRight => 3,
@@ -1224,7 +1221,7 @@ pub fn collision_parity_expected_box_count(
                 return Some(1);
             }
             if matches!(block_id, 107 | 183 | 184 | 185 | 186 | 187) {
-                return Some(3);
+                return Some(if (meta & 0x4) != 0 { 2 } else { 3 });
             }
             if block_id == 139 {
                 let connect_east = wall_connects_to(world.block_at(block_x + 1, block_y, block_z));

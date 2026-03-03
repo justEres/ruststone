@@ -30,9 +30,10 @@
     - 🚧 same with collision
         - ✅ custom block collision boxes added for many non-full blocks (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
         - 🚧 parity pass for remaining edge cases and per-state corner logic
-            - ✅ stairs: vanilla-style corner shape resolution (`straight/outer/inner`) from neighbor states
-            - ✅ collision parity test harness in `rs-sim` (stairs + door/gate/wall/pane/fence scenarios)
-            - ✅ runtime parity readout in debug overlay (expected vs actual collision box count)
+        - ✅ stairs: vanilla-style corner shape resolution (`straight/outer/inner`) from neighbor states
+        - ✅ collision parity test harness in `rs-sim` (stairs + door/gate/wall/pane/fence scenarios)
+        - ✅ open/closed door+gate traversal regression tests (pass-through vs blocking)
+        - ✅ runtime parity readout in debug overlay (expected vs actual collision box count)
 - Reach
     - ✅ the range i can click blocks or entitys feels further than original. keep it the same
 
