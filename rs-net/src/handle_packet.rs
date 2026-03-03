@@ -9,6 +9,7 @@ use rs_utils::{
     InventoryMessage, InventoryWindowInfo, MobKind, NetEntityAnimation, NetEntityKind,
     NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, item_name,
 };
+use tracing::{debug, warn};
 
 use crate::chunk_decode;
 
@@ -65,7 +66,7 @@ pub fn handle_packet(
                     let _ = to_main.send(FromNetMessage::ChunkData(chunk));
                 }
                 Err(err) => {
-                    println!("Failed to decode ChunkData: {}", err);
+                    warn!("Failed to decode ChunkData: {}", err);
                 }
             }
         }
@@ -85,7 +86,7 @@ pub fn handle_packet(
                         let _ = to_main.send(FromNetMessage::ChunkData(chunk));
                     }
                     Err(err) => {
-                        println!("Failed to decode ChunkDataBulk: {}", err);
+                        warn!("Failed to decode ChunkDataBulk: {}", err);
                         break;
                     }
                 }
@@ -238,7 +239,7 @@ pub fn handle_packet(
             if let Some(uuid) = parsed_uuid {
                 let (skin_url, skin_model) =
                     extract_skin_info_from_spawn_properties(&sp.properties.data);
-                println!(
+                debug!(
                     "NET SpawnPlayer_i32_HeldItem_String name={} uuid={:?} props={} skin_url={:?} skin_model={:?}",
                     sp.name,
                     uuid,
@@ -606,7 +607,7 @@ pub fn handle_packet(
                     } => {
                         let (skin_url, skin_model) =
                             extract_skin_info_from_player_properties(&properties);
-                        println!(
+                        debug!(
                             "NET PlayerInfo::Add name={} uuid={:?} props={} skin_url={:?} skin_model={:?}",
                             name,
                             uuid,

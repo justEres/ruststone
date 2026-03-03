@@ -1,5 +1,5 @@
 use byteorder::WriteBytesExt;
-use log::debug;
+use tracing::debug;
 /// Implements https://wiki.vg/Minecraft_Forge_Handshake
 use std::io;
 

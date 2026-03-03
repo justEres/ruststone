@@ -5,10 +5,19 @@ use std::path::PathBuf;
 use rs_render::default_model_roots;
 use rs_render::{ModelFace as Face, build_block_texture_mapping};
 use rs_utils::{block_registry_key, ruststone_assets_root};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 const TEXTURE_BASE: &str = "texturepack/assets/minecraft/textures/blocks/";
 
 fn main() {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .without_time()
+        .compact()
+        .try_init();
+
     let name_to_index = collect_texture_name_map();
     let mut resolver = rs_render::BlockModelResolver::new(default_model_roots());
     let mapping = build_block_texture_mapping(&name_to_index, Some(&mut resolver));
@@ -69,28 +78,28 @@ fn main() {
         }
     }
 
-    println!("Registered block ids with all metas fully missing:");
+    info!("Registered block ids with all metas fully missing:");
     for (id, key) in &fully_missing {
-        println!("  id={id:>4} key={key}");
+        info!("  id={id:>4} key={key}");
     }
-    println!(
+    info!(
         "Total fully missing registered ids: {}",
         fully_missing.len()
     );
 
-    println!("\nRegistered block ids with only some metas fully missing:");
+    info!("Registered block ids with only some metas fully missing:");
     for (id, key, metas) in &partial_missing {
-        println!("  id={id:>4} key={key} metas={metas:?}");
+        info!("  id={id:>4} key={key} metas={metas:?}");
     }
-    println!(
+    info!(
         "Total partially missing registered ids: {}",
         partial_missing.len()
     );
-    println!("\nRegistered block ids with meta=0 resolving all faces to stone.png:");
+    info!("Registered block ids with meta=0 resolving all faces to stone.png:");
     for (id, key) in &all_stone_meta0 {
-        println!("  id={id:>4} key={key}");
+        info!("  id={id:>4} key={key}");
     }
-    println!(
+    info!(
         "Total all-stone(meta0) registered ids: {}",
         all_stone_meta0.len()
     );

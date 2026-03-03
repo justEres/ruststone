@@ -18,6 +18,7 @@ use crate::translate;
 use crate::translate::*;
 
 use serde::Deserialize;
+use tracing::trace;
 
 pub use crate::format::color::*;
 use crate::protocol::Error;
@@ -124,12 +125,12 @@ impl Component {
 
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(str: &str) -> Self {
-        log::trace!("Raw: {}", str);
+        trace!("Raw: {}", str);
         match serde_json::from_str::<ChatSections>(str) {
             Ok(sections) => Component::from_chat_sections(sections, &Modifier::default()),
             // Sometimes mojang sends a literal string, so we should interpret it literally
             Err(error) => {
-                log::trace!("Failed error: {}", error);
+                trace!("Failed error: {}", error);
                 Component::from_legacy_str(str, &Modifier::default())
             }
         }
@@ -271,7 +272,7 @@ impl Component {
             )),
             // Sometimes mojang sends a literal string, so we should interpret it literally
             Err(error) => {
-                log::trace!("Failed error: {}", error);
+                trace!("Failed error: {}", error);
                 Ok(Component::from_legacy_str(
                     match v.as_str() {
                         Some(val) => val,

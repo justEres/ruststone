@@ -35,7 +35,7 @@ use flate2::Compression;
 use flate2::read::{ZlibDecoder, ZlibEncoder};
 use instant::{Duration, Instant};
 use lazy_static::lazy_static;
-use log::{debug, warn};
+use tracing::{debug, warn};
 use num_traits::cast::{NumCast, cast};
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::Resolver;

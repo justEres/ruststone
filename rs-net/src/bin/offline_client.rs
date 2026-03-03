@@ -1,13 +1,22 @@
 use std::env;
 use std::time::Duration;
+use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .without_time()
+        .compact()
+        .try_init();
+
     // Simple CLI: first arg is host:port (default localhost:25565), second arg is username
     let args: Vec<String> = env::args().collect();
     let target = args.get(1).map(|s| s.as_str()).unwrap_or("127.0.0.1:25565");
     let username = args.get(2).map(|s| s.as_str()).unwrap_or("RustPlayer");
 
-    println!("Connecting to {} as {} (protocol 47)", target, username);
+    info!("Connecting to {} as {} (protocol 47)", target, username);
 
     // Use the protocol crate from workspace
     let mut conn = rs_protocol::protocol::Conn::new(target, 47)?;
@@ -40,18 +49,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 use rs_protocol::protocol::packet::Packet;
                 match pkt {
                     Packet::SetInitialCompression(s) => {
-                        println!("RECV: SetInitialCompression (threshold={})", s.threshold.0);
+                        info!("RECV: SetInitialCompression (threshold={})", s.threshold.0);
                         conn.set_compression(s.threshold.0);
                     }
                     Packet::LoginSuccess_String(s) => {
-                        println!(
+                        info!(
                             "RECV: LoginSuccess_String (uuid={}, username={})",
                             s.uuid, s.username
                         );
                         conn.state = rs_protocol::protocol::State::Play;
                     }
                     Packet::LoginSuccess_UUID(s) => {
-                        println!(
+                        info!(
                             "RECV: LoginSuccess_UUID (uuid=..., username={})",
                             s.username
                         );
@@ -107,15 +116,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         if parts.is_empty() {
-                            println!("RECV: {}", variant);
+                            info!("RECV: {}", variant);
                         } else {
-                            println!("RECV: {} ({})", variant, parts.join(", "));
+                            info!("RECV: {} ({})", variant, parts.join(", "));
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("read_packet error: {:?}", e);
+                error!("read_packet error: {:?}", e);
                 // brief sleep to avoid tight loop on persistent errors
                 std::thread::sleep(Duration::from_millis(200));
                 break;

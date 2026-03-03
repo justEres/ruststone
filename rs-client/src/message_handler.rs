@@ -7,6 +7,7 @@ use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
     PerfTimings, PlayerStatus,
 };
+use tracing::{debug, info};
 
 use crate::entities::{RemoteEntityEventQueue, RemoteEntityRegistry};
 use crate::net::events::{NetEvent, NetEventQueue};
@@ -57,7 +58,7 @@ pub fn handle_messages(
                 history.0 = PredictionHistory::default().0;
                 sim_render.previous = sim_state.current;
                 inventory_state.reset();
-                println!("Connected to server");
+                info!("Connected to server");
             }
             FromNetMessage::Disconnected => {
                 *app_state = AppState(ApplicationState::Disconnected);
@@ -149,7 +150,7 @@ pub fn handle_messages(
                 // S08 in 1.8 commonly omits on_ground; default false to avoid
                 // ground-spoof loops when server is correcting an airborne state.
                 let on_ground = pos.on_ground.unwrap_or(false);
-                println!(
+                debug!(
                     "[net/correction] tick={} raw_pos={:?} raw_yaw={:?} raw_pitch={:?} flags={:?} raw_on_ground={:?} -> resolved_pos=({:.4},{:.4},{:.4}) resolved_yaw={:.4}rad resolved_pitch={:.4}rad resolved_on_ground={}",
                     sim_clock.tick,
                     raw_position,

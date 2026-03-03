@@ -12,6 +12,7 @@ use rs_protocol::protocol::packet::Packet;
 use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 use serde::Deserialize;
 use serde_json::Value;
+use tracing::{debug, error, info, warn};
 
 mod chunk_decode;
 mod handle_packet;
@@ -21,14 +22,14 @@ pub fn start_networking(
     to_main: crossbeam::channel::Sender<FromNetMessage>,
 ) {
     if dotenvy::dotenv().is_ok() {
-        println!("Loaded environment from .env");
+        info!("Loaded environment from .env");
     }
 
     loop {
         let Some(connect_req) = wait_for_connect_request(&from_main) else {
             break;
         };
-        println!(
+        info!(
             "Connecting to server at {} as {} ({:?})",
             connect_req.address, connect_req.username, connect_req.auth_mode
         );
@@ -40,7 +41,7 @@ pub fn start_networking(
             connect_req.prism_accounts_path.as_deref(),
         ) {
             Ok(mut conn) => {
-                println!("Connected to server");
+                info!("Connected to server");
                 let _ = to_main.send(FromNetMessage::Connected);
                 let shutdown = run_connected_session(&mut conn, &from_main, &to_main);
                 let _ = to_main.send(FromNetMessage::Disconnected);
@@ -49,7 +50,7 @@ pub fn start_networking(
                 }
             }
             Err(e) => {
-                println!("Failed to connect to server: {}", e);
+                error!("Failed to connect to server: {}", e);
                 let _ = to_main.send(FromNetMessage::Disconnected);
             }
         }
@@ -126,7 +127,7 @@ fn run_connected_session(
                 };
                 match msg {
                     ToNetMessage::Disconnect => {
-                        println!("Received disconnect message");
+                        info!("Received disconnect message");
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
                         return false;
                     }
@@ -144,7 +145,7 @@ fn run_connected_session(
                 match incoming {
                     Ok(Ok(pkt)) => handle_packet::handle_packet(pkt, to_main, conn),
                     Ok(Err(err)) => {
-                        println!("Error reading packet: {}", err);
+                        warn!("Error reading packet: {}", err);
                         return false;
                     }
                     Err(_) => {
@@ -161,7 +162,7 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
         ToNetMessage::ChatMessage(text) => {
             let sanitized = sanitize_outgoing_chat(&text);
             if sanitized != text {
-                bevy::log::warn!(
+                warn!(
                     "Sanitized outgoing chat (removed unsupported chars and/or clamped to 100 chars)"
                 );
             }
@@ -456,11 +457,11 @@ fn connect(
                 use rs_protocol::protocol::packet::Packet;
                 match pkt {
                     Packet::SetInitialCompression(s) => {
-                        println!("RECV: SetInitialCompression (threshold={})", s.threshold.0);
+                        debug!("RECV: SetInitialCompression (threshold={})", s.threshold.0);
                         conn.set_compression(s.threshold.0);
                     }
                     Packet::EncryptionRequest(req) => {
-                        println!("RECV: EncryptionRequest");
+                        debug!("RECV: EncryptionRequest");
                         handle_encryption_request(
                             &mut conn,
                             &req.server_id,
@@ -470,7 +471,7 @@ fn connect(
                         )?;
                     }
                     Packet::EncryptionRequest_i16(req) => {
-                        println!("RECV: EncryptionRequest_i16");
+                        debug!("RECV: EncryptionRequest_i16");
                         handle_encryption_request(
                             &mut conn,
                             &req.server_id,
@@ -483,7 +484,7 @@ fn connect(
                         return Err(format!("Login disconnect: {}", disconnect.reason).into());
                     }
                     Packet::LoginSuccess_String(s) => {
-                        println!(
+                        info!(
                             "RECV: LoginSuccess_String (uuid={}, username={})",
                             s.uuid, s.username
                         );
@@ -491,7 +492,7 @@ fn connect(
                         return Ok(conn);
                     }
                     Packet::LoginSuccess_UUID(s) => {
-                        println!(
+                        info!(
                             "RECV: LoginSuccess_UUID (uuid=..., username={})",
                             s.username
                         );
@@ -505,12 +506,12 @@ fn connect(
                         } else {
                             dbg.clone()
                         };
-                        println!("RECV: {} (full={})", variant, dbg);
+                        debug!("RECV: {} (full={})", variant, dbg);
                     }
                 }
             }
             Err(e) => {
-                println!("Error reading packet: {}", e);
+                error!("Error reading packet: {}", e);
                 return Err(Box::new(e));
             }
         }
@@ -571,7 +572,7 @@ fn load_online_account_from_prism(
         .build()?;
     let minecraft_access_token = runtime.block_on(get_minecraft_access_token(&selection))?;
 
-    println!(
+    info!(
         "Auth Prism: username={} uuid={}.. token_len={}",
         selection.username,
         &selection.uuid[..8],
@@ -765,7 +766,7 @@ fn handle_encryption_request(
         "Server requires online-mode authentication; use Authenticated mode with Prism auth"
             .to_string()
     })?;
-    println!(
+    info!(
         "Starting encrypted login: server_id='{}' pubkey_len={} verify_len={} uuid={}..",
         server_id,
         public_key.len(),
@@ -795,6 +796,6 @@ fn handle_encryption_request(
     )?;
 
     conn.enable_encyption(&shared_secret);
-    println!("Encryption enabled");
+    info!("Encryption enabled");
     Ok(())
 }
