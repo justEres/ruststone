@@ -2,7 +2,7 @@
 
 - ✅ proper options menu which saves in toml format
 - ✅ metadata stuff -> hovering over items in inventory and showing tooltips
-- better logging -> more info and more warnings using tracing
+- ✅ better logging -> more info and more warnings using tracing
 
 
 - Bugfixes:
@@ -29,7 +29,10 @@
     - 🚧 must be exactly the same as original minecraft in every aspect. Browse original source code if needed for constants and timing or logic.
     - 🚧 same with collision
         - ✅ custom block collision boxes added for many non-full blocks (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
-        - ⬜ parity pass for remaining edge cases and per-state corner logic
+        - 🚧 parity pass for remaining edge cases and per-state corner logic
+            - ✅ stairs: vanilla-style corner shape resolution (`straight/outer/inner`) from neighbor states
+            - ✅ collision parity test harness in `rs-sim` (stairs + door/gate/wall/pane/fence scenarios)
+            - ✅ runtime parity readout in debug overlay (expected vs actual collision box count)
 - Reach
     - ✅ the range i can click blocks or entitys feels further than original. keep it the same
 
@@ -43,7 +46,8 @@
         - ⬜ exact vanilla parity tuning/edge cases (stacking/timing with other modifiers)
 
 - Inventory, UI:
-    - ✅ armor slots
+    - ✅ armor slots 
+    
     - ✅ armor bar over hotbar
     - 🚧 chests
         - ✅ dynamic chest/container window layout + click routing by window id
@@ -65,7 +69,9 @@
 
 - Physics
     - proper knockback prediction -> right now players bug into blocks when receiving knockback 
-    - water / swimming
+    - 🚧 water / swimming
+        - ✅ baseline local sim present (in-water detection, drag, upward swim accel, surface step)
+        - ⬜ exact vanilla parity tuning/edge cases
     - item physics -> interpolation for falling items
     - items on the ground dont always have a texture -> missing metadata?
     - falling blocks -> sand, gravel

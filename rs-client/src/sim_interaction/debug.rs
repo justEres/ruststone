@@ -1,5 +1,6 @@
 use super::super::*;
 use super::world::raycast_block;
+use crate::sim::movement::collision_parity_expected_box_count;
 
 pub fn draw_entity_hitboxes_system(
     mut gizmos: Gizmos,
@@ -394,6 +395,25 @@ pub fn debug_overlay_system(
                                 ));
                                 ui.label(format!("registry: {}", reg));
                                 ui.label(format!("collision boxes: {}", boxes.len()));
+                                if let Some(expected) = collision_parity_expected_box_count(
+                                    &world,
+                                    state,
+                                    hit.block.x,
+                                    hit.block.y,
+                                    hit.block.z,
+                                ) {
+                                    let parity = if boxes.len() == expected {
+                                        "ok"
+                                    } else {
+                                        "mismatch"
+                                    };
+                                    ui.label(format!(
+                                        "collision parity: {} (expected {}, actual {})",
+                                        parity,
+                                        expected,
+                                        boxes.len()
+                                    ));
+                                }
                                 for (idx, (min, max)) in boxes.iter().take(4).enumerate() {
                                     let size = *max - *min;
                                     ui.label(format!(

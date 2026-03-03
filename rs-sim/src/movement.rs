@@ -484,7 +484,180 @@ fn append_box(
     ));
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StairDir {
+    East,
+    West,
+    South,
+    North,
+}
+
+impl StairDir {
+    fn from_meta(meta: u8) -> Self {
+        match meta & 0x3 {
+            0 => Self::East,
+            1 => Self::West,
+            2 => Self::South,
+            _ => Self::North,
+        }
+    }
+
+    fn opposite(self) -> Self {
+        match self {
+            Self::East => Self::West,
+            Self::West => Self::East,
+            Self::South => Self::North,
+            Self::North => Self::South,
+        }
+    }
+
+    fn left(self) -> Self {
+        match self {
+            Self::East => Self::North,
+            Self::West => Self::South,
+            Self::South => Self::East,
+            Self::North => Self::West,
+        }
+    }
+
+    fn offset(self) -> (i32, i32) {
+        match self {
+            Self::East => (1, 0),
+            Self::West => (-1, 0),
+            Self::South => (0, 1),
+            Self::North => (0, -1),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StairShape {
+    Straight,
+    OuterLeft,
+    OuterRight,
+    InnerLeft,
+    InnerRight,
+}
+
+fn stair_info(block_state: u16) -> Option<(StairDir, bool)> {
+    if !matches!(
+        block_model_kind(block_state_id(block_state)),
+        BlockModelKind::Stairs
+    ) {
+        return None;
+    }
+    let meta = block_state_meta(block_state);
+    Some((StairDir::from_meta(meta), (meta & 0x4) != 0))
+}
+
+fn stair_state_at(world: &WorldCollision, x: i32, y: i32, z: i32, dir: StairDir) -> u16 {
+    let (dx, dz) = dir.offset();
+    world.block_at(x + dx, y, z + dz)
+}
+
+fn different_stair_at(
+    world: &WorldCollision,
+    x: i32,
+    y: i32,
+    z: i32,
+    dir: StairDir,
+    current_dir: StairDir,
+    current_top: bool,
+) -> bool {
+    let neighbor = stair_state_at(world, x, y, z, dir);
+    let Some((neighbor_dir, neighbor_top)) = stair_info(neighbor) else {
+        return true;
+    };
+    neighbor_dir != current_dir || neighbor_top != current_top
+}
+
+fn stair_shape(
+    world: &WorldCollision,
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+) -> StairShape {
+    let Some((facing, top)) = stair_info(block_state) else {
+        return StairShape::Straight;
+    };
+
+    let front = stair_state_at(world, block_x, block_y, block_z, facing);
+    if let Some((front_facing, front_top)) = stair_info(front)
+        && front_top == top
+        && front_facing != facing
+        && front_facing != facing.opposite()
+        && different_stair_at(
+            world,
+            block_x,
+            block_y,
+            block_z,
+            front_facing.opposite(),
+            facing,
+            top,
+        )
+    {
+        return if front_facing == facing.left() {
+            StairShape::OuterLeft
+        } else {
+            StairShape::OuterRight
+        };
+    }
+
+    let back = stair_state_at(world, block_x, block_y, block_z, facing.opposite());
+    if let Some((back_facing, back_top)) = stair_info(back)
+        && back_top == top
+        && back_facing != facing
+        && back_facing != facing.opposite()
+        && different_stair_at(world, block_x, block_y, block_z, back_facing, facing, top)
+    {
+        return if back_facing == facing.left() {
+            StairShape::InnerLeft
+        } else {
+            StairShape::InnerRight
+        };
+    }
+
+    StairShape::Straight
+}
+
+fn stair_straight_rect(facing: StairDir) -> (f32, f32, f32, f32) {
+    match facing {
+        StairDir::East => (0.5, 1.0, 0.0, 1.0),
+        StairDir::West => (0.0, 0.5, 0.0, 1.0),
+        StairDir::South => (0.0, 1.0, 0.5, 1.0),
+        StairDir::North => (0.0, 1.0, 0.0, 0.5),
+    }
+}
+
+fn stair_outer_rect(facing: StairDir, left: bool) -> (f32, f32, f32, f32) {
+    match (facing, left) {
+        (StairDir::East, true) => (0.5, 1.0, 0.0, 0.5),
+        (StairDir::East, false) => (0.5, 1.0, 0.5, 1.0),
+        (StairDir::West, true) => (0.0, 0.5, 0.5, 1.0),
+        (StairDir::West, false) => (0.0, 0.5, 0.0, 0.5),
+        (StairDir::South, true) => (0.5, 1.0, 0.5, 1.0),
+        (StairDir::South, false) => (0.0, 0.5, 0.5, 1.0),
+        (StairDir::North, true) => (0.0, 0.5, 0.0, 0.5),
+        (StairDir::North, false) => (0.5, 1.0, 0.0, 0.5),
+    }
+}
+
+fn stair_inner_extra_rect(facing: StairDir, left: bool) -> (f32, f32, f32, f32) {
+    match (facing, left) {
+        (StairDir::East, true) => (0.0, 0.5, 0.0, 0.5),
+        (StairDir::East, false) => (0.0, 0.5, 0.5, 1.0),
+        (StairDir::West, true) => (0.5, 1.0, 0.5, 1.0),
+        (StairDir::West, false) => (0.5, 1.0, 0.0, 0.5),
+        (StairDir::South, true) => (0.5, 1.0, 0.0, 0.5),
+        (StairDir::South, false) => (0.0, 0.5, 0.0, 0.5),
+        (StairDir::North, true) => (0.0, 0.5, 0.5, 1.0),
+        (StairDir::North, false) => (0.5, 1.0, 0.5, 1.0),
+    }
+}
+
 fn append_stair_boxes(
+    world: &WorldCollision,
     block_state: u16,
     block_x: i32,
     block_y: i32,
@@ -493,7 +666,8 @@ fn append_stair_boxes(
 ) {
     let meta = block_state_meta(block_state);
     let top = (meta & 0x4) != 0;
-    let facing = meta & 0x3;
+    let facing = StairDir::from_meta(meta);
+    let shape = stair_shape(world, block_state, block_x, block_y, block_z);
 
     if top {
         append_box(
@@ -515,30 +689,30 @@ fn append_stair_boxes(
         );
     }
 
-    let (min_x, max_x, min_z, max_z) = match facing {
-        0 => (0.5, 1.0, 0.0, 1.0), // east
-        1 => (0.0, 0.5, 0.0, 1.0), // west
-        2 => (0.0, 1.0, 0.5, 1.0), // south
-        _ => (0.0, 1.0, 0.0, 0.5), // north
+    let (min_y, max_y) = if top { (0.0, 0.5) } else { (0.5, 1.0) };
+    let mut push_riser = |rect: (f32, f32, f32, f32)| {
+        append_box(
+            block_x,
+            block_y,
+            block_z,
+            [rect.0, min_y, rect.2],
+            [rect.1, max_y, rect.3],
+            out,
+        );
     };
-    if top {
-        append_box(
-            block_x,
-            block_y,
-            block_z,
-            [min_x, 0.0, min_z],
-            [max_x, 0.5, max_z],
-            out,
-        );
-    } else {
-        append_box(
-            block_x,
-            block_y,
-            block_z,
-            [min_x, 0.5, min_z],
-            [max_x, 1.0, max_z],
-            out,
-        );
+
+    match shape {
+        StairShape::Straight => push_riser(stair_straight_rect(facing)),
+        StairShape::OuterLeft => push_riser(stair_outer_rect(facing, true)),
+        StairShape::OuterRight => push_riser(stair_outer_rect(facing, false)),
+        StairShape::InnerLeft => {
+            push_riser(stair_straight_rect(facing));
+            push_riser(stair_inner_extra_rect(facing, true));
+        }
+        StairShape::InnerRight => {
+            push_riser(stair_straight_rect(facing));
+            push_riser(stair_inner_extra_rect(facing, false));
+        }
     }
 }
 
@@ -577,7 +751,9 @@ fn append_block_collision_boxes(
                 );
             }
         }
-        BlockModelKind::Stairs => append_stair_boxes(block_state, block_x, block_y, block_z, out),
+        BlockModelKind::Stairs => {
+            append_stair_boxes(world, block_state, block_x, block_y, block_z, out)
+        }
         BlockModelKind::Fence => {
             let connect_east = fence_connects_to(world.block_at(block_x + 1, block_y, block_z));
             let connect_west = fence_connects_to(world.block_at(block_x - 1, block_y, block_z));
@@ -1005,6 +1181,67 @@ fn wall_connects_to(neighbor_state: u16) -> bool {
         return true;
     }
     is_solid(neighbor_state)
+}
+
+pub fn collision_parity_expected_box_count(
+    world: &WorldCollision,
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+) -> Option<usize> {
+    let block_id = block_state_id(block_state);
+    match block_model_kind(block_id) {
+        BlockModelKind::Stairs => Some(match stair_shape(world, block_state, block_x, block_y, block_z) {
+            StairShape::InnerLeft | StairShape::InnerRight => 3,
+            StairShape::Straight | StairShape::OuterLeft | StairShape::OuterRight => 2,
+        }),
+        BlockModelKind::Fence => {
+            let connect_east = fence_connects_to(world.block_at(block_x + 1, block_y, block_z));
+            let connect_west = fence_connects_to(world.block_at(block_x - 1, block_y, block_z));
+            let connect_south = fence_connects_to(world.block_at(block_x, block_y, block_z + 1));
+            let connect_north = fence_connects_to(world.block_at(block_x, block_y, block_z - 1));
+            Some(1 + usize::from(connect_east) + usize::from(connect_west) + usize::from(connect_south) + usize::from(connect_north))
+        }
+        BlockModelKind::Pane => {
+            let connect_east = pane_connects_to(world.block_at(block_x + 1, block_y, block_z));
+            let connect_west = pane_connects_to(world.block_at(block_x - 1, block_y, block_z));
+            let connect_south = pane_connects_to(world.block_at(block_x, block_y, block_z + 1));
+            let connect_north = pane_connects_to(world.block_at(block_x, block_y, block_z - 1));
+            let has_x = connect_east || connect_west;
+            let has_z = connect_north || connect_south;
+            let center = usize::from(!has_x || !has_z);
+            Some(
+                center
+                    + usize::from(connect_east)
+                    + usize::from(connect_west)
+                    + usize::from(connect_south)
+                    + usize::from(connect_north),
+            )
+        }
+        BlockModelKind::Custom => {
+            if matches!(block_id, 64 | 71 | 193 | 194 | 195 | 196 | 197) {
+                return Some(1);
+            }
+            if matches!(block_id, 107 | 183 | 184 | 185 | 186 | 187) {
+                return Some(3);
+            }
+            if block_id == 139 {
+                let connect_east = wall_connects_to(world.block_at(block_x + 1, block_y, block_z));
+                let connect_west = wall_connects_to(world.block_at(block_x - 1, block_y, block_z));
+                let connect_south = wall_connects_to(world.block_at(block_x, block_y, block_z + 1));
+                let connect_north = wall_connects_to(world.block_at(block_x, block_y, block_z - 1));
+                return Some(
+                    1 + usize::from(connect_east)
+                        + usize::from(connect_west)
+                        + usize::from(connect_south)
+                        + usize::from(connect_north),
+                );
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 pub fn debug_block_collision_boxes(
