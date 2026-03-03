@@ -37,14 +37,25 @@ impl Plugin for UiPlugin {
             .add_plugins(EguiPlugin::default())
             .init_resource::<ConnectUiState>()
             .init_resource::<ItemIconCache>()
-            .init_resource::<FpsOverlayState>();
+            .init_resource::<ChatAutocompleteState>();
     }
 }
 
 #[derive(Resource, Default)]
-struct FpsOverlayState {
-    samples: Vec<(f64, f32)>,
-    elapsed_s: f64,
+pub struct ChatAutocompleteState {
+    pub suggestions: Vec<String>,
+    pub selected: usize,
+    pub pending_query: Option<String>,
+    pub query_snapshot: String,
+    pub suppress_next_clear: bool,
+}
+
+impl ChatAutocompleteState {
+    pub fn clear(&mut self) {
+        self.suggestions.clear();
+        self.selected = 0;
+        self.pending_query = None;
+    }
 }
 
 fn connect_ui(
@@ -53,6 +64,7 @@ fn connect_ui(
     mut app_state: ResMut<AppState>,
     to_net: Res<ToNet>,
     mut chat: ResMut<Chat>,
+    mut chat_autocomplete: ResMut<ChatAutocompleteState>,
     keys: Res<ButtonInput<KeyCode>>,
     mut ui_state: ResMut<UiState>,
     mut inventory_state: ResMut<InventoryState>,
@@ -63,7 +75,6 @@ fn connect_ui(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut window_events: EventReader<WindowFocused>,
     mut timings: ResMut<PerfTimings>,
-    mut fps_overlay: ResMut<FpsOverlayState>,
 ) {
     let start = std::time::Instant::now();
     let ctx = contexts.ctx_mut().unwrap();
@@ -109,6 +120,7 @@ fn connect_ui(
 
     if keys.just_pressed(KeyCode::Escape) && ui_state.chat_open {
         ui_state.chat_open = false;
+        chat_autocomplete.clear();
     } else if keys.just_pressed(KeyCode::Escape) && ui_state.inventory_open {
         close_open_window_if_needed(&to_net, &mut inventory_state);
         ui_state.inventory_open = false;
@@ -133,6 +145,8 @@ fn connect_ui(
         }
         if ui_state.chat_open {
             chat.1.clear();
+            chat_autocomplete.clear();
+            chat_autocomplete.query_snapshot.clear();
         }
     }
 
@@ -329,26 +343,8 @@ fn connect_ui(
         } else {
             0.0
         };
-        fps_overlay.elapsed_s += (frame_ms / 1000.0) as f64;
-        let now = fps_overlay.elapsed_s;
-        fps_overlay.samples.push((now, fps));
-        let cutoff_10s = now - 10.0;
-        fps_overlay.samples.retain(|(t, _)| *t >= cutoff_10s);
-
-        let avg_for_window = |window_s: f64| -> f32 {
-            let cutoff = now - window_s;
-            let mut sum = 0.0f32;
-            let mut count = 0u32;
-            for (t, value) in &fps_overlay.samples {
-                if *t >= cutoff {
-                    sum += *value;
-                    count += 1;
-                }
-            }
-            if count > 0 { sum / count as f32 } else { fps }
-        };
-        let avg_1s = avg_for_window(1.0);
-        let avg_10s = avg_for_window(10.0);
+        let avg_1s = fps;
+        let avg_10s = fps;
         let fps_color = if fps >= 120.0 {
             egui::Color32::from_rgb(125, 220, 120)
         } else if fps >= 60.0 {
@@ -401,18 +397,56 @@ fn connect_ui(
                     }
                     if ui_state.chat_open {
                         ui.add_space(4.0);
+                        if chat.1 != chat_autocomplete.query_snapshot {
+                            if chat_autocomplete.suppress_next_clear {
+                                chat_autocomplete.suppress_next_clear = false;
+                            } else {
+                                chat_autocomplete.clear();
+                            }
+                            chat_autocomplete.query_snapshot = chat.1.clone();
+                        }
                         let response = ui.add_sized(
                             [panel_width - 8.0, 22.0],
                             egui::TextEdit::singleline(&mut chat.1).hint_text("Type message..."),
                         );
                         response.request_focus();
                         if response.has_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Tab))
+                            && !chat.1.is_empty()
+                            && chat.1.starts_with('/')
+                        {
+                            handle_chat_tab_complete(&to_net, &mut chat, &mut chat_autocomplete);
+                            response.request_focus();
+                        }
+                        if response.has_focus()
                             && ui.input(|i| i.key_pressed(egui::Key::Enter))
                             && !chat.1.is_empty()
                         {
                             let _ = to_net.0.send(ToNetMessage::ChatMessage(chat.1.clone()));
                             chat.1.clear();
+                            chat_autocomplete.clear();
+                            chat_autocomplete.query_snapshot.clear();
                             response.request_focus();
+                        }
+                        if ui_state.chat_open && !chat_autocomplete.suggestions.is_empty() {
+                            ui.add_space(4.0);
+                            let max_suggestions = 5usize;
+                            for (idx, candidate) in chat_autocomplete
+                                .suggestions
+                                .iter()
+                                .take(max_suggestions)
+                                .enumerate()
+                            {
+                                let prefix = if idx == chat_autocomplete.selected {
+                                    "> "
+                                } else {
+                                    "  "
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("{}{}", prefix, candidate))
+                                        .color(egui::Color32::from_gray(210)),
+                                );
+                            }
                         }
                     }
                 });
@@ -2481,6 +2515,34 @@ fn draw_chat_message(ui: &mut egui::Ui, msg: &str) {
             ui.label(rich);
         }
     });
+}
+
+fn handle_chat_tab_complete(
+    to_net: &ToNet,
+    chat: &mut Chat,
+    chat_autocomplete: &mut ChatAutocompleteState,
+) {
+    if chat_autocomplete.suggestions.is_empty() {
+        let query = chat.1.clone();
+        if chat_autocomplete.pending_query.as_deref() != Some(query.as_str()) {
+            let _ = to_net
+                .0
+                .send(ToNetMessage::TabCompleteRequest { text: query.clone() });
+            chat_autocomplete.pending_query = Some(query);
+        }
+        return;
+    }
+
+    let len = chat_autocomplete.suggestions.len();
+    let idx = chat_autocomplete.selected.min(len - 1);
+    let mut completion = chat_autocomplete.suggestions[idx].trim().to_string();
+    if chat.1.starts_with('/') && !completion.starts_with('/') {
+        completion.insert(0, '/');
+    }
+    chat.1 = completion;
+    chat_autocomplete.query_snapshot = chat.1.clone();
+    chat_autocomplete.suppress_next_clear = true;
+    chat_autocomplete.selected = (idx + 1) % len;
 }
 
 #[derive(Clone)]

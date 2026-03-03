@@ -986,6 +986,9 @@ pub enum ToNetMessage {
     Disconnect,
     Shutdown,
     ChatMessage(String),
+    TabCompleteRequest {
+        text: String,
+    },
     Respawn,
     PlayerMovePosLook {
         x: f64,
@@ -1097,6 +1100,7 @@ pub enum FromNetMessage {
     Disconnected,
     Packet(Packet),
     ChatMessage(String),
+    TabCompleteReply(Vec<String>),
     ChunkData(ChunkData),
     BlockUpdates(Vec<BlockUpdate>),
     PlayerPosition(PlayerPosition),

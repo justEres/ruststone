@@ -3,9 +3,10 @@ use std::time::Instant;
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::{ChunkUpdateQueue, WorldUpdate};
+use rs_ui::ChatAutocompleteState;
 use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
-    PerfTimings, PlayerStatus,
+    PlayerStatus,
 };
 use tracing::{debug, info};
 
@@ -26,13 +27,13 @@ pub fn handle_messages(
     from_net: ResMut<FromNet>,
     mut app_state: ResMut<AppState>,
     mut chat: ResMut<Chat>,
+    mut chat_autocomplete: ResMut<ChatAutocompleteState>,
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
     mut remote_entity_events: ResMut<RemoteEntityEventQueue>,
     remote_entity_registry: Res<RemoteEntityRegistry>,
     mut collision_map: ResMut<WorldCollisionMap>,
     mut player_status: ResMut<PlayerStatus>,
-    mut timings: ResMut<PerfTimings>,
     sim_state: Res<SimState>,
     mut sim_render: ResMut<SimRenderState>,
     mut sim_clock: ResMut<SimClock>,
@@ -45,6 +46,7 @@ pub fn handle_messages(
         match msg {
             FromNetMessage::Connected => {
                 *app_state = AppState(ApplicationState::Connected);
+                chat_autocomplete.clear();
                 player_status.dead = false;
                 player_status.gamemode = 0;
                 player_status.can_fly = false;
@@ -62,6 +64,7 @@ pub fn handle_messages(
             }
             FromNetMessage::Disconnected => {
                 *app_state = AppState(ApplicationState::Disconnected);
+                chat_autocomplete.clear();
                 sim_ready.0 = false;
                 sim_render.previous = sim_state.current;
                 inventory_state.reset();
@@ -74,6 +77,24 @@ pub fn handle_messages(
             FromNetMessage::ChatMessage(msg) => {
                 chat.0.push_back(msg);
                 chat.0.truncate(100); // Keep only the last 100 messages
+            }
+            FromNetMessage::TabCompleteReply(matches) => {
+                let Some(pending_query) = chat_autocomplete.pending_query.take() else {
+                    continue;
+                };
+                if chat.1 != pending_query {
+                    continue;
+                }
+                let mut unique = std::collections::HashSet::new();
+                chat_autocomplete.suggestions = matches
+                    .into_iter()
+                    .map(|entry| entry.trim().to_string())
+                    .filter(|entry| !entry.is_empty())
+                    .filter(|entry| unique.insert(entry.clone()))
+                    .collect();
+                chat_autocomplete.selected = 0;
+                chat_autocomplete.query_snapshot = chat.1.clone();
+                chat_autocomplete.suppress_next_clear = false;
             }
             FromNetMessage::ChunkData(chunk) => {
                 collision_map.update_chunk(chunk.clone());
@@ -252,7 +273,7 @@ pub fn handle_messages(
             _ => { /* Ignore other messages for now */ }
         }
     }
-    timings.handle_messages_ms = timer.ms();
+    let _ = timer.ms();
 }
 
 fn apply_inventory_message(inventory_state: &mut InventoryState, event: InventoryMessage) {

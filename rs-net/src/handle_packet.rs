@@ -655,6 +655,9 @@ pub fn handle_packet(
             let text = component_to_legacy(&sm.message);
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
+        Packet::TabCompleteReply(reply) => {
+            let _ = to_main.send(FromNetMessage::TabCompleteReply(reply.matches.data));
+        }
         Packet::UpdateHealth(health) => {
             let _ = to_main.send(FromNetMessage::UpdateHealth {
                 health: health.health,

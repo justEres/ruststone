@@ -160,7 +160,8 @@
     - 🚧 color and formatting support
         - ✅ legacy `§` color/style code rendering pass in UI
         - ⬜ richer JSON chat components / hover / click events
-    - autocomplete for commands with tab
+    - 🚧 autocomplete for commands with tab
+        - ✅ basic tab-complete request/reply wiring (`UI -> net -> protocol -> UI`) with suggestion cycling
 
 
 - Ideas:

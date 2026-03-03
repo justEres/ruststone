@@ -172,6 +172,15 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 },
             );
         }
+        ToNetMessage::TabCompleteRequest { text } => {
+            let _ = conn.write_packet(
+                rs_protocol::protocol::packet::play::serverbound::TabComplete_NoAssume {
+                    text,
+                    has_target: false,
+                    target: None,
+                },
+            );
+        }
         ToNetMessage::PlayerMovePosLook {
             x,
             y,
