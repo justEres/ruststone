@@ -287,6 +287,7 @@ fn diagonal_stair_sprint_regression_stays_stable() {
         vel: Vec3::ZERO,
         on_ground: true,
         collided_horizontally: false,
+        jump_ticks: 0,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };
@@ -327,6 +328,7 @@ fn sprint_jump_into_stair_preserves_forward_progress() {
         vel: Vec3::ZERO,
         on_ground: true,
         collided_horizontally: false,
+        jump_ticks: 0,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };
@@ -382,6 +384,7 @@ fn closed_door_and_gate_block_forward_motion() {
         vel: Vec3::ZERO,
         on_ground: true,
         collided_horizontally: false,
+        jump_ticks: 0,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };
@@ -425,6 +428,7 @@ fn open_fence_gate_allows_forward_motion() {
         vel: Vec3::ZERO,
         on_ground: true,
         collided_horizontally: false,
+        jump_ticks: 0,
         yaw: std::f32::consts::PI,
         pitch: 0.0,
     };
@@ -467,6 +471,7 @@ fn open_door_allows_forward_motion() {
         vel: Vec3::ZERO,
         on_ground: true,
         collided_horizontally: false,
+        jump_ticks: 0,
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: 0.0,
     };

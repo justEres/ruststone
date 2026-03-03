@@ -888,6 +888,7 @@ pub fn net_event_apply_system(
             vel: Vec3::ZERO,
             on_ground,
             collided_horizontally: false,
+            jump_ticks: 0,
             yaw,
             pitch,
         };

@@ -1276,6 +1276,12 @@ pub fn simulate_tick(
     let mut state = *prev;
     state.yaw = input.yaw;
     state.pitch = input.pitch;
+    if state.jump_ticks > 0 {
+        state.jump_ticks = state.jump_ticks.saturating_sub(1);
+    }
+    if !input.jump {
+        state.jump_ticks = 0;
+    }
     if !world.has_chunk_at_pos(state.pos) {
         state.vel = Vec3::ZERO;
         state.on_ground = true;
@@ -1323,11 +1329,12 @@ pub fn simulate_tick(
 
     let on_ground_for_move = state.on_ground;
 
-    if !in_water && on_ground_for_move && input.jump {
+    if !in_water && on_ground_for_move && input.jump && state.jump_ticks == 0 {
         let jump_boost = input
             .jump_boost_amplifier
             .map_or(0.0, |amp| 0.1 * (f32::from(amp) + 1.0));
         state.vel.y = JUMP_VEL + jump_boost;
+        state.jump_ticks = 10;
         if sprinting {
             let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
             let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
