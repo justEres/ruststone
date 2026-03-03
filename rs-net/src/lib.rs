@@ -522,9 +522,14 @@ const MSA_SCOPE: &str = "XboxLive.signin offline_access";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
 fn default_prism_accounts_pathbuf() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME")
-        && !home.trim().is_empty()
-    {
+    // On Windows prefer %APPDATA%/PrismLauncher/accounts.json
+    if let Ok(appdata) = std::env::var("APPDATA") && !appdata.trim().is_empty() {
+        return PathBuf::from(appdata)
+            .join("PrismLauncher")
+            .join("accounts.json");
+    }
+    // Fallback to the common Linux location ~/.local/share/PrismLauncher/accounts.json
+    if let Ok(home) = std::env::var("HOME") && !home.trim().is_empty() {
         return PathBuf::from(home)
             .join(".local")
             .join("share")
