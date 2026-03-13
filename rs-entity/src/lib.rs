@@ -65,6 +65,14 @@ fn player_shadow_emissive_strength(player_shadow_opacity: f32) -> LinearRgba {
     LinearRgba::rgb(lift, lift, lift)
 }
 
+fn entity_root_translation(kind: NetEntityKind, pos: Vec3, visual_y_offset: f32) -> Vec3 {
+    if kind == NetEntityKind::Item {
+        pos
+    } else {
+        pos + Vec3::Y * visual_y_offset
+    }
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteItemSprite;
 
@@ -520,11 +528,12 @@ pub fn apply_remote_entity_events(
                     _ => None,
                 };
                 let uses_model_mesh = biped_mob.is_some() || quadruped_mob.is_some();
+                let root_translation = entity_root_translation(kind, pos, visual.y_offset);
 
                 let spawn_cmd = commands.spawn((
                     Name::new(format!("RemoteEntity[{entity_id}]")),
                     Transform {
-                        translation: pos + Vec3::Y * visual.y_offset,
+                        translation: root_translation,
                         rotation: entity_root_rotation(kind, yaw),
                         scale: if uses_model_mesh {
                             match kind {
@@ -556,10 +565,9 @@ pub fn apply_remote_entity_events(
                 let root = spawn_cmd.id();
 
                 if kind == NetEntityKind::Player {
-                    commands.entity(root).insert(RemoteMotionSmoothing::new(
-                        pos + Vec3::Y * visual.y_offset,
-                        now_secs,
-                    ));
+                    commands
+                        .entity(root)
+                        .insert(RemoteMotionSmoothing::new(root_translation, now_secs));
                     let (parts, material_handles) = spawn_remote_player_model(
                         &mut commands,
                         &mut meshes,
@@ -604,14 +612,13 @@ pub fn apply_remote_entity_events(
                             MeshMaterial3d(material),
                             RemoteItemSprite,
                             ItemSpin::default(),
-                            RemoteDroppedItemMotion::new(pos + Vec3::Y * visual.y_offset, now_secs),
+                            RemoteDroppedItemMotion::new(root_translation, now_secs),
                             Visibility::Hidden,
                         ));
                     } else if let Some(mob) = biped_mob {
-                        commands.entity(root).insert(RemoteMotionSmoothing::new(
-                            pos + Vec3::Y * visual.y_offset,
-                            now_secs,
-                        ));
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(root_translation, now_secs));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `biped_mob` is gated above.
                             continue;
@@ -655,10 +662,9 @@ pub fn apply_remote_entity_events(
                             },
                         ));
                     } else if let Some(mob) = quadruped_mob {
-                        commands.entity(root).insert(RemoteMotionSmoothing::new(
-                            pos + Vec3::Y * visual.y_offset,
-                            now_secs,
-                        ));
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(root_translation, now_secs));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `quadruped_mob` is gated above.
                             continue;
@@ -731,10 +737,9 @@ pub fn apply_remote_entity_events(
                             ));
                         }
                     } else {
-                        commands.entity(root).insert(RemoteMotionSmoothing::new(
-                            pos + Vec3::Y * visual.y_offset,
-                            now_secs,
-                        ));
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(root_translation, now_secs));
                         let mesh = meshes.add(match spec.mesh {
                             VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
                             VisualMesh::Sphere => Mesh::from(Sphere::default()),
@@ -896,8 +901,11 @@ pub fn apply_remote_entity_events(
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
                     if let Ok((mut remote_entity, mut look)) = params.entity_query.get_mut(entity) {
-                        let target = pos
-                            + Vec3::Y * params.visual_query.get(entity).map_or(0.0, |v| v.y_offset);
+                        let target = entity_root_translation(
+                            remote_entity.kind,
+                            pos,
+                            params.visual_query.get(entity).map_or(0.0, |v| v.y_offset),
+                        );
                         if let Ok(mut item_motion) = params.item_motion_query.get_mut(entity) {
                             let previous = item_motion.authoritative_translation;
                             update_item_motion_velocity(
