@@ -8,6 +8,7 @@ pub struct ReconcileResult {
     pub correction: Vec3,
     pub replayed_ticks: u32,
     pub hard_teleport: bool,
+    pub velocity_correction: f32,
 }
 
 pub fn reconcile(
@@ -24,12 +25,18 @@ pub fn reconcile(
 
     let err = server_state.pos - predicted.state.pos;
     let err_len = err.length();
+    let vel_err = (server_state.vel - predicted.state.vel).length();
+    let yaw_err = (server_state.yaw - predicted.state.yaw).abs();
+    let pitch_err = (server_state.pitch - predicted.state.pitch).abs();
+    let state_changed = server_state.on_ground != predicted.state.on_ground
+        || vel_err >= 0.001
+        || yaw_err >= 0.001
+        || pitch_err >= 0.001;
 
     const SMALL_EPS: f32 = 0.001;
-    const SOFT_CORRECT: f32 = 0.1;
     const HARD_TELEPORT: f32 = 3.0;
 
-    if err_len < SMALL_EPS {
+    if err_len < SMALL_EPS && !state_changed {
         return None;
     }
 
@@ -40,6 +47,7 @@ pub fn reconcile(
             correction: err,
             replayed_ticks: 0,
             hard_teleport: true,
+            velocity_correction: vel_err,
         });
     }
 
@@ -63,6 +71,7 @@ pub fn reconcile(
         correction: err,
         replayed_ticks: replayed,
         hard_teleport: err_len >= HARD_TELEPORT,
+        velocity_correction: vel_err,
     })
 }
 

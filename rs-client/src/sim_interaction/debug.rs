@@ -441,6 +441,16 @@ pub fn debug_overlay_system(
                     ui.label(format!("last correction: {:.4}", debug.last_correction));
                     ui.label(format!("last replay ticks: {}", debug.last_replay));
                     ui.label(format!(
+                        "last velocity correction: {:.4}",
+                        debug.last_velocity_correction
+                    ));
+                    ui.label(format!(
+                        "last server tick: {}",
+                        debug.last_reconciled_server_tick
+                            .map(|tick| tick.to_string())
+                            .unwrap_or_else(|| "n/a".to_string())
+                    ));
+                    ui.label(format!(
                         "smoothing offset: {:.4}",
                         debug.smoothing_offset_len
                     ));

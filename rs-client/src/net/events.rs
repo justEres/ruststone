@@ -14,6 +14,7 @@ pub enum NetEvent {
     },
     ServerVelocity {
         velocity: Vec3,
+        recv_instant: Instant,
     },
 }
 

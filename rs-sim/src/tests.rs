@@ -73,7 +73,7 @@ fn replay_equivalence() {
     let mut corrected = buffer.get_by_tick(server_tick).unwrap().state;
     corrected.pos += Vec3::new(0.05, 0.0, -0.02);
 
-    let mut current = buffer.latest_tick().unwrap();
+    let current = buffer.latest_tick().unwrap();
     let mut current_state = buffer.get_by_tick(current).unwrap().state;
 
     let res = reconcile(
@@ -95,12 +95,13 @@ fn replay_equivalence() {
     let diff = (authoritative.pos - current_state.pos).length();
     assert!(diff < 1e-4, "replay diff {:?}", diff);
     assert!(res.replayed_ticks > 0);
+    assert!(res.velocity_correction <= 1e-6);
 }
 
 #[test]
 fn ring_buffer_integrity() {
     let mut buffer = PredictionBuffer::new(8);
-    let mut state = PlayerSimState::default();
+    let state = PlayerSimState::default();
     for tick in 0..20u32 {
         let input = InputState::default();
         buffer.push(PredictedFrame { tick, input, state });
@@ -459,6 +460,159 @@ fn closed_door_and_gate_block_forward_motion() {
         "player tunneled through closed colliders, x={}",
         state.pos.x
     );
+}
+
+#[test]
+fn velocity_reconcile_replays_future_frames() {
+    let world = WorldCollision::empty();
+    let inputs = input_sequence(32);
+    let mut buffer = PredictionBuffer::new(64);
+    let mut state = PlayerSimState::default();
+
+    for (tick, input) in inputs.iter().enumerate() {
+        state = simulate_tick(&state, input, &world);
+        buffer.push(PredictedFrame {
+            tick: tick as u32,
+            input: *input,
+            state,
+        });
+    }
+
+    let latest_tick = 31u32;
+    let server_tick = 12u32;
+    let mut server_state = buffer.get_by_tick(server_tick).unwrap().state;
+    server_state.vel = Vec3::new(0.35, 0.28, -0.18);
+
+    let mut current_state = buffer.get_by_tick(latest_tick).unwrap().state;
+    let res = reconcile(
+        &mut buffer,
+        &world,
+        server_tick,
+        server_state,
+        latest_tick,
+        &mut current_state,
+    )
+    .unwrap();
+
+    let mut authoritative = server_state;
+    for t in (server_tick + 1)..=latest_tick {
+        authoritative = simulate_tick(&authoritative, &inputs[t as usize], &world);
+    }
+
+    assert!(res.replayed_ticks > 0);
+    assert!(res.velocity_correction > 0.1);
+    assert!((current_state.pos - authoritative.pos).length() < 1e-4);
+    assert!((current_state.vel - authoritative.vel).length() < 1e-4);
+}
+
+#[test]
+fn sneak_edge_clamps_over_slab_drop() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -1, 2, -1, 1, 0);
+    apply_blocks(&mut map, &[(0, 1, 0, block_state(44, 0))]);
+    let world = WorldCollision::with_map(&map);
+
+    let initial = PlayerSimState {
+        pos: Vec3::new(0.5, 1.5, 0.5),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        sneak: true,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        ..Default::default()
+    };
+
+    let next = simulate_tick(&initial, &input, &world);
+    assert!(next.pos.x < 1.3, "sneak edge should clamp forward progress");
+    assert!(next.pos.y >= 1.49, "player should stay on the slab, y={}", next.pos.y);
+}
+
+#[test]
+fn mixed_step_up_stays_bounded() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -2, 8, -2, 2, 0);
+    apply_blocks(
+        &mut map,
+        &[
+            (1, 1, 0, block_state(44, 0)),
+            (2, 1, 0, block_state(67, 1)),
+            (3, 1, 0, block_state(85, 0)),
+        ],
+    );
+    let world = WorldCollision::with_map(&map);
+
+    let mut state = PlayerSimState {
+        pos: Vec3::new(0.2, 1.0, 0.5),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        sprint: true,
+        yaw: -std::f32::consts::FRAC_PI_2,
+        ..Default::default()
+    };
+
+    for _ in 0..20 {
+        state = simulate_tick(&state, &input, &world);
+        assert!(state.pos.is_finite());
+        assert!(state.vel.is_finite());
+    }
+    assert!(state.pos.x > 1.0, "expected progress into mixed obstacle run");
+    assert!(state.pos.y <= 2.1, "unexpected vertical pop: y={}", state.pos.y);
+}
+
+#[test]
+fn water_entry_and_surface_step_stay_stable() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -2, 2, -2, 2, 0);
+    for z in -1..=1 {
+        for x in -1..=1 {
+            map.apply_block_update(BlockUpdate {
+                x,
+                y: 1,
+                z,
+                block_id: block_state(9, 0),
+            });
+        }
+    }
+    let world = WorldCollision::with_map(&map);
+
+    let mut state = PlayerSimState {
+        pos: Vec3::new(0.0, 2.2, 0.0),
+        vel: Vec3::new(0.04, -0.08, 0.0),
+        on_ground: false,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+
+    for tick in 0..20 {
+        let mut input = InputState {
+            forward: 1.0,
+            jump: tick >= 8,
+            ..Default::default()
+        };
+        input.yaw = 0.0;
+        state = simulate_tick(&state, &input, &world);
+        assert!(state.pos.is_finite());
+        assert!(state.vel.is_finite());
+        assert!(state.pos.y < 3.5, "unexpected water pop at tick {tick}: y={}", state.pos.y);
+    }
+
+    assert!(state.pos.y > 1.0, "expected to remain near the water surface");
+    assert!(state.vel.y > -0.3, "unexpected vertical sink speed: {}", state.vel.y);
 }
 
 #[test]

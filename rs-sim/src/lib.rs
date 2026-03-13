@@ -78,6 +78,8 @@ pub struct VisualCorrectionOffset(pub Vec3);
 pub struct DebugStats {
     pub last_correction: f32,
     pub last_replay: u32,
+    pub last_velocity_correction: f32,
+    pub last_reconciled_server_tick: Option<u32>,
     pub smoothing_offset_len: f32,
     pub one_way_ticks: u32,
 }

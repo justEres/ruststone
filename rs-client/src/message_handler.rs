@@ -203,6 +203,7 @@ pub fn handle_messages(
                 {
                     net_events.push(NetEvent::ServerVelocity {
                         velocity: *velocity,
+                        recv_instant: Instant::now(),
                     });
                 }
                 remote_entity_events.push(event);

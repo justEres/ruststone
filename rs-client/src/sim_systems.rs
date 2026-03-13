@@ -15,6 +15,7 @@ use crate::sim::movement::{
     WorldCollision, debug_block_collision_boxes, effective_sprint, simulate_tick,
 };
 use crate::sim::predict::PredictionBuffer;
+use crate::sim::reconcile::reconcile;
 use crate::sim::{
     CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
     CurrentInput, DebugStats, DebugUiState, FreecamState, LocalArmSwing, MovementPacketState,
@@ -694,7 +695,7 @@ pub fn fixed_sim_tick_system(
     input_snapshot.sprint = sprinting_state;
 
     sim_render.previous = sim_state.current;
-    let mut next_state = if correction_guard.skip_physics_ticks > 0 {
+    let next_state = if correction_guard.skip_physics_ticks > 0 {
         correction_guard.skip_physics_ticks = correction_guard.skip_physics_ticks.saturating_sub(1);
         let mut state = sim_state.current;
         // During correction settle, pin once to the last authoritative server pose.
@@ -861,9 +862,12 @@ pub fn net_event_apply_system(
     mut correction_guard: ResMut<CorrectionLoopGuard>,
     mut move_pkt_state: ResMut<MovementPacketState>,
     mut sim_ready: ResMut<crate::sim::SimReady>,
+    collision_map: Res<WorldCollisionMap>,
+    sim_clock: Res<SimClock>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
+    let world = WorldCollision::with_map(&collision_map);
     for event in net_events.drain() {
         let (pos, yaw, pitch, on_ground, recv_instant) = match event {
             crate::net::events::NetEvent::ServerPosLook {
@@ -873,8 +877,50 @@ pub fn net_event_apply_system(
                 on_ground,
                 recv_instant,
             } => (pos, yaw, pitch, on_ground, recv_instant),
-            crate::net::events::NetEvent::ServerVelocity { velocity } => {
-                sim_state.current.vel = velocity;
+            crate::net::events::NetEvent::ServerVelocity {
+                velocity,
+                recv_instant,
+            } => {
+                if let Some(last_sent) = latency.last_sent {
+                    let rtt = recv_instant.saturating_duration_since(last_sent);
+                    let one_way = rtt.as_secs_f32() * 0.5;
+                    latency.one_way_ticks = (one_way / 0.05).round() as u32;
+                    debug.one_way_ticks = latency.one_way_ticks;
+                }
+
+                let latest_tick = sim_clock.tick.saturating_sub(1);
+                let server_tick = latest_tick.saturating_sub(latency.one_way_ticks);
+                let mut authoritative_state = history
+                    .0
+                    .get_by_tick(server_tick)
+                    .map(|frame| frame.state)
+                    .or_else(|| history.0.latest_frame().map(|frame| frame.state))
+                    .unwrap_or(sim_state.current);
+                authoritative_state.vel = velocity;
+
+                let previous_state = sim_state.current;
+                if let Some(result) = reconcile(
+                    &mut history.0,
+                    &world,
+                    server_tick,
+                    authoritative_state,
+                    latest_tick,
+                    &mut sim_state.current,
+                ) {
+                    sim_render.previous = previous_state;
+                    visual_offset.0 += previous_state.pos - sim_state.current.pos;
+                    debug.last_correction = result.correction.length();
+                    debug.last_replay = result.replayed_ticks;
+                    debug.last_velocity_correction = result.velocity_correction;
+                    debug.last_reconciled_server_tick = Some(server_tick);
+                } else {
+                    sim_state.current.vel = velocity;
+                    if let Some(frame) = history.0.latest_frame_mut() {
+                        frame.state = sim_state.current;
+                    }
+                    debug.last_velocity_correction = 0.0;
+                    debug.last_reconciled_server_tick = Some(server_tick);
+                }
                 continue;
             }
         };
@@ -917,21 +963,46 @@ pub fn net_event_apply_system(
         let ack_pitch_deg = resolved_pitch_deg;
         correction_guard.pending_ack = Some((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
-        // Server correction packets are authoritative; snap to them directly.
-        sim_render.previous = server_state;
-        sim_state.current = server_state;
-        history.0 = PredictionHistory::default().0;
-        visual_offset.0 = Vec3::ZERO;
+        let latest_tick = sim_clock.tick.saturating_sub(1);
+        let server_tick = latest_tick.saturating_sub(latency.one_way_ticks);
+        let previous_state = sim_state.current;
+        let reconcile_result = reconcile(
+            &mut history.0,
+            &world,
+            server_tick,
+            server_state,
+            latest_tick,
+            &mut sim_state.current,
+        );
+
+        if let Some(result) = reconcile_result {
+            if result.hard_teleport {
+                sim_render.previous = server_state;
+                sim_state.current = server_state;
+                history.0 = PredictionHistory::default().0;
+                visual_offset.0 = Vec3::ZERO;
+            } else {
+                sim_render.previous = previous_state;
+                visual_offset.0 += previous_state.pos - sim_state.current.pos;
+            }
+            debug.last_correction = result.correction.length();
+            debug.last_replay = result.replayed_ticks;
+            debug.last_velocity_correction = result.velocity_correction;
+            debug.last_reconciled_server_tick = Some(server_tick);
+        } else {
+            sim_render.previous = sim_state.current;
+            debug.last_correction = 0.0;
+            debug.last_replay = 0;
+            debug.last_velocity_correction = 0.0;
+            debug.last_reconciled_server_tick = Some(server_tick);
+        }
         sim_ready.0 = true;
         move_pkt_state.initialized = true;
-        move_pkt_state.last_pos = pos;
+        move_pkt_state.last_pos = sim_state.current.pos;
         move_pkt_state.last_yaw_deg = ack_yaw_deg;
         move_pkt_state.last_pitch_deg = ack_pitch_deg;
         move_pkt_state.ticks_since_pos = 0;
         correction_guard.skip_send_ticks = 0;
-
-        debug.last_correction = 0.0;
-        debug.last_replay = 0;
     }
     timings.net_apply_ms = timer.ms();
 }

@@ -33,6 +33,15 @@ impl PredictionBuffer {
         self.latest_tick
     }
 
+    pub fn latest_frame(&self) -> Option<&PredictedFrame> {
+        self.latest_tick.and_then(|tick| self.get_by_tick(tick))
+    }
+
+    pub fn latest_frame_mut(&mut self) -> Option<&mut PredictedFrame> {
+        let tick = self.latest_tick?;
+        self.get_by_tick_mut(tick)
+    }
+
     pub fn push(&mut self, frame: PredictedFrame) {
         let idx = (frame.tick as usize) % self.capacity;
         self.frames[idx] = frame;
