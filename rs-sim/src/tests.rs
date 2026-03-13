@@ -132,6 +132,37 @@ fn sprint_requires_strong_forward_input() {
 }
 
 #[test]
+fn sprint_jump_takeoff_matches_vanilla_reference() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, -1, 1, -1, 1, 0);
+    let world = WorldCollision::with_map(&map);
+    let prev = PlayerSimState {
+        pos: Vec3::new(0.0, 1.0, 0.0),
+        vel: Vec3::ZERO,
+        on_ground: true,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        jump: true,
+        sprint: true,
+        yaw: 0.0,
+        ..Default::default()
+    };
+
+    let next = simulate_tick(&prev, &input, &world);
+
+    // Vanilla 1.8.9 reference from EntityLivingBase#jump and moveEntityWithHeading:
+    // jump impulse 0.42, sprint kick 0.2, ground accel 0.13, then gravity/drag/friction.
+    assert!((next.pos.z + 0.33).abs() < 1e-4, "pos.z={}", next.pos.z);
+    assert!((next.vel.y - 0.3332).abs() < 1e-4, "vel.y={}", next.vel.y);
+    assert!((next.vel.z + 0.18018).abs() < 1e-4, "vel.z={}", next.vel.z);
+}
+
+#[test]
 fn airborne_sprint_acceleration_is_higher_than_walk() {
     let mut map = WorldCollisionMap::default();
     lay_floor(&mut map, -1, 1, -1, 1, 0);

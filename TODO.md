@@ -4,6 +4,7 @@
 - ✅ metadata stuff -> hovering over items in inventory and showing tooltips
 - ✅ better logging -> more info and more warnings using tracing
 
+- ✅ F1 key for toggling ui rendering -> skip egui layer if enabled
 
 - Bugfixes:
     - ✅ block outline for water -> should not be there

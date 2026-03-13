@@ -23,7 +23,6 @@ const SLIPPERINESS_DEFAULT: f32 = 0.6;
 const SLIPPERINESS_ICE: f32 = 0.98;
 const SLIPPERINESS_SLIME: f32 = 0.8;
 const SNEAK_EDGE_STEP: f32 = 0.05;
-const MOVE_INPUT_DAMPING: f32 = 0.98;
 const SNEAK_INPUT_SCALE: f32 = 0.3;
 const FLY_VERTICAL_ACCEL_MULT: f32 = 3.0;
 const FLY_HORIZONTAL_DAMPING: f32 = 0.91;
@@ -1296,11 +1295,7 @@ pub fn simulate_tick(
         let fly_speed = input.flying_speed.max(0.0);
         let fly_move_speed = fly_speed * if sprinting { FLY_SPRINT_MULT } else { 1.0 };
 
-        let mut wish = Vec3::new(
-            input.strafe * MOVE_INPUT_DAMPING,
-            0.0,
-            input.forward * MOVE_INPUT_DAMPING,
-        );
+        let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
@@ -1343,11 +1338,7 @@ pub fn simulate_tick(
         }
     }
 
-    let mut wish = Vec3::new(
-        input.strafe * MOVE_INPUT_DAMPING,
-        0.0,
-        input.forward * MOVE_INPUT_DAMPING,
-    );
+    let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
     if wish.length_squared() > 1.0 {
         wish = wish.normalize();
     }
@@ -1359,7 +1350,7 @@ pub fn simulate_tick(
     let move_speed =
         BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
 
-    let mut f4 = if on_ground_for_move {
+    let f4 = if on_ground_for_move {
         world.ground_slipperiness(state.pos) * 0.91
     } else {
         0.91
@@ -1426,11 +1417,6 @@ pub fn simulate_tick(
     } else {
         state.vel.y += GRAVITY;
         state.vel.y *= AIR_DRAG;
-        f4 = if state.on_ground {
-            world.ground_slipperiness(state.pos) * 0.91
-        } else {
-            0.91
-        };
         state.vel.x *= f4;
         state.vel.z *= f4;
     }

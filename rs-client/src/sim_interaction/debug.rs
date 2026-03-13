@@ -266,13 +266,14 @@ pub fn debug_overlay_system(
     render_perf: Res<RenderPerfStats>,
     sim_state: Res<SimState>,
     input: Res<CurrentInput>,
+    ui_state: Res<UiState>,
     player_status: Res<rs_utils::PlayerStatus>,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
-    if !debug_ui.open {
+    if !debug_ui.open || ui_state.ui_hidden {
         timings.debug_ui_ms = 0.0;
         return;
     }

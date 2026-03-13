@@ -77,7 +77,6 @@ fn connect_ui(
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
-    let ctx = contexts.ctx_mut().unwrap();
 
     for ev in window_events.read() {
         if ev.focused {
@@ -107,6 +106,24 @@ fn connect_ui(
         }
         state.options_loaded = true;
     }
+
+    if keys.just_pressed(KeyCode::F1) {
+        ui_state.ui_hidden = !ui_state.ui_hidden;
+        if ui_state.ui_hidden {
+            ui_state.chat_open = false;
+            ui_state.inventory_open = false;
+            ui_state.paused = false;
+            state.debug_items_open = false;
+            chat_autocomplete.clear();
+        }
+    }
+
+    if ui_state.ui_hidden {
+        timings.ui_ms = start.elapsed().as_secs_f32() * 1000.0;
+        return;
+    }
+
+    let ctx = contexts.ctx_mut().unwrap();
 
     if matches!(app_state.0, ApplicationState::Connected)
         && inventory_state

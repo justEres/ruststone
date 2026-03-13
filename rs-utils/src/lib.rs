@@ -64,6 +64,7 @@ pub struct UiState {
     pub chat_open: bool,
     pub paused: bool,
     pub inventory_open: bool,
+    pub ui_hidden: bool,
 }
 
 #[derive(Clone)]

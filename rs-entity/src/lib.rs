@@ -25,7 +25,7 @@ use rs_render::{
 };
 use rs_utils::{
     AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
-    NetEntityMessage, PlayerSkinModel,
+    NetEntityMessage, PlayerSkinModel, UiState,
 };
 use tracing::{info, warn};
 
@@ -1032,10 +1032,15 @@ pub fn draw_remote_entity_names(
         With<RemoteEntity>,
     >,
     collision_map: Res<WorldCollisionMap>,
+    ui_state: Res<UiState>,
 ) {
     const NON_PLAYER_NAME_MAX_DISTANCE: f32 = 5.0;
     const PLAYER_NAME_ALPHA: u8 = 210;
     const NON_PLAYER_NAME_ALPHA: u8 = 120;
+
+    if ui_state.ui_hidden {
+        return;
+    }
 
     let Ok((camera, camera_transform)) = camera_query.get_single() else {
         return;
