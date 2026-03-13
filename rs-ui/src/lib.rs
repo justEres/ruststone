@@ -29,6 +29,331 @@ const INVENTORY_SLOT_SPACING: f32 = 4.0;
 const DEFAULT_OPTIONS_PATH: &str = "ruststone_options.toml";
 const DEBUG_ITEM_CELL: f32 = 52.0;
 
+#[derive(Clone, Copy)]
+enum OptionSearchTarget {
+    General,
+    Lighting,
+    Water,
+    Diagnostics,
+    System,
+    Visual,
+}
+
+#[derive(Clone, Copy)]
+struct OptionSearchEntry {
+    label: &'static str,
+    target: OptionSearchTarget,
+    aliases: &'static [&'static str],
+}
+
+const OPTION_SEARCH_ENTRIES: &[OptionSearchEntry] = &[
+    OptionSearchEntry {
+        label: "FOV",
+        target: OptionSearchTarget::General,
+        aliases: &["field of view"],
+    },
+    OptionSearchEntry {
+        label: "Render Distance",
+        target: OptionSearchTarget::General,
+        aliases: &["chunks", "distance"],
+    },
+    OptionSearchEntry {
+        label: "Anti-aliasing",
+        target: OptionSearchTarget::General,
+        aliases: &["aa", "msaa"],
+    },
+    OptionSearchEntry {
+        label: "Occlusion cull",
+        target: OptionSearchTarget::General,
+        aliases: &["occlusion", "culling"],
+    },
+    OptionSearchEntry {
+        label: "Anchor occlusion to player",
+        target: OptionSearchTarget::General,
+        aliases: &["occlusion anchor"],
+    },
+    OptionSearchEntry {
+        label: "Cull guard radius (chunks)",
+        target: OptionSearchTarget::General,
+        aliases: &["cull guard"],
+    },
+    OptionSearchEntry {
+        label: "Binary greedy meshing",
+        target: OptionSearchTarget::General,
+        aliases: &["greedy meshing", "meshing"],
+    },
+    OptionSearchEntry {
+        label: "Wireframe",
+        target: OptionSearchTarget::General,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Barriers as billboard sprites",
+        target: OptionSearchTarget::General,
+        aliases: &["barriers", "billboard"],
+    },
+    OptionSearchEntry {
+        label: "Render held items",
+        target: OptionSearchTarget::General,
+        aliases: &["held items"],
+    },
+    OptionSearchEntry {
+        label: "Render first-person arms",
+        target: OptionSearchTarget::General,
+        aliases: &["arms", "first person"],
+    },
+    OptionSearchEntry {
+        label: "Render self model",
+        target: OptionSearchTarget::General,
+        aliases: &["self model"],
+    },
+    OptionSearchEntry {
+        label: "VSync",
+        target: OptionSearchTarget::General,
+        aliases: &["vsync", "vertical sync"],
+    },
+    OptionSearchEntry {
+        label: "PBR terrain path",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["pbr"],
+    },
+    OptionSearchEntry {
+        label: "Shadows",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["shadow"],
+    },
+    OptionSearchEntry {
+        label: "Shader quality mode",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["shader quality"],
+    },
+    OptionSearchEntry {
+        label: "Shadow distance",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Shadow map size",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["shadow resolution"],
+    },
+    OptionSearchEntry {
+        label: "Shadow cascades",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Shadow max distance",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Sun azimuth",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["sun angle"],
+    },
+    OptionSearchEntry {
+        label: "Sun elevation",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Sun strength",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Sun warmth",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Shadow opacity",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Player shadow opacity",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Ambient strength",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["ambient"],
+    },
+    OptionSearchEntry {
+        label: "Voxel AO",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["ambient occlusion", "ao"],
+    },
+    OptionSearchEntry {
+        label: "Voxel AO on cutout blocks",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["cutout ao"],
+    },
+    OptionSearchEntry {
+        label: "Voxel AO strength",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["ao strength"],
+    },
+    OptionSearchEntry {
+        label: "Fog enabled",
+        target: OptionSearchTarget::Lighting,
+        aliases: &["fog"],
+    },
+    OptionSearchEntry {
+        label: "Fog intensity",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Fog density",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Fog start",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Fog end",
+        target: OptionSearchTarget::Lighting,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Water reflections",
+        target: OptionSearchTarget::Water,
+        aliases: &["water reflection"],
+    },
+    OptionSearchEntry {
+        label: "Water reflection strength",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Near reflection boost",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Blue reflection tint",
+        target: OptionSearchTarget::Water,
+        aliases: &["water tint"],
+    },
+    OptionSearchEntry {
+        label: "Blue tint strength",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Water wave strength",
+        target: OptionSearchTarget::Water,
+        aliases: &["waves"],
+    },
+    OptionSearchEntry {
+        label: "Water wave speed",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Water detail wave strength",
+        target: OptionSearchTarget::Water,
+        aliases: &["detail waves"],
+    },
+    OptionSearchEntry {
+        label: "Water detail wave scale",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Water detail wave speed",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Reflection edge fade",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Reflection sky fallback",
+        target: OptionSearchTarget::Water,
+        aliases: &["sky fallback"],
+    },
+    OptionSearchEntry {
+        label: "SSR reflections",
+        target: OptionSearchTarget::Water,
+        aliases: &["screen space reflections", "ssr"],
+    },
+    OptionSearchEntry {
+        label: "SSR ray steps",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "SSR hit thickness",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "SSR max distance",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "SSR step stride",
+        target: OptionSearchTarget::Water,
+        aliases: &[],
+    },
+    OptionSearchEntry {
+        label: "Shader debug view",
+        target: OptionSearchTarget::Diagnostics,
+        aliases: &["debug view"],
+    },
+    OptionSearchEntry {
+        label: "Frustum FOV debug",
+        target: OptionSearchTarget::Diagnostics,
+        aliases: &["frustum debug"],
+    },
+    OptionSearchEntry {
+        label: "Frustum FOV",
+        target: OptionSearchTarget::Diagnostics,
+        aliases: &["frustum"],
+    },
+    OptionSearchEntry {
+        label: "Show chunk borders",
+        target: OptionSearchTarget::Diagnostics,
+        aliases: &["chunk borders"],
+    },
+    OptionSearchEntry {
+        label: "Options file",
+        target: OptionSearchTarget::System,
+        aliases: &["config", "settings file"],
+    },
+    OptionSearchEntry {
+        label: "Saturation",
+        target: OptionSearchTarget::Visual,
+        aliases: &["color saturation"],
+    },
+    OptionSearchEntry {
+        label: "Contrast",
+        target: OptionSearchTarget::Visual,
+        aliases: &["color contrast"],
+    },
+    OptionSearchEntry {
+        label: "Brightness",
+        target: OptionSearchTarget::Visual,
+        aliases: &["color brightness"],
+    },
+    OptionSearchEntry {
+        label: "Gamma",
+        target: OptionSearchTarget::Visual,
+        aliases: &[],
+    },
+];
+
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
@@ -56,6 +381,27 @@ impl ChatAutocompleteState {
         self.selected = 0;
         self.pending_query = None;
     }
+}
+
+fn option_matches_query(entry: &OptionSearchEntry, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let query = query.to_ascii_lowercase();
+    entry.label.to_ascii_lowercase().contains(&query)
+        || entry
+            .aliases
+            .iter()
+            .any(|alias| alias.to_ascii_lowercase().contains(&query))
+}
+
+fn activate_option_search_result(state: &mut ConnectUiState, target: OptionSearchTarget) {
+    state.options_section_general = matches!(target, OptionSearchTarget::General);
+    state.options_section_lighting = matches!(target, OptionSearchTarget::Lighting);
+    state.options_section_water = matches!(target, OptionSearchTarget::Water);
+    state.options_section_diagnostics = matches!(target, OptionSearchTarget::Diagnostics);
+    state.options_section_system = matches!(target, OptionSearchTarget::System);
+    state.visual_settings_open = matches!(target, OptionSearchTarget::Visual);
 }
 
 fn connect_ui(
@@ -494,6 +840,41 @@ fn connect_ui(
                 let mut options_changed = false;
                 ui.heading("Game Paused");
                 ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Search");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut state.options_search)
+                            .hint_text("Search options"),
+                    );
+                    state.options_search_focused = response.has_focus();
+                    if ui.button("Clear").clicked() {
+                        state.options_search.clear();
+                    }
+                });
+                let options_search = state.options_search.trim().to_ascii_lowercase();
+                if state.options_search_focused || !options_search.is_empty() {
+                    let matches: Vec<OptionSearchEntry> = OPTION_SEARCH_ENTRIES
+                        .iter()
+                        .copied()
+                        .filter(|entry| option_matches_query(entry, &options_search))
+                        .collect();
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.label(format!("Options ({})", matches.len()));
+                        ui.add_space(4.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for entry in matches {
+                                    if ui.button(entry.label).clicked() {
+                                        activate_option_search_result(&mut state, entry.target);
+                                        state.options_search.clear();
+                                        state.options_search_focused = false;
+                                    }
+                                }
+                            });
+                    });
+                    ui.add_space(8.0);
+                }
                 let general_section = egui::CollapsingHeader::new("General")
                     .default_open(state.options_section_general)
                     .show(ui, |ui| {
@@ -918,6 +1299,7 @@ fn connect_ui(
                         options_changed |= ui
                             .checkbox(&mut render_debug.show_chunk_borders, "Show chunk borders")
                             .changed();
+                        ui.label("Entity hitboxes toggle: H");
                         ui.add_space(8.0);
                         if ui.button("Force remesh chunks").clicked() {
                             render_debug.force_remesh = true;
@@ -1208,6 +1590,8 @@ pub struct ConnectUiState {
     pub options_path: String,
     pub options_status: String,
     pub visual_settings_open: bool,
+    pub options_search: String,
+    pub options_search_focused: bool,
     pub options_section_general: bool,
     pub options_section_lighting: bool,
     pub options_section_water: bool,
@@ -1234,6 +1618,8 @@ impl Default for ConnectUiState {
             options_path: DEFAULT_OPTIONS_PATH.to_string(),
             options_status: String::new(),
             visual_settings_open: false,
+            options_search: String::new(),
+            options_search_focused: false,
             options_section_general: false,
             options_section_lighting: false,
             options_section_water: false,
@@ -2542,9 +2928,9 @@ fn handle_chat_tab_complete(
     if chat_autocomplete.suggestions.is_empty() {
         let query = chat.1.clone();
         if chat_autocomplete.pending_query.as_deref() != Some(query.as_str()) {
-            let _ = to_net
-                .0
-                .send(ToNetMessage::TabCompleteRequest { text: query.clone() });
+            let _ = to_net.0.send(ToNetMessage::TabCompleteRequest {
+                text: query.clone(),
+            });
             chat_autocomplete.pending_query = Some(query);
         }
         return;

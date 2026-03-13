@@ -7,7 +7,6 @@ pub mod model;
 mod player_mesh;
 mod specs;
 
-use rs_sim::collision::{WorldCollisionMap, is_solid};
 use bevy::color::LinearRgba;
 use bevy::ecs::system::SystemParam;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -23,6 +22,7 @@ use rs_render::{
     CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
     LOCAL_PLAYER_RENDER_LAYER, MAIN_RENDER_LAYER, PlayerCamera,
 };
+use rs_sim::collision::{WorldCollisionMap, is_solid};
 use rs_utils::{
     AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
     NetEntityMessage, PlayerSkinModel, UiState,
@@ -37,21 +37,22 @@ use crate::model::{
     SHEEP_MODEL_TEX32, SHEEP_WOOL_MODEL_TEX32, part_mesh, spawn_model,
 };
 
+use crate::entity_anim_spawn::*;
 pub use crate::entity_anim_spawn::{
     animate_remote_biped_models, animate_remote_player_models, animate_remote_quadruped_models,
     rebuild_remote_player_meshes_on_texture_debug_change,
 };
-use crate::entity_anim_spawn::*;
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
 use crate::player_mesh::*;
 use crate::specs::{
-    BipedModelKind, QuadrupedModelKind, VisualMesh, kind_label, mob_biped_model_kind,
-    mob_model_scale, mob_quadruped_anim_tuning, mob_quadruped_model_kind, mob_texture_path,
-    mob_uses_biped_model, mob_uses_entity_model, mob_uses_quadruped_model, visual_spec,
+    BipedModelKind, DROPPED_ITEM_RENDER_SCALE, DROPPED_ITEM_RENDER_Y_OFFSET, QuadrupedModelKind,
+    VisualMesh, kind_label, mob_biped_model_kind, mob_model_scale, mob_quadruped_anim_tuning,
+    mob_quadruped_model_kind, mob_texture_path, mob_uses_biped_model, mob_uses_entity_model,
+    mob_uses_quadruped_model, visual_spec,
 };
-use rs_sim::{CameraPerspectiveMode, CameraPerspectiveState, FreecamState, LocalArmSwing};
 use rs_render::RenderDebugSettings;
 use rs_render::{LookAngles, Player};
+use rs_sim::{CameraPerspectiveMode, CameraPerspectiveState, FreecamState, LocalArmSwing};
 use rs_ui::ConnectUiState;
 
 const SHEEP_WOOL_TEXTURE_PATH: &str = "entity/sheep/sheep_fur.png";
@@ -355,7 +356,7 @@ const DROPPED_ITEM_DRAG_GROUND: f32 = 0.58;
 const DROPPED_ITEM_RESTITUTION: f32 = 0.12;
 const DROPPED_ITEM_EXTRAPOLATE_MAX: f32 = 0.12;
 const DROPPED_ITEM_COLLISION_RADIUS: f32 = 0.125;
-const DROPPED_ITEM_COLLISION_HEIGHT_OFFSET: f32 = 0.17;
+const DROPPED_ITEM_COLLISION_HEIGHT_OFFSET: f32 = DROPPED_ITEM_RENDER_Y_OFFSET;
 const DROPPED_ITEM_COLLECT_DURATION: f32 = 0.14;
 const DROPPED_ITEM_FALLBACK_COLLECT_HEIGHT: f32 = 0.6;
 
@@ -554,9 +555,10 @@ pub fn apply_remote_entity_events(
                 let root = spawn_cmd.id();
 
                 if kind == NetEntityKind::Player {
-                    commands
-                        .entity(root)
-                        .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
+                    commands.entity(root).insert(RemoteMotionSmoothing::new(
+                        pos + Vec3::Y * visual.y_offset,
+                        now_secs,
+                    ));
                     let (parts, material_handles) = spawn_remote_player_model(
                         &mut commands,
                         &mut meshes,
@@ -605,9 +607,10 @@ pub fn apply_remote_entity_events(
                             Visibility::Hidden,
                         ));
                     } else if let Some(mob) = biped_mob {
-                        commands
-                            .entity(root)
-                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
+                        commands.entity(root).insert(RemoteMotionSmoothing::new(
+                            pos + Vec3::Y * visual.y_offset,
+                            now_secs,
+                        ));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `biped_mob` is gated above.
                             continue;
@@ -651,9 +654,10 @@ pub fn apply_remote_entity_events(
                             },
                         ));
                     } else if let Some(mob) = quadruped_mob {
-                        commands
-                            .entity(root)
-                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
+                        commands.entity(root).insert(RemoteMotionSmoothing::new(
+                            pos + Vec3::Y * visual.y_offset,
+                            now_secs,
+                        ));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `quadruped_mob` is gated above.
                             continue;
@@ -726,9 +730,10 @@ pub fn apply_remote_entity_events(
                             ));
                         }
                     } else {
-                        commands
-                            .entity(root)
-                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
+                        commands.entity(root).insert(RemoteMotionSmoothing::new(
+                            pos + Vec3::Y * visual.y_offset,
+                            now_secs,
+                        ));
                         let mesh = meshes.add(match spec.mesh {
                             VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
                             VisualMesh::Sphere => Mesh::from(Sphere::default()),
@@ -884,14 +889,15 @@ pub fn apply_remote_entity_events(
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
                     if let Ok((mut remote_entity, mut look)) = params.entity_query.get_mut(entity) {
                         let target = pos
-                            + Vec3::Y
-                                * params
-                                    .visual_query
-                                    .get(entity)
-                                    .map_or(0.0, |v| v.y_offset);
+                            + Vec3::Y * params.visual_query.get(entity).map_or(0.0, |v| v.y_offset);
                         if let Ok(mut item_motion) = params.item_motion_query.get_mut(entity) {
                             let previous = item_motion.authoritative_translation;
-                            update_item_motion_velocity(&mut item_motion, previous, target, now_secs);
+                            update_item_motion_velocity(
+                                &mut item_motion,
+                                previous,
+                                target,
+                                now_secs,
+                            );
                             if let Ok(mut transform) = params.transform_query.get_mut(entity)
                                 && transform.translation.distance_squared(target) > 64.0
                             {
@@ -1136,7 +1142,11 @@ fn clamp_item_translation(
         }
     }
 
-    let below = Vec3::new(next.x, next.y - DROPPED_ITEM_COLLISION_HEIGHT_OFFSET - 0.02, next.z);
+    let below = Vec3::new(
+        next.x,
+        next.y - DROPPED_ITEM_COLLISION_HEIGHT_OFFSET - 0.02,
+        next.z,
+    );
     if let Some(cell) = sample_solid_block(world, below) {
         let top = cell.y as f32 + 1.0 + DROPPED_ITEM_COLLISION_HEIGHT_OFFSET;
         if next.y <= top + 0.08 && velocity.y <= 0.0 {
@@ -1156,7 +1166,8 @@ fn advance_item_motion(
 ) -> (Vec3, Vec3, bool) {
     let mut pos = motion.authoritative_translation;
     let mut vel = motion.estimated_velocity;
-    let age = ((now_secs - motion.last_server_update_secs) as f32).clamp(0.0, DROPPED_ITEM_EXTRAPOLATE_MAX);
+    let age = ((now_secs - motion.last_server_update_secs) as f32)
+        .clamp(0.0, DROPPED_ITEM_EXTRAPOLATE_MAX);
     if age <= 0.0 {
         return (motion.render_translation, vel, motion.ground_contact);
     }
@@ -1257,7 +1268,7 @@ pub fn smooth_remote_item_entities(
                 .unwrap_or(transform.translation + Vec3::Y * DROPPED_ITEM_FALLBACK_COLLECT_HEIGHT);
             let alpha = (collect.progress_secs / DROPPED_ITEM_COLLECT_DURATION).clamp(0.0, 1.0);
             transform.translation = transform.translation.lerp(target, alpha);
-            transform.scale = Vec3::splat(0.17 * (1.0 - alpha * 0.75));
+            transform.scale = Vec3::splat(DROPPED_ITEM_RENDER_SCALE * (1.0 - alpha * 0.75));
             motion.render_translation = transform.translation;
             if alpha >= 1.0 {
                 debug!(
@@ -1285,7 +1296,7 @@ pub fn smooth_remote_item_entities(
         motion.estimated_velocity = predicted_vel;
         motion.ground_contact = grounded;
         transform.translation = motion.render_translation;
-        transform.scale = Vec3::splat(0.17);
+        transform.scale = Vec3::splat(DROPPED_ITEM_RENDER_SCALE);
     }
 }
 

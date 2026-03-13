@@ -11,8 +11,11 @@ const MOB_SCALE: Vec3 = Vec3::new(0.55, 0.9, 0.55);
 const MOB_Y_OFFSET: f32 = 0.9;
 const MOB_NAME_Y_OFFSET: f32 = 1.35;
 
-const ITEM_SCALE: Vec3 = Vec3::splat(0.17);
-const ITEM_Y_OFFSET: f32 = 0.17;
+pub(crate) const DROPPED_ITEM_RENDER_SCALE: f32 = 0.25;
+pub(crate) const DROPPED_ITEM_RENDER_Y_OFFSET: f32 = 0.25;
+
+const ITEM_SCALE: Vec3 = Vec3::splat(DROPPED_ITEM_RENDER_SCALE);
+const ITEM_Y_OFFSET: f32 = DROPPED_ITEM_RENDER_Y_OFFSET;
 const ITEM_NAME_Y_OFFSET: f32 = 0.5;
 
 const ORB_SCALE: Vec3 = Vec3::splat(0.14);
@@ -89,7 +92,10 @@ const MOB_SPECS: &[MobSpec] = &[
         scale: Vec3::ONE,
         name_y_offset: 1.8,
         texture_path: Some("entity/creeper/creeper.png"),
-        quadruped_tuning: RemoteQuadrupedAnimTuning { body_pitch: 0.0, leg_swing_scale: 0.95 },
+        quadruped_tuning: RemoteQuadrupedAnimTuning {
+            body_pitch: 0.0,
+            leg_swing_scale: 0.95,
+        },
         biped_model: BipedModelKind::Tex32,
         quadruped_model: QuadrupedModelKind::CreeperTex64,
     },
@@ -508,26 +514,106 @@ const MOB_SPECS: &[MobSpec] = &[
 ];
 
 const OBJECT_SPECS: &[ObjectSpec] = &[
-    ObjectSpec { kind: ObjectKind::Boat, label: "Boat", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::Minecart, label: "Minecart", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::Arrow, label: "Arrow", color: [0.72, 0.72, 0.72] },
-    ObjectSpec { kind: ObjectKind::Snowball, label: "Snowball", color: [0.72, 0.72, 0.72] },
-    ObjectSpec { kind: ObjectKind::ItemFrame, label: "Item Frame", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::LeashKnot, label: "Leash Knot", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::EnderPearl, label: "Ender Pearl", color: [0.72, 0.72, 0.72] },
-    ObjectSpec { kind: ObjectKind::EnderEye, label: "Ender Eye", color: [0.72, 0.72, 0.72] },
-    ObjectSpec { kind: ObjectKind::Firework, label: "Firework", color: [0.45, 0.74, 0.88] },
-    ObjectSpec { kind: ObjectKind::LargeFireball, label: "Fireball", color: [0.90, 0.25, 0.18] },
-    ObjectSpec { kind: ObjectKind::SmallFireball, label: "Small Fireball", color: [0.90, 0.25, 0.18] },
-    ObjectSpec { kind: ObjectKind::WitherSkull, label: "Wither Skull", color: [0.90, 0.25, 0.18] },
-    ObjectSpec { kind: ObjectKind::Egg, label: "Egg", color: [0.72, 0.72, 0.72] },
-    ObjectSpec { kind: ObjectKind::SplashPotion, label: "Splash Potion", color: [0.45, 0.74, 0.88] },
-    ObjectSpec { kind: ObjectKind::ExpBottle, label: "XP Bottle", color: [0.45, 0.74, 0.88] },
-    ObjectSpec { kind: ObjectKind::FishingHook, label: "Fishing Hook", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::PrimedTnt, label: "Primed TNT", color: [0.90, 0.25, 0.18] },
-    ObjectSpec { kind: ObjectKind::ArmorStand, label: "Armor Stand", color: [0.72, 0.56, 0.35] },
-    ObjectSpec { kind: ObjectKind::EndCrystal, label: "End Crystal", color: [0.45, 0.74, 0.88] },
-    ObjectSpec { kind: ObjectKind::FallingBlock, label: "Falling Block", color: [0.45, 0.74, 0.88] },
+    ObjectSpec {
+        kind: ObjectKind::Boat,
+        label: "Boat",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::Minecart,
+        label: "Minecart",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::Arrow,
+        label: "Arrow",
+        color: [0.72, 0.72, 0.72],
+    },
+    ObjectSpec {
+        kind: ObjectKind::Snowball,
+        label: "Snowball",
+        color: [0.72, 0.72, 0.72],
+    },
+    ObjectSpec {
+        kind: ObjectKind::ItemFrame,
+        label: "Item Frame",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::LeashKnot,
+        label: "Leash Knot",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::EnderPearl,
+        label: "Ender Pearl",
+        color: [0.72, 0.72, 0.72],
+    },
+    ObjectSpec {
+        kind: ObjectKind::EnderEye,
+        label: "Ender Eye",
+        color: [0.72, 0.72, 0.72],
+    },
+    ObjectSpec {
+        kind: ObjectKind::Firework,
+        label: "Firework",
+        color: [0.45, 0.74, 0.88],
+    },
+    ObjectSpec {
+        kind: ObjectKind::LargeFireball,
+        label: "Fireball",
+        color: [0.90, 0.25, 0.18],
+    },
+    ObjectSpec {
+        kind: ObjectKind::SmallFireball,
+        label: "Small Fireball",
+        color: [0.90, 0.25, 0.18],
+    },
+    ObjectSpec {
+        kind: ObjectKind::WitherSkull,
+        label: "Wither Skull",
+        color: [0.90, 0.25, 0.18],
+    },
+    ObjectSpec {
+        kind: ObjectKind::Egg,
+        label: "Egg",
+        color: [0.72, 0.72, 0.72],
+    },
+    ObjectSpec {
+        kind: ObjectKind::SplashPotion,
+        label: "Splash Potion",
+        color: [0.45, 0.74, 0.88],
+    },
+    ObjectSpec {
+        kind: ObjectKind::ExpBottle,
+        label: "XP Bottle",
+        color: [0.45, 0.74, 0.88],
+    },
+    ObjectSpec {
+        kind: ObjectKind::FishingHook,
+        label: "Fishing Hook",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::PrimedTnt,
+        label: "Primed TNT",
+        color: [0.90, 0.25, 0.18],
+    },
+    ObjectSpec {
+        kind: ObjectKind::ArmorStand,
+        label: "Armor Stand",
+        color: [0.72, 0.56, 0.35],
+    },
+    ObjectSpec {
+        kind: ObjectKind::EndCrystal,
+        label: "End Crystal",
+        color: [0.45, 0.74, 0.88],
+    },
+    ObjectSpec {
+        kind: ObjectKind::FallingBlock,
+        label: "Falling Block",
+        color: [0.45, 0.74, 0.88],
+    },
 ];
 
 fn mob_spec(kind: MobKind) -> Option<&'static MobSpec> {
@@ -554,7 +640,11 @@ pub(crate) fn visual_spec(kind: NetEntityKind) -> VisualSpec {
             } else {
                 MOB_SCALE
             },
-            y_offset: if mob_uses_entity_model(mob) { 0.0 } else { MOB_Y_OFFSET },
+            y_offset: if mob_uses_entity_model(mob) {
+                0.0
+            } else {
+                MOB_Y_OFFSET
+            },
             name_y_offset: if mob_uses_entity_model(mob) {
                 mob_model_name_y_offset(mob)
             } else {
