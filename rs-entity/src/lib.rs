@@ -109,6 +109,7 @@ pub struct RemoteEntityApplyParams<'w, 's> {
     transform_query: Query<'w, 's, &'static mut Transform>,
     smoothing_query: Query<'w, 's, &'static mut RemoteMotionSmoothing>,
     item_motion_query: Query<'w, 's, &'static mut RemoteDroppedItemMotion>,
+    item_stack_query: Query<'w, 's, &'static RemoteItemStackState>,
     entity_query: Query<'w, 's, (&'static mut RemoteEntity, &'static mut RemoteEntityLook)>,
     player_anim_query: Query<'w, 's, &'static mut RemotePlayerAnimation>,
     biped_anim_query: Query<'w, 's, &'static mut RemoteBipedAnimation>,
@@ -800,9 +801,16 @@ pub fn apply_remote_entity_events(
                     None => {
                         debug!(entity_id, "dropped item metadata cleared stack");
                         if let Ok(mut commands_entity) = commands.get_entity(entity) {
-                            commands_entity.remove::<RemoteItemStackState>();
-                            commands_entity.remove::<ItemSpriteStack>();
-                            commands_entity.insert(Visibility::Hidden);
+                            if params.item_stack_query.get(entity).is_ok() {
+                                debug!(
+                                    entity_id,
+                                    "keeping last resolved dropped item stack until destroy"
+                                );
+                            } else {
+                                commands_entity.remove::<RemoteItemStackState>();
+                                commands_entity.remove::<ItemSpriteStack>();
+                                commands_entity.insert(Visibility::Hidden);
+                            }
                         }
                     }
                 }
