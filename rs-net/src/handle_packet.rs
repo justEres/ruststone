@@ -276,6 +276,14 @@ pub fn handle_packet(
         }
         Packet::EntityProperties(_ep) => {}
         Packet::SpawnObject_i32_NoUUID(so) => {
+            if object_type_to_kind(so.ty) == NetEntityKind::Item {
+                debug!(
+                    entity_id = so.entity_id.0,
+                    data = so.data,
+                    pos = ?(so.x, so.y, so.z),
+                    "spawned dropped item object before metadata"
+                );
+            }
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
                 entity_id: so.entity_id.0,
                 uuid: None,
@@ -291,6 +299,14 @@ pub fn handle_packet(
             }));
         }
         Packet::SpawnObject_i32(so) => {
+            if object_type_to_kind(so.ty) == NetEntityKind::Item {
+                debug!(
+                    entity_id = so.entity_id.0,
+                    data = so.data,
+                    pos = ?(so.x, so.y, so.z),
+                    "spawned dropped item object before metadata"
+                );
+            }
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::Spawn {
                 entity_id: so.entity_id.0,
                 uuid: Some(so.uuid),
@@ -917,6 +933,14 @@ fn handle_entity_metadata(
 
     if let Some(MetadataValue::OptionalItemStack(stack_opt)) = metadata.get_raw(10) {
         let stack_converted = protocol_stack_to_inventory_item(stack_opt.clone());
+        debug!(
+            entity_id,
+            has_stack = stack_converted.is_some(),
+            item_id = stack_converted.as_ref().map(|s| s.item_id),
+            damage = stack_converted.as_ref().map(|s| s.damage),
+            count = stack_converted.as_ref().map(|s| s.count),
+            "entity metadata updated item stack slot"
+        );
 
         let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SetItemStack {
             entity_id,

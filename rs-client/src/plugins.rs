@@ -147,6 +147,9 @@ impl Plugin for ClientEntityPlugin {
                 entities::apply_remote_player_skins.after(entities::remote_skin_download_tick),
                 entities::rebuild_remote_player_meshes_on_texture_debug_change
                     .after(entities::apply_remote_player_skins),
+                entities::smooth_remote_item_entities
+                    .after(entities::apply_remote_entity_events)
+                    .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
                 entities::smooth_remote_entity_motion
                     .after(entities::apply_remote_entity_events)
                     .after(entities::rebuild_remote_player_meshes_on_texture_debug_change),
@@ -154,7 +157,7 @@ impl Plugin for ClientEntityPlugin {
                 entities::animate_remote_biped_models.after(entities::smooth_remote_entity_motion),
                 entities::animate_remote_quadruped_models
                     .after(entities::smooth_remote_entity_motion),
-                entities::billboard_item_sprites.after(entities::smooth_remote_entity_motion),
+                entities::billboard_item_sprites.after(entities::smooth_remote_item_entities),
             ),
         )
         .add_systems(

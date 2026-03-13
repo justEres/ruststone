@@ -8,7 +8,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_utils::{InventoryItemStack, item_texture_candidates, texturepack_textures_root};
-use tracing::warn;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemTexKey {
@@ -22,6 +22,20 @@ struct ItemTexResult {
     rgba: Vec<u8>,
     width: u32,
     height: u32,
+    found_texture: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemTexLoadStatus {
+    Exact,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemTextureResolution {
+    Exact,
+    DamageFallback { fallback_damage: i16 },
+    Missing,
 }
 
 #[derive(Resource)]
@@ -31,6 +45,9 @@ pub struct ItemTextureCache {
     requested: HashSet<ItemTexKey>,
     loaded: HashMap<ItemTexKey, Handle<Image>>,
     materials: HashMap<ItemTexKey, Handle<StandardMaterial>>,
+    status: HashMap<ItemTexKey, ItemTexLoadStatus>,
+    logged_fallbacks: HashSet<ItemTexKey>,
+    logged_missing: HashSet<ItemTexKey>,
 }
 
 #[derive(Resource, Clone)]
@@ -52,6 +69,9 @@ impl Default for ItemTextureCache {
             requested: HashSet::new(),
             loaded: HashMap::new(),
             materials: HashMap::new(),
+            status: HashMap::new(),
+            logged_fallbacks: HashSet::new(),
+            logged_missing: HashSet::new(),
         }
     }
 }
@@ -120,6 +140,58 @@ impl ItemTextureCache {
         None
     }
 
+    pub fn resolution_for_stack(&self, stack: &InventoryItemStack) -> Option<ItemTextureResolution> {
+        let key = ItemTexKey {
+            item_id: stack.item_id,
+            damage: stack.damage,
+        };
+        if self.materials.contains_key(&key) {
+            return Some(match self.status.get(&key).copied() {
+                Some(ItemTexLoadStatus::Exact) => ItemTextureResolution::Exact,
+                Some(ItemTexLoadStatus::Missing) | None => ItemTextureResolution::Missing,
+            });
+        }
+
+        if stack.damage != 0 {
+            let base = ItemTexKey {
+                item_id: stack.item_id,
+                damage: 0,
+            };
+            if self.materials.contains_key(&base) {
+                return Some(match self.status.get(&base).copied() {
+                    Some(ItemTexLoadStatus::Exact) => ItemTextureResolution::DamageFallback {
+                        fallback_damage: 0,
+                    },
+                    Some(ItemTexLoadStatus::Missing) | None => ItemTextureResolution::Missing,
+                });
+            }
+        }
+
+        None
+    }
+
+    pub fn take_resolution_diagnostic(
+        &mut self,
+        stack: &InventoryItemStack,
+    ) -> Option<ItemTextureResolution> {
+        let resolution = self.resolution_for_stack(stack)?;
+        let key = ItemTexKey {
+            item_id: stack.item_id,
+            damage: stack.damage,
+        };
+        match resolution {
+            ItemTextureResolution::Exact => None,
+            ItemTextureResolution::DamageFallback { .. } => {
+                self.logged_missing.remove(&key);
+                self.logged_fallbacks.insert(key).then_some(resolution)
+            }
+            ItemTextureResolution::Missing => {
+                self.logged_fallbacks.remove(&key);
+                self.logged_missing.insert(key).then_some(resolution)
+            }
+        }
+    }
+
     pub fn insert_material(&mut self, key: ItemTexKey, handle: Handle<StandardMaterial>) {
         self.materials.insert(key, handle);
     }
@@ -152,6 +224,14 @@ pub fn item_texture_cache_tick(
 
         let tex_handle = images.add(image);
         cache.loaded.insert(result.key, tex_handle.clone());
+        cache.status.insert(
+            result.key,
+            if result.found_texture {
+                ItemTexLoadStatus::Exact
+            } else {
+                ItemTexLoadStatus::Missing
+            },
+        );
 
         let mat_handle = materials.add(StandardMaterial {
             base_color: Color::WHITE,
@@ -194,6 +274,7 @@ fn item_texture_worker(request_rx: Receiver<ItemTexKey>, result_tx: Sender<ItemT
                         rgba: rgba.into_raw(),
                         width: w,
                         height: h,
+                        found_texture: true,
                     });
                     continue;
                 }
@@ -212,6 +293,7 @@ fn item_texture_worker(request_rx: Receiver<ItemTexKey>, result_tx: Sender<ItemT
             rgba: rgba.unwrap_or_else(|| data),
             width: w,
             height: h,
+            found_texture: false,
         });
     }
 }
@@ -264,4 +346,30 @@ fn build_item_quad_mesh() -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+pub fn log_item_texture_resolution(cache: &mut ItemTextureCache, stack: &InventoryItemStack) {
+    let Some(resolution) = cache.take_resolution_diagnostic(stack) else {
+        return;
+    };
+
+    match resolution {
+        ItemTextureResolution::Exact => {}
+        ItemTextureResolution::DamageFallback { fallback_damage } => {
+            debug!(
+                item_id = stack.item_id,
+                damage = stack.damage,
+                fallback_damage,
+                "item texture resolved via damage fallback"
+            );
+        }
+        ItemTextureResolution::Missing => {
+            warn!(
+                item_id = stack.item_id,
+                damage = stack.damage,
+                display_name = stack.meta.display_name.as_deref().unwrap_or(""),
+                "item texture missing; using generated placeholder"
+            );
+        }
+    }
 }

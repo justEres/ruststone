@@ -27,7 +27,7 @@ use rs_utils::{
     AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
     NetEntityMessage, PlayerSkinModel, UiState,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::model::{
     BIPED_BODY, BIPED_HEAD, BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_MODEL_TEX32, BIPED_MODEL_TEX64,
@@ -76,10 +76,38 @@ pub struct ItemSpriteStack(pub InventoryItemStack);
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct ItemSpin(pub f32);
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RemoteDroppedItemMotion {
+    pub authoritative_translation: Vec3,
+    pub render_translation: Vec3,
+    pub estimated_velocity: Vec3,
+    pub last_server_update_secs: f64,
+    pub ground_contact: bool,
+}
+
+impl RemoteDroppedItemMotion {
+    fn new(translation: Vec3, now_secs: f64) -> Self {
+        Self {
+            authoritative_translation: translation,
+            render_translation: translation,
+            estimated_velocity: Vec3::ZERO,
+            last_server_update_secs: now_secs,
+            ground_contact: false,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct RemoteDroppedItemCollect {
+    pub collector_server_id: Option<i32>,
+    pub progress_secs: f32,
+}
+
 #[derive(SystemParam)]
 pub struct RemoteEntityApplyParams<'w, 's> {
     transform_query: Query<'w, 's, &'static mut Transform>,
     smoothing_query: Query<'w, 's, &'static mut RemoteMotionSmoothing>,
+    item_motion_query: Query<'w, 's, &'static mut RemoteDroppedItemMotion>,
     entity_query: Query<'w, 's, (&'static mut RemoteEntity, &'static mut RemoteEntityLook)>,
     player_anim_query: Query<'w, 's, &'static mut RemotePlayerAnimation>,
     biped_anim_query: Query<'w, 's, &'static mut RemoteBipedAnimation>,
@@ -321,6 +349,16 @@ pub struct RemoteMotionSmoothing {
     pub last_server_update_secs: f64,
 }
 
+const DROPPED_ITEM_GRAVITY: f32 = -0.04;
+const DROPPED_ITEM_DRAG_AIR: f32 = 0.98;
+const DROPPED_ITEM_DRAG_GROUND: f32 = 0.58;
+const DROPPED_ITEM_RESTITUTION: f32 = 0.12;
+const DROPPED_ITEM_EXTRAPOLATE_MAX: f32 = 0.12;
+const DROPPED_ITEM_COLLISION_RADIUS: f32 = 0.125;
+const DROPPED_ITEM_COLLISION_HEIGHT_OFFSET: f32 = 0.17;
+const DROPPED_ITEM_COLLECT_DURATION: f32 = 0.14;
+const DROPPED_ITEM_FALLBACK_COLLECT_HEIGHT: f32 = 0.6;
+
 impl RemoteMotionSmoothing {
     fn new(target_translation: Vec3, now_secs: f64) -> Self {
         Self {
@@ -511,12 +549,14 @@ pub fn apply_remote_entity_events(
                     },
                     RemoteEntityName(display_name),
                     visual,
-                    RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs),
                     RemotePoseState::default(),
                 ));
                 let root = spawn_cmd.id();
 
                 if kind == NetEntityKind::Player {
+                    commands
+                        .entity(root)
+                        .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
                     let (parts, material_handles) = spawn_remote_player_model(
                         &mut commands,
                         &mut meshes,
@@ -555,13 +595,19 @@ pub fn apply_remote_entity_events(
                             metallic: 0.0,
                             ..Default::default()
                         });
+                        debug!(entity_id, pos = ?pos, "spawned dropped item placeholder awaiting metadata");
                         commands.entity(root).insert((
                             Mesh3d(item_sprite_mesh.0.clone()),
                             MeshMaterial3d(material),
                             RemoteItemSprite,
                             ItemSpin::default(),
+                            RemoteDroppedItemMotion::new(pos + Vec3::Y * visual.y_offset, now_secs),
+                            Visibility::Hidden,
                         ));
                     } else if let Some(mob) = biped_mob {
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `biped_mob` is gated above.
                             continue;
@@ -605,6 +651,9 @@ pub fn apply_remote_entity_events(
                             },
                         ));
                     } else if let Some(mob) = quadruped_mob {
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
                         let Some(texture_path) = mob_texture_path(mob) else {
                             // Shouldn't happen since `quadruped_mob` is gated above.
                             continue;
@@ -677,6 +726,9 @@ pub fn apply_remote_entity_events(
                             ));
                         }
                     } else {
+                        commands
+                            .entity(root)
+                            .insert(RemoteMotionSmoothing::new(pos + Vec3::Y * visual.y_offset, now_secs));
                         let mesh = meshes.add(match spec.mesh {
                             VisualMesh::Capsule => Mesh::from(Capsule3d::default()),
                             VisualMesh::Sphere => Mesh::from(Sphere::default()),
@@ -723,18 +775,29 @@ pub fn apply_remote_entity_events(
                 }
                 match stack {
                     Some(stack) => {
+                        debug!(
+                            entity_id,
+                            item_id = stack.item_id,
+                            damage = stack.damage,
+                            count = stack.count,
+                            "dropped item metadata resolved stack"
+                        );
                         item_textures.request_stack(&stack);
                         if let Ok(mut commands_entity) = commands.get_entity(entity) {
                             commands_entity.insert((
                                 RemoteItemStackState(stack.clone()),
                                 ItemSpriteStack(stack),
+                                Visibility::Visible,
                             ));
+                            commands_entity.remove::<RemoteDroppedItemCollect>();
                         }
                     }
                     None => {
+                        debug!(entity_id, "dropped item metadata cleared stack");
                         if let Ok(mut commands_entity) = commands.get_entity(entity) {
                             commands_entity.remove::<RemoteItemStackState>();
                             commands_entity.remove::<ItemSpriteStack>();
+                            commands_entity.insert(Visibility::Hidden);
                         }
                     }
                 }
@@ -763,7 +826,11 @@ pub fn apply_remote_entity_events(
                 on_ground,
             } => {
                 if let Some(entity) = registry.by_server_id.get(&entity_id).copied() {
-                    if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
+                    if let Ok(mut item_motion) = params.item_motion_query.get_mut(entity) {
+                        let previous = item_motion.authoritative_translation;
+                        let next = previous + delta;
+                        update_item_motion_velocity(&mut item_motion, previous, next, now_secs);
+                    } else if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
                         let previous = smoothing.target_translation;
                         let next = previous + delta;
                         update_motion_velocity(&mut smoothing, previous, next, now_secs);
@@ -822,7 +889,16 @@ pub fn apply_remote_entity_events(
                                     .visual_query
                                     .get(entity)
                                     .map_or(0.0, |v| v.y_offset);
-                        if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
+                        if let Ok(mut item_motion) = params.item_motion_query.get_mut(entity) {
+                            let previous = item_motion.authoritative_translation;
+                            update_item_motion_velocity(&mut item_motion, previous, target, now_secs);
+                            if let Ok(mut transform) = params.transform_query.get_mut(entity)
+                                && transform.translation.distance_squared(target) > 64.0
+                            {
+                                transform.translation = target;
+                                item_motion.render_translation = target;
+                            }
+                        } else if let Ok(mut smoothing) = params.smoothing_query.get_mut(entity) {
                             let previous = smoothing.target_translation;
                             update_motion_velocity(&mut smoothing, previous, target, now_secs);
                             // Big teleports should still snap to avoid long catch-up.
@@ -847,7 +923,19 @@ pub fn apply_remote_entity_events(
                     }
                 }
             }
-            NetEntityMessage::Velocity { .. } => {}
+            NetEntityMessage::Velocity {
+                entity_id,
+                velocity,
+            } => {
+                if let Some(entity) = registry.by_server_id.get(&entity_id).copied()
+                    && let Ok(mut item_motion) = params.item_motion_query.get_mut(entity)
+                {
+                    debug!(entity_id, velocity = ?velocity, "received dropped item velocity");
+                    item_motion.estimated_velocity = velocity;
+                    item_motion.ground_contact = false;
+                    item_motion.last_server_update_secs = now_secs;
+                }
+            }
             NetEntityMessage::Pose {
                 entity_id,
                 sneaking,
@@ -946,13 +1034,24 @@ pub fn apply_remote_entity_events(
             }
             NetEntityMessage::CollectItem {
                 collected_entity_id,
-                ..
+                collector_entity_id,
             } => {
-                // For now, despawn immediately to avoid "ghost" items lingering.
-                if let Some(entity) = registry.by_server_id.remove(&collected_entity_id) {
-                    commands.entity(entity).despawn_recursive();
+                let Some(entity) = registry.by_server_id.get(&collected_entity_id).copied() else {
+                    registry.pending_labels.remove(&collected_entity_id);
+                    continue;
+                };
+                let Ok((remote, _look)) = params.entity_query.get_mut(entity) else {
+                    continue;
+                };
+                if remote.kind != NetEntityKind::Item {
+                    continue;
                 }
-                registry.pending_labels.remove(&collected_entity_id);
+                if let Ok(mut commands_entity) = commands.get_entity(entity) {
+                    commands_entity.insert(RemoteDroppedItemCollect {
+                        collector_server_id: Some(collector_entity_id),
+                        progress_secs: 0.0,
+                    });
+                }
             }
             NetEntityMessage::Destroy { entity_ids } => {
                 for entity_id in entity_ids {
@@ -979,6 +1078,110 @@ fn update_motion_velocity(
     smoothing.estimated_velocity = (next - previous) / dt;
     smoothing.target_translation = next;
     smoothing.last_server_update_secs = now_secs;
+}
+
+fn update_item_motion_velocity(
+    motion: &mut RemoteDroppedItemMotion,
+    previous: Vec3,
+    next: Vec3,
+    now_secs: f64,
+) {
+    let dt = (now_secs - motion.last_server_update_secs).max(1.0 / 120.0) as f32;
+    motion.estimated_velocity = (next - previous) / dt;
+    motion.authoritative_translation = next;
+    motion.last_server_update_secs = now_secs;
+    motion.ground_contact = false;
+}
+
+fn sample_solid_block(world: &WorldCollisionMap, point: Vec3) -> Option<IVec3> {
+    let radius = DROPPED_ITEM_COLLISION_RADIUS;
+    let probes = [
+        point,
+        point + Vec3::new(radius, 0.0, 0.0),
+        point + Vec3::new(-radius, 0.0, 0.0),
+        point + Vec3::new(0.0, 0.0, radius),
+        point + Vec3::new(0.0, 0.0, -radius),
+    ];
+    probes.into_iter().find_map(|probe| {
+        let cell = probe.floor().as_ivec3();
+        is_solid(world.block_at(cell.x, cell.y, cell.z)).then_some(cell)
+    })
+}
+
+fn clamp_item_translation(
+    world: &WorldCollisionMap,
+    current: Vec3,
+    candidate: Vec3,
+    velocity: &mut Vec3,
+) -> (Vec3, bool) {
+    let mut next = candidate;
+    let mut grounded = false;
+
+    if let Some(cell) = sample_solid_block(world, next) {
+        let top = cell.y as f32 + 1.0 + DROPPED_ITEM_COLLISION_HEIGHT_OFFSET;
+        if current.y >= top - 0.35 || velocity.y <= 0.0 {
+            next.y = top;
+            if velocity.y < 0.0 {
+                velocity.y = -velocity.y * DROPPED_ITEM_RESTITUTION;
+                if velocity.y.abs() < 0.02 {
+                    velocity.y = 0.0;
+                }
+            }
+            grounded = true;
+        } else {
+            velocity.x = 0.0;
+            velocity.z = 0.0;
+            next.x = current.x;
+            next.z = current.z;
+        }
+    }
+
+    let below = Vec3::new(next.x, next.y - DROPPED_ITEM_COLLISION_HEIGHT_OFFSET - 0.02, next.z);
+    if let Some(cell) = sample_solid_block(world, below) {
+        let top = cell.y as f32 + 1.0 + DROPPED_ITEM_COLLISION_HEIGHT_OFFSET;
+        if next.y <= top + 0.08 && velocity.y <= 0.0 {
+            next.y = top;
+            grounded = true;
+            velocity.y = 0.0;
+        }
+    }
+
+    (next, grounded)
+}
+
+fn advance_item_motion(
+    world: &WorldCollisionMap,
+    motion: &RemoteDroppedItemMotion,
+    now_secs: f64,
+) -> (Vec3, Vec3, bool) {
+    let mut pos = motion.authoritative_translation;
+    let mut vel = motion.estimated_velocity;
+    let age = ((now_secs - motion.last_server_update_secs) as f32).clamp(0.0, DROPPED_ITEM_EXTRAPOLATE_MAX);
+    if age <= 0.0 {
+        return (motion.render_translation, vel, motion.ground_contact);
+    }
+
+    let steps = (age / (1.0 / 60.0)).ceil().max(1.0) as usize;
+    let dt = age / steps as f32;
+    let mut grounded = motion.ground_contact;
+
+    for _ in 0..steps {
+        vel.y += DROPPED_ITEM_GRAVITY * dt * 20.0;
+        let candidate = pos + vel * dt * 20.0;
+        let (next_pos, hit_ground) = clamp_item_translation(world, pos, candidate, &mut vel);
+        pos = next_pos;
+        grounded = hit_ground;
+        let drag = if grounded {
+            DROPPED_ITEM_DRAG_GROUND
+        } else {
+            DROPPED_ITEM_DRAG_AIR
+        };
+        vel.x *= drag;
+        vel.y *= DROPPED_ITEM_DRAG_AIR;
+        vel.z *= drag;
+    }
+
+    (pos, vel, grounded)
 }
 
 pub fn smooth_remote_entity_motion(
@@ -1015,6 +1218,74 @@ pub fn smooth_remote_entity_motion(
         let desired_rot = entity_root_rotation(remote.kind, look.yaw);
         let rot_alpha = 1.0 - (-22.0 * dt).exp();
         transform.rotation = transform.rotation.slerp(desired_rot, rot_alpha);
+    }
+}
+
+pub fn smooth_remote_item_entities(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut registry: ResMut<RemoteEntityRegistry>,
+    collision_map: Res<WorldCollisionMap>,
+    transforms: Query<&GlobalTransform>,
+    mut query: Query<
+        (
+            Entity,
+            &RemoteEntity,
+            &mut Transform,
+            &mut RemoteDroppedItemMotion,
+            Option<&mut RemoteDroppedItemCollect>,
+            Option<&RemoteItemStackState>,
+        ),
+        With<RemoteItemSprite>,
+    >,
+) {
+    let dt = time.delta_secs().max(1e-4);
+    let now_secs = time.elapsed_secs_f64();
+    for (entity, remote, mut transform, mut motion, collect, stack) in &mut query {
+        let Some(stack) = stack else {
+            motion.render_translation = transform.translation;
+            continue;
+        };
+
+        if let Some(mut collect) = collect {
+            collect.progress_secs += dt;
+            let target = collect
+                .collector_server_id
+                .and_then(|collector_id| registry.by_server_id.get(&collector_id).copied())
+                .and_then(|collector| transforms.get(collector).ok())
+                .map(|gt| gt.translation() + Vec3::Y * 0.9)
+                .unwrap_or(transform.translation + Vec3::Y * DROPPED_ITEM_FALLBACK_COLLECT_HEIGHT);
+            let alpha = (collect.progress_secs / DROPPED_ITEM_COLLECT_DURATION).clamp(0.0, 1.0);
+            transform.translation = transform.translation.lerp(target, alpha);
+            transform.scale = Vec3::splat(0.17 * (1.0 - alpha * 0.75));
+            motion.render_translation = transform.translation;
+            if alpha >= 1.0 {
+                debug!(
+                    entity_id = remote.server_id,
+                    item_id = stack.0.item_id,
+                    damage = stack.0.damage,
+                    "despawning collected dropped item after fly-to animation"
+                );
+                registry.by_server_id.remove(&remote.server_id);
+                registry.pending_labels.remove(&remote.server_id);
+                commands.entity(entity).despawn_recursive();
+            }
+            continue;
+        }
+
+        let (predicted_pos, predicted_vel, grounded) =
+            advance_item_motion(&collision_map, &motion, now_secs);
+        let delta = predicted_pos - motion.render_translation;
+        if delta.length_squared() > 9.0 {
+            motion.render_translation = predicted_pos;
+        } else {
+            let alpha = 1.0 - (-18.0 * dt).exp();
+            motion.render_translation += delta * alpha;
+        }
+        motion.estimated_velocity = predicted_vel;
+        motion.ground_contact = grounded;
+        transform.translation = motion.render_translation;
+        transform.scale = Vec3::splat(0.17);
     }
 }
 
@@ -1108,6 +1379,7 @@ pub fn apply_item_sprite_textures_system(
             if material.0 != handle {
                 material.0 = handle;
             }
+            crate::item_textures::log_item_texture_resolution(&mut cache, &stack.0);
         }
     }
 }

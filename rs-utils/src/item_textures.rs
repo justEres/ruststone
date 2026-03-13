@@ -424,3 +424,27 @@ fn dye_color_name(damage: i16) -> &'static str {
         _ => "white",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::item_texture_candidates;
+
+    #[test]
+    fn metadata_variant_candidates_prioritize_exact_match() {
+        let wool = item_texture_candidates(35, 14);
+        assert_eq!(wool.first().map(String::as_str), Some("blocks/wool_colored_red.png"));
+
+        let planks = item_texture_candidates(5, 5);
+        assert_eq!(planks.first().map(String::as_str), Some("blocks/planks_big_oak.png"));
+    }
+
+    #[test]
+    fn potion_candidates_prefer_splash_bottle_texture() {
+        let splash = item_texture_candidates(373, 0x4000);
+        assert_eq!(
+            splash.first().map(String::as_str),
+            Some("items/potion_bottle_splash.png")
+        );
+        assert!(splash.iter().any(|c| c == "items/potion.png"));
+    }
+}
