@@ -101,6 +101,7 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(sim_systems::PredictionHistory::default())
             .insert_resource(sim_systems::LatencyEstimate::default())
             .insert_resource(sim_systems::ActionState::default())
+            .insert_resource(sim_systems::MovementSoundState::default())
             .insert_resource(sim_systems::FrameTimingState::default())
             .insert_resource(sim_systems::EntityHitboxDebug::default())
             .insert_resource(item_textures::ItemTextureCache::default())
@@ -245,6 +246,7 @@ impl Plugin for ClientSimPlugin {
                 (
                     sim_systems::net_event_apply_system,
                     sim_systems::fixed_sim_tick_system,
+                    sim_systems::local_movement_sound_system,
                 )
                     .chain(),
             )

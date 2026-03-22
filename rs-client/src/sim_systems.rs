@@ -5,9 +5,12 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::time::Fixed;
 use bevy_egui::{EguiContexts, egui};
+use rs_sound::{block_step_sound, emit_ui_sound, emit_world_sound};
 
 use rs_render::{ChunkRoot, LookAngles, Player, PlayerCamera};
-use rs_utils::{AppState, ApplicationState, ToNet, ToNetMessage, UiState};
+use rs_utils::{
+    AppState, ApplicationState, SoundCategory, SoundEventQueue, ToNet, ToNetMessage, UiState,
+};
 
 use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
@@ -67,6 +70,13 @@ pub struct ActionState {
     pub sprinting: bool,
     pub jump_was_pressed: bool,
     pub fly_toggle_timer: u8,
+}
+
+#[derive(Default, Resource)]
+pub struct MovementSoundState {
+    pub accumulated_ground_distance: f32,
+    pub accumulated_swim_distance: f32,
+    pub was_in_water: bool,
 }
 
 #[derive(Default)]
@@ -844,6 +854,93 @@ pub fn fixed_sim_tick_system(
         latency.last_sent = Some(Instant::now());
     }
     timings.fixed_tick_ms = timer.ms();
+}
+
+fn is_water_state(block_state: u16) -> bool {
+    matches!(block_state_id(block_state), 8 | 9)
+}
+
+pub fn local_movement_sound_system(
+    app_state: Res<AppState>,
+    ui_state: Res<UiState>,
+    player_status: Res<rs_utils::PlayerStatus>,
+    sim_state: Res<SimState>,
+    sim_render: Res<SimRenderState>,
+    collision_map: Res<WorldCollisionMap>,
+    mut movement_sound: ResMut<MovementSoundState>,
+    mut sound_queue: ResMut<SoundEventQueue>,
+) {
+    if !gameplay_input_allowed(&app_state, &ui_state, &player_status) {
+        movement_sound.accumulated_ground_distance = 0.0;
+        movement_sound.accumulated_swim_distance = 0.0;
+        movement_sound.was_in_water = false;
+        return;
+    }
+
+    let previous = sim_render.previous;
+    let current = sim_state.current;
+    let horizontal_delta = Vec2::new(current.pos.x - previous.pos.x, current.pos.z - previous.pos.z);
+    let horizontal_distance = horizontal_delta.length();
+    if horizontal_distance <= f32::EPSILON {
+        return;
+    }
+
+    let feet_block = collision_map.block_at(
+        current.pos.x.floor() as i32,
+        current.pos.y.floor() as i32,
+        current.pos.z.floor() as i32,
+    );
+    let in_water = is_water_state(feet_block);
+
+    if in_water && !movement_sound.was_in_water {
+        emit_ui_sound(
+            &mut sound_queue,
+            "minecraft:random.splash",
+            0.5,
+            1.0,
+        );
+    }
+    movement_sound.was_in_water = in_water;
+
+    if in_water {
+        movement_sound.accumulated_ground_distance = 0.0;
+        movement_sound.accumulated_swim_distance += horizontal_distance;
+        if movement_sound.accumulated_swim_distance >= 0.9 {
+            emit_world_sound(
+                &mut sound_queue,
+                "minecraft:game.player.swim",
+                current.pos,
+                0.35,
+                1.0,
+                Some(SoundCategory::Player),
+            );
+            movement_sound.accumulated_swim_distance = 0.0;
+        }
+        return;
+    }
+
+    movement_sound.accumulated_swim_distance = 0.0;
+    if !current.on_ground {
+        movement_sound.accumulated_ground_distance = 0.0;
+        return;
+    }
+
+    movement_sound.accumulated_ground_distance += horizontal_distance;
+    if movement_sound.accumulated_ground_distance < 0.55 {
+        return;
+    }
+
+    let below = Vec3::new(current.pos.x, current.pos.y - 0.2, current.pos.z).floor().as_ivec3();
+    let ground_state = collision_map.block_at(below.x, below.y, below.z);
+    emit_world_sound(
+        &mut sound_queue,
+        block_step_sound(block_state_id(ground_state)),
+        current.pos,
+        0.25,
+        1.0,
+        Some(SoundCategory::Block),
+    );
+    movement_sound.accumulated_ground_distance = 0.0;
 }
 
 pub fn local_arm_swing_tick_system(time: Res<Time>, mut swing: ResMut<LocalArmSwing>) {

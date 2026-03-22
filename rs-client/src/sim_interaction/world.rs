@@ -1,4 +1,6 @@
 use super::super::*;
+use rs_sound::{block_dig_sound, block_step_sound, emit_world_sound};
+use rs_utils::{SoundCategory, SoundEventQueue};
 
 pub fn world_interaction_system(
     time: Res<Time>,
@@ -8,6 +10,7 @@ pub fn world_interaction_system(
     player_status: Res<rs_utils::PlayerStatus>,
     to_net: Res<ToNet>,
     mut inventory_state: ResMut<InventoryState>,
+    mut sound_queue: ResMut<SoundEventQueue>,
     sim_state: Res<SimState>,
     mut swing: ResMut<LocalArmSwing>,
     mut break_indicator: ResMut<BreakIndicator>,
@@ -125,6 +128,18 @@ pub fn world_interaction_system(
                     z: hit.block.z,
                     face,
                 });
+                emit_world_sound(
+                    &mut sound_queue,
+                    block_dig_sound(block_state_id(block_id)),
+                    Vec3::new(
+                        hit.block.x as f32 + 0.5,
+                        hit.block.y as f32 + 0.5,
+                        hit.block.z as f32 + 0.5,
+                    ),
+                    0.7,
+                    1.0,
+                    Some(SoundCategory::Block),
+                );
             } else {
                 mining.elapsed_secs += time.delta_secs();
             }
@@ -194,6 +209,18 @@ pub fn world_interaction_system(
                     cursor_y: 8,
                     cursor_z: 8,
                 });
+                emit_world_sound(
+                    &mut sound_queue,
+                    "minecraft:random.click",
+                    Vec3::new(
+                        hit.block.x as f32 + 0.5,
+                        hit.block.y as f32 + 0.5,
+                        hit.block.z as f32 + 0.5,
+                    ),
+                    0.4,
+                    1.0,
+                    Some(SoundCategory::Block),
+                );
                 return;
             }
 
@@ -210,6 +237,18 @@ pub fn world_interaction_system(
                 cursor_y: 8,
                 cursor_z: 8,
             });
+            emit_world_sound(
+                &mut sound_queue,
+                block_step_sound(target_id),
+                Vec3::new(
+                    place_pos.x as f32 + 0.5,
+                    place_pos.y as f32 + 0.5,
+                    place_pos.z as f32 + 0.5,
+                ),
+                0.8,
+                0.9,
+                Some(SoundCategory::Block),
+            );
             if player_status.gamemode != 1 {
                 let _ = inventory_state.consume_selected_hotbar_one();
             }

@@ -8,6 +8,7 @@ use rs_utils::{ApplicationState, AuthMode, FromNet, RUSTSTONE_ASSETS_ROOT_ENV, T
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use rs_sound::SoundPlugin;
 
 mod embedded_assets;
 mod inventory_systems;
@@ -141,6 +142,7 @@ fn main() {
                 .disable::<LogPlugin>(),
         )
         .add_plugins(RenderPlugin)
+        .add_plugins(SoundPlugin)
         .add_plugins(ClientTimingPlugin)
         .add_plugins(ClientCorePlugin::new(
             initial_state,

@@ -8,7 +8,7 @@ use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryEnchantment, InventoryItemMeta, InventoryItemStack,
     InventoryMessage, InventoryWindowInfo, MobKind, NetEntityAnimation, NetEntityKind,
     NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, ScoreboardMessage,
-    TitleMessage, item_name,
+    SoundCategory, SoundEvent, TitleMessage, item_name,
 };
 use tracing::{debug, warn};
 
@@ -569,6 +569,70 @@ pub fn handle_packet(
             let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::CollectItem {
                 collected_entity_id: ci.collected_entity_id,
                 collector_entity_id: ci.collector_entity_id,
+            }));
+        }
+        Packet::NamedSoundEffect(sound) => {
+            let _ = to_main.send(FromNetMessage::Sound(SoundEvent::World {
+                event_id: sound.name,
+                position: packet_sound_position(sound.x, sound.y, sound.z),
+                volume: sound.volume,
+                pitch: sound.pitch,
+                category_override: SoundCategory::from_vanilla_id(sound.category.0),
+                distance_delay: false,
+            }));
+        }
+        Packet::NamedSoundEffect_u8(sound) => {
+            let _ = to_main.send(FromNetMessage::Sound(SoundEvent::World {
+                event_id: sound.name,
+                position: packet_sound_position(sound.x, sound.y, sound.z),
+                volume: sound.volume,
+                pitch: f32::from(sound.pitch) / 63.0,
+                category_override: SoundCategory::from_vanilla_id(sound.category.0),
+                distance_delay: false,
+            }));
+        }
+        Packet::NamedSoundEffect_u8_NoCategory(sound) => {
+            let _ = to_main.send(FromNetMessage::Sound(SoundEvent::World {
+                event_id: sound.name,
+                position: packet_sound_position(sound.x, sound.y, sound.z),
+                volume: sound.volume,
+                pitch: f32::from(sound.pitch) / 63.0,
+                category_override: None,
+                distance_delay: false,
+            }));
+        }
+        Packet::Effect(effect) => {
+            send_aux_sound_effect(
+                to_main,
+                effect.effect_id,
+                bevy::prelude::Vec3::new(
+                    effect.location.x as f32 + 0.5,
+                    effect.location.y as f32 + 0.5,
+                    effect.location.z as f32 + 0.5,
+                ),
+                effect.data,
+            );
+        }
+        Packet::Effect_u8y(effect) => {
+            send_aux_sound_effect(
+                to_main,
+                effect.effect_id,
+                bevy::prelude::Vec3::new(
+                    effect.x as f32 + 0.5,
+                    f32::from(effect.y) + 0.5,
+                    effect.z as f32 + 0.5,
+                ),
+                effect.data,
+            );
+        }
+        Packet::Explosion(explosion) => {
+            let _ = to_main.send(FromNetMessage::Sound(SoundEvent::World {
+                event_id: "minecraft:random.explode".to_string(),
+                position: bevy::prelude::Vec3::new(explosion.x, explosion.y, explosion.z),
+                volume: 4.0,
+                pitch: 1.0,
+                category_override: Some(SoundCategory::Block),
+                distance_delay: false,
             }));
         }
         Packet::BlockChange_VarInt(bc) => {
@@ -1340,6 +1404,72 @@ fn extract_skin_info_from_properties<'a>(
         }
     }
     (None, PlayerSkinModel::Classic)
+}
+
+fn packet_sound_position(x: i32, y: i32, z: i32) -> bevy::prelude::Vec3 {
+    bevy::prelude::Vec3::new(x as f32 / 8.0, y as f32 / 8.0, z as f32 / 8.0)
+}
+
+fn send_aux_sound_effect(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    effect_id: i32,
+    position: bevy::prelude::Vec3,
+    data: i32,
+) {
+    let mapped = match effect_id {
+        1000 => Some(("minecraft:random.click", SoundCategory::Block, 1.0, 1.0)),
+        1001 => Some(("minecraft:random.click", SoundCategory::Block, 1.0, 1.2)),
+        1002 => Some(("minecraft:random.bow", SoundCategory::Player, 1.0, 1.2)),
+        1003 => Some(("minecraft:random.door_open", SoundCategory::Block, 1.0, 1.0)),
+        1004 => Some(("minecraft:random.fizz", SoundCategory::Block, 0.5, 2.6)),
+        1005 => record_name_from_item_id(data)
+            .map(|name| (name, SoundCategory::Record, 4.0, 1.0)),
+        1006 => Some(("minecraft:random.door_close", SoundCategory::Block, 1.0, 1.0)),
+        1007 => Some(("minecraft:mob.ghast.charge", SoundCategory::Hostile, 10.0, 1.0)),
+        1008 => Some(("minecraft:mob.ghast.fireball", SoundCategory::Hostile, 10.0, 1.0)),
+        1009 => Some(("minecraft:mob.ghast.fireball", SoundCategory::Hostile, 2.0, 1.0)),
+        1010 => Some(("minecraft:mob.zombie.wood", SoundCategory::Hostile, 2.0, 1.0)),
+        1011 => Some(("minecraft:mob.zombie.metal", SoundCategory::Hostile, 2.0, 1.0)),
+        1012 => Some(("minecraft:mob.zombie.woodbreak", SoundCategory::Hostile, 2.0, 1.0)),
+        1013 => Some(("minecraft:mob.wither.spawn", SoundCategory::Hostile, 1.0, 1.0)),
+        1014 => Some(("minecraft:mob.wither.shoot", SoundCategory::Hostile, 2.0, 1.0)),
+        1015 => Some(("minecraft:mob.bat.takeoff", SoundCategory::Ambient, 0.05, 1.0)),
+        1016 => Some(("minecraft:mob.zombie.infect", SoundCategory::Hostile, 2.0, 1.0)),
+        1017 => Some(("minecraft:mob.zombie.unfect", SoundCategory::Hostile, 2.0, 1.0)),
+        1018 => Some(("minecraft:mob.enderdragon.end", SoundCategory::Hostile, 5.0, 1.0)),
+        1020 => Some(("minecraft:random.anvil_break", SoundCategory::Block, 1.0, 1.0)),
+        1021 => Some(("minecraft:random.anvil_use", SoundCategory::Block, 1.0, 1.0)),
+        1022 => Some(("minecraft:random.anvil_land", SoundCategory::Block, 0.3, 1.0)),
+        _ => None,
+    };
+    if let Some((event_id, category, volume, pitch)) = mapped {
+        let _ = to_main.send(FromNetMessage::Sound(SoundEvent::World {
+            event_id: event_id.to_string(),
+            position,
+            volume,
+            pitch,
+            category_override: Some(category),
+            distance_delay: false,
+        }));
+    }
+}
+
+fn record_name_from_item_id(item_id: i32) -> Option<&'static str> {
+    match item_id {
+        2256 => Some("minecraft:records.13"),
+        2257 => Some("minecraft:records.cat"),
+        2258 => Some("minecraft:records.blocks"),
+        2259 => Some("minecraft:records.chirp"),
+        2260 => Some("minecraft:records.far"),
+        2261 => Some("minecraft:records.mall"),
+        2262 => Some("minecraft:records.mellohi"),
+        2263 => Some("minecraft:records.stal"),
+        2264 => Some("minecraft:records.strad"),
+        2265 => Some("minecraft:records.ward"),
+        2266 => Some("minecraft:records.11"),
+        2267 => Some("minecraft:records.wait"),
+        _ => None,
+    }
 }
 
 fn mob_type_to_kind(ty: u8) -> MobKind {

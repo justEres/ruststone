@@ -17,6 +17,7 @@ rs-sim = { version = "0.1.0", path = "../rs-sim" }
 
 rs-protocol = { version = "0.1.0", path = "../rs-protocol" }
 rs-render = { version = "0.1.0", path = "../rs-render" }
+rs-sound = { version = "0.1.0", path = "../rs-sound" }
 rs-ui = { version = "0.1.0", path = "../rs-ui" }
 rs-utils = { version = "0.1.0", path = "../rs-utils" }
 tracing.workspace = true

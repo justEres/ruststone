@@ -1,7 +1,8 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use rs_utils::{
-    AppState, ApplicationState, InventoryState, PlayerStatus, ToNet, ToNetMessage, UiState,
+    AppState, ApplicationState, InventoryState, PlayerStatus, SoundCategory, SoundEvent,
+    SoundEventQueue, ToNet, ToNetMessage, UiState,
 };
 
 const HOTBAR_DIGIT_KEYS: [(KeyCode, u8); 9] = [
@@ -24,6 +25,7 @@ pub fn hotbar_input_system(
     player_status: Res<PlayerStatus>,
     to_net: Res<ToNet>,
     mut inventory: ResMut<InventoryState>,
+    mut sound_queue: ResMut<SoundEventQueue>,
 ) {
     if !matches!(app_state.0, ApplicationState::Connected)
         || ui_state.chat_open
@@ -80,6 +82,12 @@ pub fn hotbar_input_system(
             let _ = to_net
                 .0
                 .send(ToNetMessage::HeldItemChange { slot: slot as i16 });
+            sound_queue.push(SoundEvent::Ui {
+                event_id: "minecraft:random.click".to_string(),
+                volume: 0.25,
+                pitch: 1.0,
+                category_override: Some(SoundCategory::Player),
+            });
         }
         return;
     };
@@ -88,6 +96,12 @@ pub fn hotbar_input_system(
         let _ = to_net
             .0
             .send(ToNetMessage::HeldItemChange { slot: slot as i16 });
+        sound_queue.push(SoundEvent::Ui {
+            event_id: "minecraft:random.click".to_string(),
+            volume: 0.25,
+            pitch: 1.0,
+            category_override: Some(SoundCategory::Player),
+        });
     }
 }
 

@@ -7,8 +7,8 @@ use rs_render::{ChunkUpdateQueue, WorldUpdate};
 use rs_ui::{ChatAutocompleteState, ConnectUiState};
 use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
-    PlayerStatus, ScoreboardMessage, ScoreboardState, TabListHeaderFooter, TitleMessage,
-    TitleOverlayState, WorldTime,
+    PlayerStatus, ScoreboardMessage, ScoreboardState, SoundCategory, SoundEvent,
+    SoundEventQueue, TabListHeaderFooter, TitleMessage, TitleOverlayState, WorldTime,
 };
 use tracing::{debug, info};
 
@@ -42,6 +42,7 @@ pub(crate) struct GameplayState<'w, 's> {
     title_overlay: ResMut<'w, TitleOverlayState>,
     tab_list_header_footer: ResMut<'w, TabListHeaderFooter>,
     scoreboard: ResMut<'w, ScoreboardState>,
+    sound_queue: ResMut<'w, SoundEventQueue>,
     sim_render: ResMut<'w, SimRenderState>,
     sim_clock: ResMut<'w, SimClock>,
     sim_ready: ResMut<'w, SimReady>,
@@ -154,6 +155,7 @@ pub fn handle_messages(
                 food_saturation,
             } => {
                 let was_dead = game.player_status.dead;
+                let previous_health = game.player_status.health;
                 game.player_status.health = health;
                 game.player_status.food = food;
                 game.player_status.food_saturation = food_saturation;
@@ -164,6 +166,14 @@ pub fn handle_messages(
                     game.sim_ready.0 = false;
                     game.history.0 = PredictionHistory::default().0;
                     game.sim_render.previous = sim_state.current;
+                }
+                if !was_dead && health < previous_health {
+                    game.sound_queue.push(SoundEvent::Ui {
+                        event_id: "minecraft:game.player.hurt".to_string(),
+                        volume: 1.0,
+                        pitch: 1.0,
+                        category_override: Some(SoundCategory::Player),
+                    });
                 }
             }
             FromNetMessage::PlayerPosition(pos) => {
@@ -237,6 +247,19 @@ pub fn handle_messages(
                 });
             }
             FromNetMessage::NetEntity(event) => {
+                if let rs_utils::NetEntityMessage::CollectItem {
+                    collector_entity_id,
+                    ..
+                } = &event
+                    && remote_entity_registry.local_entity_id == Some(*collector_entity_id)
+                {
+                    game.sound_queue.push(SoundEvent::Ui {
+                        event_id: "minecraft:random.pop".to_string(),
+                        volume: 0.2,
+                        pitch: 2.0,
+                        category_override: Some(SoundCategory::Player),
+                    });
+                }
                 if let rs_utils::NetEntityMessage::Velocity {
                     entity_id,
                     velocity,
@@ -255,9 +278,18 @@ pub fn handle_messages(
                 level,
                 total_experience,
             } => {
+                let previous_level = game.player_status.level;
                 game.player_status.experience_bar = experience_bar.clamp(0.0, 1.0);
                 game.player_status.level = level.max(0);
                 game.player_status.total_experience = total_experience.max(0);
+                if game.player_status.level > previous_level {
+                    game.sound_queue.push(SoundEvent::Ui {
+                        event_id: "minecraft:random.levelup".to_string(),
+                        volume: 0.75,
+                        pitch: 1.0,
+                        category_override: Some(SoundCategory::Player),
+                    });
+                }
             }
             FromNetMessage::GameMode { gamemode } => {
                 // 1.8 join packet: lower 3 bits hold game mode, bit 3 is hardcore flag.
@@ -318,7 +350,10 @@ pub fn handle_messages(
                 }
             }
             FromNetMessage::Inventory(event) => {
-                apply_inventory_message(&mut ui.inventory_state, event);
+                apply_inventory_message(&mut ui.inventory_state, &mut game.sound_queue, event);
+            }
+            FromNetMessage::Sound(event) => {
+                game.sound_queue.push(event);
             }
             FromNetMessage::Title(event) => match event {
                 TitleMessage::SetTitle { text } => {
@@ -398,9 +433,23 @@ pub fn handle_messages(
     let _ = timer.ms();
 }
 
-fn apply_inventory_message(inventory_state: &mut InventoryState, event: InventoryMessage) {
+fn apply_inventory_message(
+    inventory_state: &mut InventoryState,
+    sound_queue: &mut SoundEventQueue,
+    event: InventoryMessage,
+) {
     match event {
         InventoryMessage::WindowOpen(open) => {
+            if open.kind.to_ascii_lowercase().contains("chest")
+                || open.title.to_ascii_lowercase().contains("chest")
+            {
+                sound_queue.push(SoundEvent::Ui {
+                    event_id: "minecraft:random.chestopen".to_string(),
+                    volume: 0.5,
+                    pitch: 1.0,
+                    category_override: Some(SoundCategory::Block),
+                });
+            }
             inventory_state.open_window = Some(open.clone());
             inventory_state
                 .window_slots
@@ -413,6 +462,19 @@ fn apply_inventory_message(inventory_state: &mut InventoryState, event: Inventor
                 .as_ref()
                 .is_some_and(|window| window.id == id)
             {
+                if inventory_state
+                    .open_window
+                    .as_ref()
+                    .is_some_and(|window| window.kind.to_ascii_lowercase().contains("chest")
+                        || window.title.to_ascii_lowercase().contains("chest"))
+                {
+                    sound_queue.push(SoundEvent::Ui {
+                        event_id: "minecraft:random.chestclosed".to_string(),
+                        volume: 0.5,
+                        pitch: 1.0,
+                        category_override: Some(SoundCategory::Block),
+                    });
+                }
                 inventory_state.open_window = None;
             }
         }

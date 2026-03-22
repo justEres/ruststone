@@ -18,9 +18,9 @@ use rs_render::{
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,
     InventoryItemStack, InventoryState, InventoryWindowInfo, PerfTimings, PlayerStatus,
-    ScoreboardState, TabListHeaderFooter, TitleOverlayState, ToNet, ToNetMessage, UiState,
-    WorldTime, block_model_kind, block_registry_key, block_texture_name, item_max_durability,
-    item_name, item_registry_key, item_texture_candidates,
+    ScoreboardState, SoundSettings, TabListHeaderFooter, TitleOverlayState, ToNet, ToNetMessage,
+    UiState, WorldTime, block_model_kind, block_registry_key, block_texture_name,
+    item_max_durability, item_name, item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,6 +36,7 @@ enum OptionSearchTarget {
     General,
     Lighting,
     Water,
+    Sound,
     ChatHud,
     Diagnostics,
     System,
@@ -311,6 +312,51 @@ const OPTION_SEARCH_ENTRIES: &[OptionSearchEntry] = &[
         aliases: &[],
     },
     OptionSearchEntry {
+        label: "Master volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["sound", "audio", "volume"],
+    },
+    OptionSearchEntry {
+        label: "Music volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["music"],
+    },
+    OptionSearchEntry {
+        label: "Record volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["jukebox", "disc"],
+    },
+    OptionSearchEntry {
+        label: "Weather volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["rain", "thunder"],
+    },
+    OptionSearchEntry {
+        label: "Block volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["step", "dig", "place"],
+    },
+    OptionSearchEntry {
+        label: "Hostile volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["mob", "enemy"],
+    },
+    OptionSearchEntry {
+        label: "Neutral volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["animal", "passive"],
+    },
+    OptionSearchEntry {
+        label: "Player volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["hurt", "pickup", "xp"],
+    },
+    OptionSearchEntry {
+        label: "Ambient volume",
+        target: OptionSearchTarget::Sound,
+        aliases: &["ambient"],
+    },
+    OptionSearchEntry {
         label: "Chat background opacity",
         target: OptionSearchTarget::ChatHud,
         aliases: &["chat opacity", "chat background"],
@@ -443,6 +489,7 @@ fn activate_option_search_result(state: &mut ConnectUiState, target: OptionSearc
     state.options_section_general = matches!(target, OptionSearchTarget::General);
     state.options_section_lighting = matches!(target, OptionSearchTarget::Lighting);
     state.options_section_water = matches!(target, OptionSearchTarget::Water);
+    state.options_section_sound = matches!(target, OptionSearchTarget::Sound);
     state.options_section_chat_hud = matches!(target, OptionSearchTarget::ChatHud);
     state.options_section_diagnostics = matches!(target, OptionSearchTarget::Diagnostics);
     state.options_section_system = matches!(target, OptionSearchTarget::System);
@@ -460,6 +507,7 @@ fn connect_ui(
     mut ui_state: ResMut<UiState>,
     mut inventory_state: ResMut<InventoryState>,
     mut item_icons: ResMut<ItemIconCache>,
+    mut sound_settings: ResMut<SoundSettings>,
     hud: HudParams,
     mut render_debug: ResMut<RenderDebugSettings>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
@@ -486,8 +534,13 @@ fn connect_ui(
         let options_path = state.options_path.clone();
         match window_query.get_single_mut() {
             Ok(mut window) => {
-                match load_client_options(&options_path, &mut state, &mut render_debug, &mut window)
-                {
+                match load_client_options(
+                    &options_path,
+                    &mut state,
+                    &mut render_debug,
+                    &mut sound_settings,
+                    &mut window,
+                ) {
                     Ok(()) => {
                         state.options_status = format!("Loaded {}", options_path);
                     }
@@ -1314,6 +1367,75 @@ fn connect_ui(
                     });
                 state.options_section_water = water_section.fully_open();
 
+                let sound_section = egui::CollapsingHeader::new("Sound")
+                    .default_open(state.options_section_sound)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.master, 0.0..=1.0)
+                                    .text("Master volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.music, 0.0..=1.0)
+                                    .text("Music volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.record, 0.0..=1.0)
+                                    .text("Record volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.weather, 0.0..=1.0)
+                                    .text("Weather volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.block, 0.0..=1.0)
+                                    .text("Block volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.hostile, 0.0..=1.0)
+                                    .text("Hostile volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.neutral, 0.0..=1.0)
+                                    .text("Neutral volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.player, 0.0..=1.0)
+                                    .text("Player volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut sound_settings.ambient, 0.0..=1.0)
+                                    .text("Ambient volume")
+                                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+                            )
+                            .changed();
+                    });
+                state.options_section_sound = sound_section.fully_open();
+
                 let chat_hud_section = egui::CollapsingHeader::new("Chat & HUD")
                     .default_open(state.options_section_chat_hud)
                     .show(ui, |ui| {
@@ -1434,6 +1556,7 @@ fn connect_ui(
                     .show(ui, |ui| {
                         if ui.button("Reset All Settings To Default").clicked() {
                             *render_debug = RenderDebugSettings::default();
+                            *sound_settings = SoundSettings::default();
                             state.vsync_enabled = false;
                             if let Ok(mut window) = window_query.get_single_mut() {
                                 window.present_mode = PresentMode::AutoNoVsync;
@@ -1458,6 +1581,7 @@ fn connect_ui(
                                         &options_path,
                                         &mut state,
                                         &mut render_debug,
+                                        &mut sound_settings,
                                         &mut window,
                                     ) {
                                         Ok(()) => {
@@ -1477,6 +1601,7 @@ fn connect_ui(
                                     &state.options_path,
                                     &state,
                                     &render_debug,
+                                    &sound_settings,
                                 ) {
                                     Ok(()) => {
                                         state.options_status =
@@ -1495,7 +1620,12 @@ fn connect_ui(
 
                 if options_changed {
                     state.options_dirty = true;
-                    match save_client_options(&state.options_path, &state, &render_debug) {
+                    match save_client_options(
+                        &state.options_path,
+                        &state,
+                        &render_debug,
+                        &sound_settings,
+                    ) {
                         Ok(()) => {
                             state.options_status = format!("Saved {}", state.options_path);
                             state.options_dirty = false;
@@ -1507,7 +1637,12 @@ fn connect_ui(
                 if ui.button("Controls (todo)").clicked() {}
                 if ui.button("Disconnect").clicked() {
                     if state.options_dirty {
-                        let _ = save_client_options(&state.options_path, &state, &render_debug);
+                        let _ = save_client_options(
+                            &state.options_path,
+                            &state,
+                            &render_debug,
+                            &sound_settings,
+                        );
                         state.options_dirty = false;
                     }
                     let _ = to_net.0.send(ToNetMessage::Disconnect);
@@ -1519,7 +1654,12 @@ fn connect_ui(
                 }
                 if ui.button("Done").clicked() {
                     if state.options_dirty {
-                        let _ = save_client_options(&state.options_path, &state, &render_debug);
+                        let _ = save_client_options(
+                            &state.options_path,
+                            &state,
+                            &render_debug,
+                            &sound_settings,
+                        );
                         state.options_dirty = false;
                     }
                     state.visual_settings_open = false;
@@ -1566,7 +1706,12 @@ fn connect_ui(
                     }
                     if options_changed {
                         state.options_dirty = true;
-                        match save_client_options(&state.options_path, &state, &render_debug) {
+                        match save_client_options(
+                            &state.options_path,
+                            &state,
+                            &render_debug,
+                            &sound_settings,
+                        ) {
                             Ok(()) => {
                                 state.options_status = format!("Saved {}", state.options_path);
                                 state.options_dirty = false;
@@ -1713,6 +1858,7 @@ pub struct ConnectUiState {
     pub options_section_general: bool,
     pub options_section_lighting: bool,
     pub options_section_water: bool,
+    pub options_section_sound: bool,
     pub options_section_chat_hud: bool,
     pub options_section_diagnostics: bool,
     pub options_section_system: bool,
@@ -1748,6 +1894,7 @@ impl Default for ConnectUiState {
             options_section_general: false,
             options_section_lighting: false,
             options_section_water: false,
+            options_section_sound: false,
             options_section_chat_hud: false,
             options_section_diagnostics: false,
             options_section_system: false,
@@ -1833,6 +1980,15 @@ struct ClientOptionsFile {
     pub water_ssr_thickness: f32,
     pub water_ssr_max_distance: f32,
     pub water_ssr_stride: f32,
+    pub sound_master: f32,
+    pub sound_music: f32,
+    pub sound_record: f32,
+    pub sound_weather: f32,
+    pub sound_block: f32,
+    pub sound_hostile: f32,
+    pub sound_neutral: f32,
+    pub sound_player: f32,
+    pub sound_ambient: f32,
     pub chat_background_opacity: f32,
     pub chat_font_size: f32,
     pub scoreboard_background_opacity: f32,
@@ -1916,6 +2072,15 @@ impl Default for ClientOptionsFile {
             water_ssr_thickness: render.water_ssr_thickness,
             water_ssr_max_distance: render.water_ssr_max_distance,
             water_ssr_stride: render.water_ssr_stride,
+            sound_master: 1.0,
+            sound_music: 1.0,
+            sound_record: 1.0,
+            sound_weather: 1.0,
+            sound_block: 1.0,
+            sound_hostile: 1.0,
+            sound_neutral: 1.0,
+            sound_player: 1.0,
+            sound_ambient: 1.0,
             chat_background_opacity: 96.0,
             chat_font_size: 15.0,
             scoreboard_background_opacity: 112.0,
@@ -1931,7 +2096,11 @@ impl Default for ClientOptionsFile {
     }
 }
 
-fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> ClientOptionsFile {
+fn options_to_file(
+    state: &ConnectUiState,
+    render: &RenderDebugSettings,
+    sound: &SoundSettings,
+) -> ClientOptionsFile {
     ClientOptionsFile {
         fov_deg: render.fov_deg,
         render_distance_chunks: render.render_distance_chunks,
@@ -1999,6 +2168,15 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_ssr_thickness: render.water_ssr_thickness,
         water_ssr_max_distance: render.water_ssr_max_distance,
         water_ssr_stride: render.water_ssr_stride,
+        sound_master: sound.master,
+        sound_music: sound.music,
+        sound_record: sound.record,
+        sound_weather: sound.weather,
+        sound_block: sound.block,
+        sound_hostile: sound.hostile,
+        sound_neutral: sound.neutral,
+        sound_player: sound.player,
+        sound_ambient: sound.ambient,
         chat_background_opacity: state.chat_background_opacity,
         chat_font_size: state.chat_font_size,
         scoreboard_background_opacity: state.scoreboard_background_opacity,
@@ -2017,6 +2195,7 @@ fn apply_options(
     options: &ClientOptionsFile,
     state: &mut ConnectUiState,
     render: &mut RenderDebugSettings,
+    sound: &mut SoundSettings,
     window: &mut Window,
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
@@ -2088,6 +2267,15 @@ fn apply_options(
     render.water_ssr_thickness = options.water_ssr_thickness.clamp(0.02, 2.0);
     render.water_ssr_max_distance = options.water_ssr_max_distance.clamp(4.0, 400.0);
     render.water_ssr_stride = options.water_ssr_stride.clamp(0.2, 8.0);
+    sound.master = options.sound_master.clamp(0.0, 1.0);
+    sound.music = options.sound_music.clamp(0.0, 1.0);
+    sound.record = options.sound_record.clamp(0.0, 1.0);
+    sound.weather = options.sound_weather.clamp(0.0, 1.0);
+    sound.block = options.sound_block.clamp(0.0, 1.0);
+    sound.hostile = options.sound_hostile.clamp(0.0, 1.0);
+    sound.neutral = options.sound_neutral.clamp(0.0, 1.0);
+    sound.player = options.sound_player.clamp(0.0, 1.0);
+    sound.ambient = options.sound_ambient.clamp(0.0, 1.0);
     state.chat_background_opacity = options.chat_background_opacity.clamp(0.0, 255.0);
     state.chat_font_size = options.chat_font_size.clamp(10.0, 28.0);
     state.scoreboard_background_opacity = options.scoreboard_background_opacity.clamp(0.0, 255.0);
@@ -2111,6 +2299,7 @@ fn load_client_options(
     path: &str,
     state: &mut ConnectUiState,
     render: &mut RenderDebugSettings,
+    sound: &mut SoundSettings,
     window: &mut Window,
 ) -> Result<(), String> {
     let path_buf = PathBuf::from(path);
@@ -2118,14 +2307,14 @@ fn load_client_options(
         Ok(v) => v,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let defaults = ClientOptionsFile::default();
-            apply_options(&defaults, state, render, window);
-            return save_client_options(path, state, render);
+            apply_options(&defaults, state, render, sound, window);
+            return save_client_options(path, state, render, sound);
         }
         Err(err) => return Err(format!("Failed to read options file {}: {}", path, err)),
     };
     let parsed = toml::from_str::<ClientOptionsFile>(&content)
         .map_err(|err| format!("Invalid TOML options {}: {}", path, err))?;
-    apply_options(&parsed, state, render, window);
+    apply_options(&parsed, state, render, sound, window);
     Ok(())
 }
 
@@ -2133,6 +2322,7 @@ fn save_client_options(
     path: &str,
     state: &ConnectUiState,
     render: &RenderDebugSettings,
+    sound: &SoundSettings,
 ) -> Result<(), String> {
     let path_buf = PathBuf::from(path);
     if let Some(parent) = path_buf.parent()
@@ -2146,7 +2336,7 @@ fn save_client_options(
             )
         })?;
     }
-    let body = toml::to_string_pretty(&options_to_file(state, render))
+    let body = toml::to_string_pretty(&options_to_file(state, render, sound))
         .map_err(|err| format!("Failed to encode options TOML: {}", err))?;
     std::fs::write(&path_buf, body)
         .map_err(|err| format!("Failed to write options file {}: {}", path, err))

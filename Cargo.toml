@@ -5,6 +5,7 @@ members = [
     "rs-net",
     "rs-protocol",
     "rs-render",
+    "rs-sound",
     "rs-sim",
     "rs-ui",
     "rs-utils",
