@@ -77,10 +77,42 @@ pub struct UiState {
     pub ui_hidden: bool,
 }
 
-#[derive(Resource, Debug, Clone, Copy, Default)]
+#[derive(Resource, Debug, Clone, Copy)]
 pub struct WorldTime {
     pub world_age: i64,
     pub time_of_day: i64,
+    pub last_sync_instant: Option<Instant>,
+}
+
+impl Default for WorldTime {
+    fn default() -> Self {
+        Self {
+            world_age: 0,
+            time_of_day: 0,
+            last_sync_instant: None,
+        }
+    }
+}
+
+impl WorldTime {
+    pub fn interpolated_time_of_day(self, now: Instant) -> f32 {
+        let fixed_time = self.time_of_day < 0;
+        let base = if fixed_time {
+            (-self.time_of_day) as f32
+        } else {
+            self.time_of_day as f32
+        };
+
+        if fixed_time {
+            base
+        } else {
+            let elapsed_ticks = self
+                .last_sync_instant
+                .map(|instant| now.saturating_duration_since(instant).as_secs_f32() * 20.0)
+                .unwrap_or(0.0);
+            base + elapsed_ticks
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -287,7 +319,9 @@ impl ScoreboardState {
         let mut lines: Vec<(String, i32)> = self
             .scores
             .iter()
-            .filter(|((entry, objective), _)| objective == objective_name && !entry.starts_with('#'))
+            .filter(|((entry, objective), _)| {
+                objective == objective_name && !entry.starts_with('#')
+            })
             .map(|((entry, _), value)| (self.format_entry(entry), *value))
             .collect();
         lines.sort_by(|(name_a, value_a), (name_b, value_b)| {

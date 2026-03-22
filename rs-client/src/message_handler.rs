@@ -1,14 +1,14 @@
 use std::time::Instant;
 
-use bevy::ecs::system::SystemParam;
 use bevy::ecs::system::ResMut;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use rs_render::{ChunkUpdateQueue, WorldUpdate};
 use rs_ui::{ChatAutocompleteState, ConnectUiState};
 use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
-    PlayerStatus, ScoreboardMessage, ScoreboardState, SoundCategory, SoundEvent,
-    SoundEventQueue, TabListHeaderFooter, TitleMessage, TitleOverlayState, WorldTime,
+    PlayerStatus, ScoreboardMessage, ScoreboardState, SoundCategory, SoundEvent, SoundEventQueue,
+    TabListHeaderFooter, TitleMessage, TitleOverlayState, WorldTime,
 };
 use tracing::{debug, info};
 
@@ -78,6 +78,7 @@ pub fn handle_messages(
                 game.player_status.jump_boost_amplifier = None;
                 game.world_time.world_age = 0;
                 game.world_time.time_of_day = 0;
+                game.world_time.last_sync_instant = None;
                 game.title_overlay.reset();
                 game.tab_list_header_footer.header.clear();
                 game.tab_list_header_footer.footer.clear();
@@ -307,6 +308,7 @@ pub fn handle_messages(
             } => {
                 game.world_time.world_age = world_age;
                 game.world_time.time_of_day = time_of_day;
+                game.world_time.last_sync_instant = Some(Instant::now());
             }
             FromNetMessage::PlayerAbilities {
                 flags,
@@ -399,7 +401,9 @@ pub fn handle_messages(
                     display_name,
                     render_type,
                 } => match mode.unwrap_or(0) {
-                    0 | 2 => game.scoreboard.set_objective(name, display_name, render_type),
+                    0 | 2 => game
+                        .scoreboard
+                        .set_objective(name, display_name, render_type),
                     1 => game.scoreboard.remove_objective(&name),
                     _ => {}
                 },
@@ -462,12 +466,10 @@ fn apply_inventory_message(
                 .as_ref()
                 .is_some_and(|window| window.id == id)
             {
-                if inventory_state
-                    .open_window
-                    .as_ref()
-                    .is_some_and(|window| window.kind.to_ascii_lowercase().contains("chest")
-                        || window.title.to_ascii_lowercase().contains("chest"))
-                {
+                if inventory_state.open_window.as_ref().is_some_and(|window| {
+                    window.kind.to_ascii_lowercase().contains("chest")
+                        || window.title.to_ascii_lowercase().contains("chest")
+                }) {
                     sound_queue.push(SoundEvent::Ui {
                         event_id: "minecraft:random.chestclosed".to_string(),
                         volume: 0.5,

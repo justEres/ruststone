@@ -1,7 +1,7 @@
-use bevy::pbr::CascadeShadowConfigBuilder;
+use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
-use bevy::render::view::RenderLayers;
 use bevy::render::view::NoFrustumCulling;
+use bevy::render::view::RenderLayers;
 
 use crate::components::{ShadowCasterLight, WorldRoot};
 use crate::debug::RenderDebugSettings;
@@ -69,7 +69,7 @@ pub fn setup_world(
         base_color: Color::WHITE,
         base_color_texture: Some(sun_texture),
         emissive: LinearRgba::rgb(2.5, 2.35, 2.1),
-        alpha_mode: AlphaMode::Blend,
+        alpha_mode: AlphaMode::Add,
         cull_mode: None,
         unlit: true,
         depth_bias: -100.0,
@@ -85,6 +85,8 @@ pub fn setup_world(
         InheritedVisibility::default(),
         ViewVisibility::default(),
         NoFrustumCulling,
+        NotShadowCaster,
+        NotShadowReceiver,
         RenderLayers::layer(MAIN_RENDER_LAYER)
             .with(CHUNK_OPAQUE_RENDER_LAYER)
             .with(CHUNK_CUTOUT_RENDER_LAYER)

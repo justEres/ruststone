@@ -10,6 +10,8 @@ use bevy::pbr::{
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
+use std::time::Instant;
+
 use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
 use crate::debug::{AntiAliasingMode, RenderDebugSettings, RenderPerfStats};
@@ -151,10 +153,16 @@ pub fn vanilla_celestial_angle(world_time: i64, partial_ticks: f32) -> f32 {
     base + (curved - base) / 3.0
 }
 
-pub fn effective_sun_direction(settings: &RenderDebugSettings, world_time: Option<&WorldTime>) -> Vec3 {
+pub fn effective_sun_direction(
+    settings: &RenderDebugSettings,
+    world_time: Option<&WorldTime>,
+) -> Vec3 {
     if settings.sync_sun_with_time {
-        let time = world_time.map(|time| time.time_of_day).unwrap_or(0);
-        let angle = vanilla_celestial_angle(time, 0.0) * std::f32::consts::TAU;
+        let time = world_time
+            .map(|time| time.interpolated_time_of_day(Instant::now()))
+            .unwrap_or(0.0);
+        let angle =
+            vanilla_celestial_angle(time.floor() as i64, time.fract()) * std::f32::consts::TAU;
         Vec3::new(0.0, angle.cos(), angle.sin()).normalize_or_zero()
     } else {
         let az = settings.sun_azimuth_deg.to_radians();
@@ -576,7 +584,8 @@ pub fn update_water_animation(
         if let Some(mat) = materials.get_mut(handle) {
             // Rebuild the full uniform every frame to prevent stale pass specialization
             // when quality presets are switched at runtime.
-            mat.extension.lighting = lighting_uniform_for_mode(&settings, Some(&world_time), pass_mode);
+            mat.extension.lighting =
+                lighting_uniform_for_mode(&settings, Some(&world_time), pass_mode);
             mat.base.unlit = force_unlit;
             mat.base.alpha_mode = alpha_mode;
             mat.base.opaque_render_method = OpaqueRendererMethod::Forward;
