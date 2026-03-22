@@ -36,6 +36,7 @@ enum OptionSearchTarget {
     General,
     Lighting,
     Water,
+    ChatHud,
     Diagnostics,
     System,
     Visual,
@@ -310,6 +311,36 @@ const OPTION_SEARCH_ENTRIES: &[OptionSearchEntry] = &[
         aliases: &[],
     },
     OptionSearchEntry {
+        label: "Chat background opacity",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["chat opacity", "chat background"],
+    },
+    OptionSearchEntry {
+        label: "Chat font size",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["chat text"],
+    },
+    OptionSearchEntry {
+        label: "Scoreboard background opacity",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["scoreboard opacity", "sidebar background"],
+    },
+    OptionSearchEntry {
+        label: "Scoreboard font size",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["sidebar text"],
+    },
+    OptionSearchEntry {
+        label: "Title background opacity",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["title opacity", "title background"],
+    },
+    OptionSearchEntry {
+        label: "Title font size",
+        target: OptionSearchTarget::ChatHud,
+        aliases: &["title text"],
+    },
+    OptionSearchEntry {
         label: "Shader debug view",
         target: OptionSearchTarget::Diagnostics,
         aliases: &["debug view"],
@@ -412,6 +443,7 @@ fn activate_option_search_result(state: &mut ConnectUiState, target: OptionSearc
     state.options_section_general = matches!(target, OptionSearchTarget::General);
     state.options_section_lighting = matches!(target, OptionSearchTarget::Lighting);
     state.options_section_water = matches!(target, OptionSearchTarget::Water);
+    state.options_section_chat_hud = matches!(target, OptionSearchTarget::ChatHud);
     state.options_section_diagnostics = matches!(target, OptionSearchTarget::Diagnostics);
     state.options_section_system = matches!(target, OptionSearchTarget::System);
     state.visual_settings_open = matches!(target, OptionSearchTarget::Visual);
@@ -774,14 +806,16 @@ fn connect_ui(
             .interactable(ui_state.chat_open)
             .show(ctx, |ui| {
                 let frame = egui::Frame::new()
-                    .fill(egui::Color32::from_black_alpha(96))
+                    .fill(egui::Color32::from_black_alpha(alpha_to_u8(
+                        state.chat_background_opacity,
+                    )))
                     .inner_margin(egui::Margin::same(8))
                     .corner_radius(4.0);
                 frame.show(ui, |ui| {
                     ui.set_width(panel_width);
                     let start = chat.0.len().saturating_sub(visible_lines);
                     for msg in chat.0.iter().skip(start) {
-                        draw_chat_message(ui, msg);
+                        draw_chat_message(ui, msg, state.chat_font_size);
                     }
                     if ui_state.chat_open {
                         ui.add_space(4.0);
@@ -840,12 +874,12 @@ fn connect_ui(
                 });
             });
 
-        draw_scoreboard_sidebar(ctx, &scoreboard);
-        draw_title_overlay(ctx, &title_overlay);
-        draw_action_bar_overlay(ctx, &title_overlay);
+        draw_scoreboard_sidebar(ctx, &scoreboard, &state);
+        draw_title_overlay(ctx, &title_overlay, &state);
+        draw_action_bar_overlay(ctx, &title_overlay, &state);
 
         if keys.pressed(KeyCode::Tab) {
-            draw_tab_list_overlay(ctx, &tab_list_header_footer);
+            draw_tab_list_overlay(ctx, &tab_list_header_footer, &state);
         }
     }
 
@@ -1280,6 +1314,57 @@ fn connect_ui(
                     });
                 state.options_section_water = water_section.fully_open();
 
+                let chat_hud_section = egui::CollapsingHeader::new("Chat & HUD")
+                    .default_open(state.options_section_chat_hud)
+                    .show(ui, |ui| {
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut state.chat_background_opacity,
+                                    0.0..=255.0,
+                                )
+                                .text("Chat background opacity"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut state.chat_font_size, 10.0..=28.0)
+                                    .text("Chat font size"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut state.scoreboard_background_opacity,
+                                    0.0..=255.0,
+                                )
+                                .text("Scoreboard background opacity"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut state.scoreboard_font_size, 10.0..=28.0)
+                                    .text("Scoreboard font size"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut state.title_background_opacity,
+                                    0.0..=255.0,
+                                )
+                                .text("Title background opacity"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut state.title_font_size, 14.0..=56.0)
+                                    .text("Title font size"),
+                            )
+                            .changed();
+                    });
+                state.options_section_chat_hud = chat_hud_section.fully_open();
+
                 let diagnostics_section = egui::CollapsingHeader::new("Diagnostics")
                     .default_open(state.options_section_diagnostics)
                     .show(ui, |ui| {
@@ -1628,8 +1713,15 @@ pub struct ConnectUiState {
     pub options_section_general: bool,
     pub options_section_lighting: bool,
     pub options_section_water: bool,
+    pub options_section_chat_hud: bool,
     pub options_section_diagnostics: bool,
     pub options_section_system: bool,
+    pub chat_background_opacity: f32,
+    pub chat_font_size: f32,
+    pub scoreboard_background_opacity: f32,
+    pub scoreboard_font_size: f32,
+    pub title_background_opacity: f32,
+    pub title_font_size: f32,
     pub debug_items_open: bool,
     pub debug_items_filter: String,
     pub debug_items: Vec<InventoryItemStack>,
@@ -1656,8 +1748,15 @@ impl Default for ConnectUiState {
             options_section_general: false,
             options_section_lighting: false,
             options_section_water: false,
+            options_section_chat_hud: false,
             options_section_diagnostics: false,
             options_section_system: false,
+            chat_background_opacity: 96.0,
+            chat_font_size: 15.0,
+            scoreboard_background_opacity: 112.0,
+            scoreboard_font_size: 15.5,
+            title_background_opacity: 80.0,
+            title_font_size: 34.0,
             debug_items_open: false,
             debug_items_filter: String::new(),
             debug_items: Vec::new(),
@@ -1734,6 +1833,12 @@ struct ClientOptionsFile {
     pub water_ssr_thickness: f32,
     pub water_ssr_max_distance: f32,
     pub water_ssr_stride: f32,
+    pub chat_background_opacity: f32,
+    pub chat_font_size: f32,
+    pub scoreboard_background_opacity: f32,
+    pub scoreboard_font_size: f32,
+    pub title_background_opacity: f32,
+    pub title_font_size: f32,
     pub cutout_debug_mode: u8,
     pub show_layer_entities: bool,
     pub show_layer_chunks_opaque: bool,
@@ -1811,6 +1916,12 @@ impl Default for ClientOptionsFile {
             water_ssr_thickness: render.water_ssr_thickness,
             water_ssr_max_distance: render.water_ssr_max_distance,
             water_ssr_stride: render.water_ssr_stride,
+            chat_background_opacity: 96.0,
+            chat_font_size: 15.0,
+            scoreboard_background_opacity: 112.0,
+            scoreboard_font_size: 15.5,
+            title_background_opacity: 80.0,
+            title_font_size: 34.0,
             cutout_debug_mode: render.cutout_debug_mode,
             show_layer_entities: render.show_layer_entities,
             show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -1888,6 +1999,12 @@ fn options_to_file(state: &ConnectUiState, render: &RenderDebugSettings) -> Clie
         water_ssr_thickness: render.water_ssr_thickness,
         water_ssr_max_distance: render.water_ssr_max_distance,
         water_ssr_stride: render.water_ssr_stride,
+        chat_background_opacity: state.chat_background_opacity,
+        chat_font_size: state.chat_font_size,
+        scoreboard_background_opacity: state.scoreboard_background_opacity,
+        scoreboard_font_size: state.scoreboard_font_size,
+        title_background_opacity: state.title_background_opacity,
+        title_font_size: state.title_font_size,
         cutout_debug_mode: render.cutout_debug_mode,
         show_layer_entities: render.show_layer_entities,
         show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -1971,6 +2088,12 @@ fn apply_options(
     render.water_ssr_thickness = options.water_ssr_thickness.clamp(0.02, 2.0);
     render.water_ssr_max_distance = options.water_ssr_max_distance.clamp(4.0, 400.0);
     render.water_ssr_stride = options.water_ssr_stride.clamp(0.2, 8.0);
+    state.chat_background_opacity = options.chat_background_opacity.clamp(0.0, 255.0);
+    state.chat_font_size = options.chat_font_size.clamp(10.0, 28.0);
+    state.scoreboard_background_opacity = options.scoreboard_background_opacity.clamp(0.0, 255.0);
+    state.scoreboard_font_size = options.scoreboard_font_size.clamp(10.0, 28.0);
+    state.title_background_opacity = options.title_background_opacity.clamp(0.0, 255.0);
+    state.title_font_size = options.title_font_size.clamp(14.0, 56.0);
     render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 8);
     render.show_layer_entities = options.show_layer_entities;
     render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;
@@ -2931,11 +3054,13 @@ fn draw_inventory_item_tooltip(ctx: &egui::Context, stack: &InventoryItemStack) 
         });
 }
 
-fn draw_chat_message(ui: &mut egui::Ui, msg: &str) {
+fn draw_chat_message(ui: &mut egui::Ui, msg: &str, font_size: f32) {
     let segments = parse_legacy_chat_segments(msg);
     ui.horizontal_wrapped(|ui| {
         for segment in segments {
-            let mut rich = egui::RichText::new(segment.text).color(segment.color);
+            let mut rich = egui::RichText::new(segment.text)
+                .color(segment.color)
+                .size(font_size);
             if segment.bold {
                 rich = rich.strong();
             }
@@ -2981,7 +3106,11 @@ fn handle_chat_tab_complete(
     chat_autocomplete.selected = (idx + 1) % len;
 }
 
-fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
+fn draw_scoreboard_sidebar(
+    ctx: &egui::Context,
+    scoreboard: &ScoreboardState,
+    state: &ConnectUiState,
+) {
     let Some((_, objective)) = scoreboard.sidebar_objective() else {
         return;
     };
@@ -2998,25 +3127,35 @@ fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
         .interactable(false)
         .show(ctx, |ui| {
             let frame = egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(112))
+                .fill(egui::Color32::from_black_alpha(alpha_to_u8(
+                    state.scoreboard_background_opacity,
+                )))
                 .inner_margin(egui::Margin::same(8))
                 .corner_radius(4.0);
             frame.show(ui, |ui| {
                 ui.set_width(sidebar_width);
                 ui.set_min_width(sidebar_width);
                 ui.set_max_width(sidebar_width);
-                draw_legacy_text(ui, objective.display_name.as_str(), true);
+                draw_legacy_text(
+                    ui,
+                    objective.display_name.as_str(),
+                    true,
+                    state.scoreboard_font_size,
+                );
                 ui.add_space(4.0);
                 for (name, value) in lines {
                     ui.horizontal(|ui| {
                         ui.allocate_ui_with_layout(
                             egui::vec2(name_width.max(40.0), 18.0),
                             egui::Layout::left_to_right(egui::Align::Min),
-                            |ui| draw_legacy_text(ui, name.as_str(), false),
+                            |ui| {
+                                draw_legacy_text(ui, name.as_str(), false, state.scoreboard_font_size)
+                            },
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(value.to_string())
+                                    .size(state.scoreboard_font_size)
                                     .color(egui::Color32::from_gray(220)),
                             );
                         });
@@ -3026,7 +3165,11 @@ fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
         });
 }
 
-fn draw_title_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayState) {
+fn draw_title_overlay(
+    ctx: &egui::Context,
+    title_overlay: &TitleOverlayState,
+    state: &ConnectUiState,
+) {
     let Some(alpha) = overlay_alpha(title_overlay.title_started_at, title_overlay.times) else {
         return;
     };
@@ -3039,29 +3182,41 @@ fn draw_title_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayState) {
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -90.0))
         .interactable(false)
         .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                if !title_overlay.title.is_empty() {
-                    let title = strip_legacy_codes(title_overlay.title.as_str());
-                    ui.label(
-                        egui::RichText::new(title)
-                            .size(34.0)
-                            .strong()
-                            .color(egui::Color32::from_white_alpha(alpha_u8)),
-                    );
-                }
-                if !title_overlay.subtitle.is_empty() {
-                    let subtitle = strip_legacy_codes(title_overlay.subtitle.as_str());
-                    ui.label(
-                        egui::RichText::new(subtitle)
-                            .size(20.0)
-                            .color(egui::Color32::from_white_alpha(alpha_u8)),
-                    );
-                }
+            let frame = egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(
+                    ((alpha * state.title_background_opacity).round()).clamp(0.0, 255.0) as u8,
+                ))
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .corner_radius(6.0);
+            frame.show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    if !title_overlay.title.is_empty() {
+                        let title = strip_legacy_codes(title_overlay.title.as_str());
+                        ui.label(
+                            egui::RichText::new(title)
+                                .size(state.title_font_size)
+                                .strong()
+                                .color(egui::Color32::from_white_alpha(alpha_u8)),
+                        );
+                    }
+                    if !title_overlay.subtitle.is_empty() {
+                        let subtitle = strip_legacy_codes(title_overlay.subtitle.as_str());
+                        ui.label(
+                            egui::RichText::new(subtitle)
+                                .size((state.title_font_size * 0.58).clamp(10.0, 36.0))
+                                .color(egui::Color32::from_white_alpha(alpha_u8)),
+                        );
+                    }
+                });
             });
         });
 }
 
-fn draw_action_bar_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayState) {
+fn draw_action_bar_overlay(
+    ctx: &egui::Context,
+    title_overlay: &TitleOverlayState,
+    state: &ConnectUiState,
+) {
     if title_overlay.action_bar.is_empty() {
         return;
     }
@@ -3075,21 +3230,27 @@ fn draw_action_bar_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayStat
         .interactable(false)
         .show(ctx, |ui| {
             let frame = egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha((alpha * 112.0).round() as u8))
+                .fill(egui::Color32::from_black_alpha(
+                    ((alpha * state.title_background_opacity).round()).clamp(0.0, 255.0) as u8,
+                ))
                 .inner_margin(egui::Margin::same(6))
                 .corner_radius(4.0);
             frame.show(ui, |ui| {
                 let text = strip_legacy_codes(title_overlay.action_bar.as_str());
                 ui.label(
                     egui::RichText::new(text)
-                        .size(18.0)
+                        .size((state.title_font_size * 0.53).clamp(10.0, 30.0))
                         .color(egui::Color32::from_white_alpha(alpha_u8)),
                 );
             });
         });
 }
 
-fn draw_tab_list_overlay(ctx: &egui::Context, tab_list_header_footer: &TabListHeaderFooter) {
+fn draw_tab_list_overlay(
+    ctx: &egui::Context,
+    tab_list_header_footer: &TabListHeaderFooter,
+    state: &ConnectUiState,
+) {
     if tab_list_header_footer.header.trim().is_empty() && tab_list_header_footer.footer.trim().is_empty()
     {
         return;
@@ -3100,19 +3261,31 @@ fn draw_tab_list_overlay(ctx: &egui::Context, tab_list_header_footer: &TabListHe
         .interactable(false)
         .show(ctx, |ui| {
             let frame = egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(112))
+                .fill(egui::Color32::from_black_alpha(alpha_to_u8(
+                    state.scoreboard_background_opacity,
+                )))
                 .inner_margin(egui::Margin::same(10))
                 .corner_radius(4.0);
             frame.show(ui, |ui| {
                 ui.set_width(320.0);
                 if !tab_list_header_footer.header.trim().is_empty() {
-                    draw_legacy_text(ui, tab_list_header_footer.header.as_str(), true);
+                    draw_legacy_text(
+                        ui,
+                        tab_list_header_footer.header.as_str(),
+                        true,
+                        state.scoreboard_font_size,
+                    );
                 }
                 if !tab_list_header_footer.footer.trim().is_empty() {
                     if !tab_list_header_footer.header.trim().is_empty() {
                         ui.add_space(8.0);
                     }
-                    draw_legacy_text(ui, tab_list_header_footer.footer.as_str(), false);
+                    draw_legacy_text(
+                        ui,
+                        tab_list_header_footer.footer.as_str(),
+                        false,
+                        state.scoreboard_font_size,
+                    );
                 }
             });
         });
@@ -3141,9 +3314,9 @@ fn overlay_alpha(started_at: Option<std::time::Instant>, times: rs_utils::TitleT
     Some(1.0)
 }
 
-fn draw_legacy_text(ui: &mut egui::Ui, text: &str, centered: bool) {
+fn draw_legacy_text(ui: &mut egui::Ui, text: &str, centered: bool, font_size: f32) {
     let segments = parse_legacy_chat_segments(text);
-    let layout_job = legacy_layout_job(&segments);
+    let layout_job = legacy_layout_job(&segments, font_size);
     if centered {
         ui.horizontal_centered(|ui| {
             ui.label(layout_job.clone());
@@ -3153,7 +3326,7 @@ fn draw_legacy_text(ui: &mut egui::Ui, text: &str, centered: bool) {
     }
 }
 
-fn legacy_layout_job(segments: &[ChatSegment]) -> egui::text::LayoutJob {
+fn legacy_layout_job(segments: &[ChatSegment], font_size: f32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     for segment in segments {
         if segment.text.is_empty() {
@@ -3161,10 +3334,11 @@ fn legacy_layout_job(segments: &[ChatSegment]) -> egui::text::LayoutJob {
         }
         let mut format = egui::TextFormat {
             color: segment.color,
+            font_id: egui::FontId::proportional(font_size),
             ..Default::default()
         };
         if segment.bold {
-            format.font_id = egui::FontId::proportional(15.5);
+            format.font_id = egui::FontId::proportional(font_size);
         }
         if segment.italic {
             format.italics = true;
@@ -3178,6 +3352,10 @@ fn legacy_layout_job(segments: &[ChatSegment]) -> egui::text::LayoutJob {
         job.append(segment.text.as_str(), 0.0, format);
     }
     job
+}
+
+fn alpha_to_u8(value: f32) -> u8 {
+    value.round().clamp(0.0, 255.0) as u8
 }
 
 fn strip_legacy_codes(text: &str) -> String {
