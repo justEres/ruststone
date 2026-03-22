@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
 use rand::Rng;
-use rs_protocol::protocol::Conn;
+use rs_protocol::protocol::{Conn, Direction, State, packet};
 use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::packet::Packet;
 use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
@@ -104,14 +104,15 @@ fn run_connected_session(
     let mut reader_conn = conn.clone();
     thread::spawn(move || {
         loop {
-            match reader_conn.read_packet() {
-                Ok(pkt) => {
+            match read_packet_allow_visual_tolerance(&mut reader_conn) {
+                Ok(Some(pkt)) => {
                     if pkt_tx.send(Ok(pkt)).is_err() {
                         break;
                     }
                 }
+                Ok(None) => continue,
                 Err(e) => {
-                    let _ = pkt_tx.send(Err(e.to_string()));
+                    let _ = pkt_tx.send(Err(e));
                     break;
                 }
             }
@@ -155,6 +156,60 @@ fn run_connected_session(
             }
         }
     }
+}
+
+fn read_packet_allow_visual_tolerance(conn: &mut Conn) -> Result<Option<Packet>, String> {
+    let compression_threshold = conn.compression_threshold;
+    let (id, mut buf) =
+        Conn::read_raw_packet_from(conn, compression_threshold).map_err(|err| err.to_string())?;
+
+    let dir = Direction::Clientbound;
+    let tolerate_visual = is_tolerable_visual_packet(conn.state, dir, id);
+
+    let packet = match packet::packet_by_id(conn.protocol_version, conn.state, dir, id, &mut buf) {
+        Ok(packet) => packet,
+        Err(err) if tolerate_visual => {
+            warn!(
+                "Skipping visual packet 0x{:X} after parse failure: {}",
+                id, err
+            );
+            return Ok(None);
+        }
+        Err(err) => return Err(err.to_string()),
+    };
+
+    let Some(packet) = packet else {
+        if tolerate_visual {
+            warn!("Skipping unknown visual packet 0x{:X}", id);
+            return Ok(None);
+        }
+        return Err("protocol error: missing packet".to_string());
+    };
+
+    let pos = buf.position() as usize;
+    let ibuf = buf.into_inner();
+    if ibuf.len() != pos {
+        let bytes_left = ibuf.len() - pos;
+        if tolerate_visual {
+            warn!(
+                "Accepted visual packet 0x{:X} with {} unread bytes left",
+                id, bytes_left
+            );
+            return Ok(Some(packet));
+        }
+        return Err(format!(
+            "protocol error: Failed to read all of packet 0x{:X}, had {} bytes left",
+            id, bytes_left
+        ));
+    }
+
+    Ok(Some(packet))
+}
+
+fn is_tolerable_visual_packet(state: State, dir: Direction, id: i32) -> bool {
+    state == State::Play
+        && matches!(dir, Direction::Clientbound)
+        && matches!(id, 0x3B | 0x3C | 0x3D | 0x3E | 0x45 | 0x47)
 }
 
 fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {

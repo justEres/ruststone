@@ -2989,6 +2989,9 @@ fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
     if lines.is_empty() {
         return;
     }
+    let sidebar_width = 180.0;
+    let score_width = 28.0;
+    let name_width = sidebar_width - score_width - 16.0;
 
     egui::Area::new(egui::Id::new("scoreboard_sidebar"))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
@@ -2999,14 +3002,15 @@ fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
                 .inner_margin(egui::Margin::same(8))
                 .corner_radius(4.0);
             frame.show(ui, |ui| {
-                ui.set_min_width(180.0);
+                ui.set_width(sidebar_width);
+                ui.set_min_width(sidebar_width);
+                ui.set_max_width(sidebar_width);
                 draw_legacy_text(ui, objective.display_name.as_str(), true);
                 ui.add_space(4.0);
                 for (name, value) in lines {
                     ui.horizontal(|ui| {
-                        let available_width = (ui.available_width() - 36.0).max(40.0);
                         ui.allocate_ui_with_layout(
-                            egui::vec2(available_width, 18.0),
+                            egui::vec2(name_width.max(40.0), 18.0),
                             egui::Layout::left_to_right(egui::Align::Min),
                             |ui| draw_legacy_text(ui, name.as_str(), false),
                         );
