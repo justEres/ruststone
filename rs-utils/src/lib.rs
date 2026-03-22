@@ -278,14 +278,14 @@ impl ScoreboardState {
         let mut lines: Vec<(String, i32)> = self
             .scores
             .iter()
-            .filter(|((_, objective), _)| objective == objective_name)
+            .filter(|((entry, objective), _)| objective == objective_name && !entry.starts_with('#'))
             .map(|((entry, _), value)| (self.format_entry(entry), *value))
             .collect();
         lines.sort_by(|(name_a, value_a), (name_b, value_b)| {
-            value_b.cmp(value_a).then_with(|| name_a.cmp(name_b))
+            value_a.cmp(value_b).then_with(|| name_b.cmp(name_a))
         });
         if lines.len() > 15 {
-            lines.truncate(15);
+            lines = lines.split_off(lines.len() - 15);
         }
         lines
     }
@@ -1476,5 +1476,23 @@ mod tests {
 
         assert!(scoreboard.sidebar_objective().is_none());
         assert!(scoreboard.sidebar_lines().is_empty());
+    }
+
+    #[test]
+    fn scoreboard_sidebar_filters_hidden_entries_and_keeps_highest_fifteen() {
+        let mut scoreboard = ScoreboardState::default();
+        scoreboard.set_objective("bw".to_string(), "Bedwars".to_string(), None);
+        scoreboard.set_display_slot(1, "bw".to_string());
+
+        scoreboard.set_score("#hidden".to_string(), "bw".to_string(), 999);
+        for idx in 0..20 {
+            scoreboard.set_score(format!("Player{idx:02}"), "bw".to_string(), idx);
+        }
+
+        let lines = scoreboard.sidebar_lines();
+        assert_eq!(lines.len(), 15);
+        assert_eq!(lines.first(), Some(&("Player05".to_string(), 5)));
+        assert_eq!(lines.last(), Some(&("Player19".to_string(), 19)));
+        assert!(lines.iter().all(|(name, _)| !name.starts_with('#')));
     }
 }

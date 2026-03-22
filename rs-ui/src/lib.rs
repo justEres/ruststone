@@ -3114,54 +3114,103 @@ fn draw_scoreboard_sidebar(
     let Some((_, objective)) = scoreboard.sidebar_objective() else {
         return;
     };
-    let lines = scoreboard.sidebar_lines();
+    let mut lines = scoreboard.sidebar_lines();
     if lines.is_empty() {
         return;
     }
-    let sidebar_width = 180.0;
-    let score_width = 28.0;
-    let name_width = sidebar_width - score_width - 16.0;
+    let title_text = single_line_plain_text(objective.display_name.as_str());
 
     egui::Area::new(egui::Id::new("scoreboard_sidebar"))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
         .interactable(false)
         .show(ctx, |ui| {
-            let frame = egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(alpha_to_u8(
-                    state.scoreboard_background_opacity,
-                )))
-                .inner_margin(egui::Margin::same(8))
-                .corner_radius(4.0);
-            frame.show(ui, |ui| {
-                ui.set_width(sidebar_width);
-                ui.set_min_width(sidebar_width);
-                ui.set_max_width(sidebar_width);
-                draw_legacy_text(
-                    ui,
-                    objective.display_name.as_str(),
-                    true,
-                    state.scoreboard_font_size,
+            let font_id = egui::FontId::proportional(state.scoreboard_font_size);
+            let bg_alpha = alpha_to_u8(state.scoreboard_background_opacity);
+            let row_bg = egui::Color32::from_black_alpha(bg_alpha);
+            let title_bg = egui::Color32::from_black_alpha(bg_alpha.saturating_add(24));
+            let name_color = egui::Color32::from_gray(235);
+            let score_color = egui::Color32::from_rgb(255, 85, 85);
+            let title_color = egui::Color32::WHITE;
+
+            let measure_width = |text: &str| -> f32 {
+                ui.painter()
+                    .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+                    .size()
+                    .x
+            };
+
+            let content_lines: Vec<(String, String)> = lines
+                .drain(..)
+                .map(|(name, value)| (single_line_plain_text(name.as_str()), value.to_string()))
+                .collect();
+
+            let mut max_width = measure_width(title_text.as_str());
+            for (name, score) in &content_lines {
+                let combined = if name.is_empty() {
+                    score.clone()
+                } else {
+                    format!("{name}: {score}")
+                };
+                max_width = max_width.max(measure_width(combined.as_str()));
+            }
+
+            let row_height = ui
+                .painter()
+                .layout_no_wrap("Ay".to_string(), font_id.clone(), egui::Color32::WHITE)
+                .size()
+                .y
+                .ceil();
+            let screen_rect = ctx.screen_rect();
+            let sidebar_width = (max_width + 6.0).clamp(48.0, screen_rect.width() * 0.4);
+            let right = screen_rect.right() - 3.0;
+            let total_rows = content_lines.len() as f32;
+            let bottom = screen_rect.center().y + (total_rows * row_height) / 3.0;
+            let left = right - sidebar_width;
+            let painter = ui.painter();
+
+            for (idx, (name, score)) in content_lines.iter().enumerate() {
+                let top = bottom - (idx as f32 + 1.0) * row_height;
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(left - 2.0, top),
+                    egui::pos2(right, top + row_height),
                 );
-                ui.add_space(4.0);
-                for (name, value) in lines {
-                    ui.horizontal(|ui| {
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(name_width.max(40.0), 18.0),
-                            egui::Layout::left_to_right(egui::Align::Min),
-                            |ui| {
-                                draw_legacy_text(ui, name.as_str(), false, state.scoreboard_font_size)
-                            },
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(value.to_string())
-                                    .size(state.scoreboard_font_size)
-                                    .color(egui::Color32::from_gray(220)),
-                            );
-                        });
-                    });
+                painter.rect_filled(rect, 0.0, row_bg);
+                if !name.is_empty() {
+                    painter.text(
+                        egui::pos2(left, top + row_height * 0.5),
+                        egui::Align2::LEFT_CENTER,
+                        name,
+                        font_id.clone(),
+                        name_color,
+                    );
                 }
-            });
+                painter.text(
+                    egui::pos2(right - 2.0, top + row_height * 0.5),
+                    egui::Align2::RIGHT_CENTER,
+                    score,
+                    font_id.clone(),
+                    score_color,
+                );
+            }
+
+            let title_top = bottom - (total_rows + 1.0) * row_height;
+            let title_rect = egui::Rect::from_min_max(
+                egui::pos2(left - 2.0, title_top - 1.0),
+                egui::pos2(right, title_top + row_height - 1.0),
+            );
+            painter.rect_filled(title_rect, 0.0, title_bg);
+            let separator_rect = egui::Rect::from_min_max(
+                egui::pos2(left - 2.0, bottom - total_rows * row_height - 1.0),
+                egui::pos2(right, bottom - total_rows * row_height),
+            );
+            painter.rect_filled(separator_rect, 0.0, row_bg);
+            painter.text(
+                egui::pos2((left + right) * 0.5 - 1.0, title_top + row_height * 0.5 - 1.0),
+                egui::Align2::CENTER_CENTER,
+                title_text,
+                font_id,
+                title_color,
+            );
         });
 }
 
@@ -3366,6 +3415,27 @@ fn strip_legacy_codes(text: &str) -> String {
             let _ = chars.next();
             continue;
         }
+        out.push(ch);
+    }
+    out
+}
+
+fn single_line_plain_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut pending_space = false;
+    for ch in strip_legacy_codes(text).chars() {
+        if ch.is_control() {
+            pending_space = true;
+            continue;
+        }
+        if ch.is_whitespace() {
+            pending_space = true;
+            continue;
+        }
+        if pending_space && !out.is_empty() {
+            out.push(' ');
+        }
+        pending_space = false;
         out.push(ch);
     }
     out
