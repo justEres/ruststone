@@ -1007,7 +1007,7 @@ fn connect_ui(
                         let mut render_distance = render_debug.render_distance_chunks;
                         options_changed |= ui
                             .add(
-                                egui::Slider::new(&mut render_distance, 2..=32)
+                                egui::Slider::new(&mut render_distance, 2..=64)
                                     .text("Render Distance"),
                             )
                             .changed();
@@ -1546,8 +1546,36 @@ fn connect_ui(
                             .changed();
                         ui.label("Entity hitboxes toggle: H");
                         ui.add_space(8.0);
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.mesh_enqueue_budget_per_frame,
+                                    1..=128,
+                                )
+                                .text("Mesh jobs per frame"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut render_debug.mesh_apply_budget_per_frame,
+                                    1..=64,
+                                )
+                                .text("Mesh uploads per frame"),
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut render_debug.mesh_max_in_flight, 1..=256)
+                                    .text("Max async meshing"),
+                            )
+                            .changed();
+                        ui.add_space(8.0);
                         if ui.button("Force remesh chunks").clicked() {
                             render_debug.force_remesh = true;
+                        }
+                        if ui.button("Clear + regenerate all chunk meshes").clicked() {
+                            render_debug.clear_and_rebuild_meshes = true;
                         }
                         if ui.button("Rebuild render materials").clicked() {
                             render_debug.material_rebuild_nonce =
@@ -1921,6 +1949,9 @@ impl Default for ConnectUiState {
 struct ClientOptionsFile {
     pub fov_deg: f32,
     pub render_distance_chunks: i32,
+    pub mesh_enqueue_budget_per_frame: u32,
+    pub mesh_apply_budget_per_frame: u32,
+    pub mesh_max_in_flight: u32,
     pub shadows_enabled: bool,
     pub shadow_distance_scale: f32,
     pub aa_mode: String,
@@ -2015,6 +2046,9 @@ impl Default for ClientOptionsFile {
         Self {
             fov_deg: render.fov_deg,
             render_distance_chunks: render.render_distance_chunks,
+            mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
+            mesh_apply_budget_per_frame: render.mesh_apply_budget_per_frame,
+            mesh_max_in_flight: render.mesh_max_in_flight,
             shadows_enabled: render.shadows_enabled,
             shadow_distance_scale: render.shadow_distance_scale,
             aa_mode: render.aa_mode.as_options_value().to_string(),
@@ -2113,6 +2147,9 @@ fn options_to_file(
     ClientOptionsFile {
         fov_deg: render.fov_deg,
         render_distance_chunks: render.render_distance_chunks,
+        mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
+        mesh_apply_budget_per_frame: render.mesh_apply_budget_per_frame,
+        mesh_max_in_flight: render.mesh_max_in_flight,
         shadows_enabled: render.shadows_enabled,
         shadow_distance_scale: render.shadow_distance_scale,
         aa_mode: render.aa_mode.as_options_value().to_string(),
@@ -2210,7 +2247,10 @@ fn apply_options(
     window: &mut Window,
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
-    render.render_distance_chunks = options.render_distance_chunks.clamp(2, 32);
+    render.render_distance_chunks = options.render_distance_chunks.clamp(2, 64);
+    render.mesh_enqueue_budget_per_frame = options.mesh_enqueue_budget_per_frame.clamp(1, 128);
+    render.mesh_apply_budget_per_frame = options.mesh_apply_budget_per_frame.clamp(1, 64);
+    render.mesh_max_in_flight = options.mesh_max_in_flight.clamp(1, 256);
     render.shader_quality_mode = options.shader_quality_mode.clamp(0, 3);
     if let Some(mode) = AntiAliasingMode::from_options_value(&options.aa_mode) {
         render.aa_mode = mode;

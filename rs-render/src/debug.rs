@@ -2,10 +2,10 @@ use bevy::prelude::*;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::async_mesh::{MeshAsyncResources, MeshGeneration, MeshInFlight, MeshJob};
+use crate::async_mesh::{MeshGeneration, MeshInFlight};
 use crate::chunk::{
     ChunkFace, ChunkOcclusionData, ChunkRenderAssets, ChunkRenderState, ChunkStore,
-    snapshot_for_chunk,
+    PendingChunkRemesh,
 };
 use crate::components::{ChunkRoot, Player, PlayerCamera, ShadowCasterLight};
 use bevy::pbr::wireframe::WireframeConfig;
@@ -154,6 +154,9 @@ pub struct RenderDebugSettings {
     pub water_ssr_thickness: f32,
     pub water_ssr_max_distance: f32,
     pub water_ssr_stride: f32,
+    pub mesh_enqueue_budget_per_frame: u32,
+    pub mesh_apply_budget_per_frame: u32,
+    pub mesh_max_in_flight: u32,
     // Shader debug output mode:
     // 0 off, 1 pass id, 2 atlas rgb, 3 atlas alpha, 4 vertex tint, 5 linear depth
     pub cutout_debug_mode: u8,
@@ -162,6 +165,7 @@ pub struct RenderDebugSettings {
     pub show_layer_chunks_cutout: bool,
     pub show_layer_chunks_transparent: bool,
     pub force_remesh: bool,
+    pub clear_and_rebuild_meshes: bool,
     pub material_rebuild_nonce: u32,
 }
 
@@ -240,12 +244,16 @@ impl Default for RenderDebugSettings {
             water_ssr_thickness: 0.24,
             water_ssr_max_distance: 80.0,
             water_ssr_stride: 1.25,
+            mesh_enqueue_budget_per_frame: 24,
+            mesh_apply_budget_per_frame: 8,
+            mesh_max_in_flight: 48,
             cutout_debug_mode: 0,
             show_layer_entities: true,
             show_layer_chunks_opaque: true,
             show_layer_chunks_cutout: true,
             show_layer_chunks_transparent: true,
             force_remesh: false,
+            clear_and_rebuild_meshes: false,
             material_rebuild_nonce: 0,
         }
     }
@@ -604,10 +612,10 @@ pub fn remesh_on_meshing_toggle(
     mut settings: ResMut<RenderDebugSettings>,
     mut state: ResMut<MeshingToggleState>,
     store: Res<ChunkStore>,
-    async_mesh: Res<MeshAsyncResources>,
+    mut pending: ResMut<PendingChunkRemesh>,
     mut generation: ResMut<MeshGeneration>,
     mut in_flight: ResMut<MeshInFlight>,
-    assets: Res<ChunkRenderAssets>,
+    _assets: Res<ChunkRenderAssets>,
 ) {
     if settings.use_greedy_meshing == state.last_use_greedy
         && settings.voxel_ao_enabled == state.last_voxel_ao_enabled
@@ -624,28 +632,12 @@ pub fn remesh_on_meshing_toggle(
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
     state.last_barrier_billboard = settings.barrier_billboard;
     settings.force_remesh = false;
+    settings.clear_and_rebuild_meshes = false;
     generation.0 = generation.0.wrapping_add(1);
     in_flight.chunks.clear();
     in_flight.pending_remesh.clear();
-    for key in store.chunks.keys().copied() {
-        let snapshot = snapshot_for_chunk(&store, key);
-        let job = MeshJob {
-            generation: generation.0,
-            chunk_key: key,
-            snapshot,
-            use_greedy: settings.use_greedy_meshing,
-            leaf_depth_layer_faces: true,
-            voxel_ao_enabled: settings.voxel_ao_enabled,
-            voxel_ao_strength: settings.voxel_ao_strength,
-            voxel_ao_cutout: settings.voxel_ao_cutout,
-            barrier_billboard: settings.barrier_billboard,
-            texture_mapping: assets.texture_mapping.clone(),
-            biome_tints: assets.biome_tints.clone(),
-        };
-        if async_mesh.job_tx.send(job).is_ok() {
-            in_flight.chunks.insert(key);
-        }
-    }
+    pending.keys.clear();
+    pending.keys.extend(store.chunks.keys().copied());
 }
 
 pub fn refresh_render_state_on_mode_change(

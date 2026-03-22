@@ -88,6 +88,11 @@ pub enum WorldUpdate {
 pub struct ChunkUpdateQueue(pub Vec<WorldUpdate>);
 
 #[derive(Resource, Default)]
+pub struct PendingChunkRemesh {
+    pub keys: std::collections::HashSet<(i32, i32)>,
+}
+
+#[derive(Resource, Default)]
 pub struct ChunkRenderState {
     pub entries: HashMap<(i32, i32), ChunkEntry>,
 }

@@ -73,6 +73,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<debug::MeshingToggleState>()
         .init_resource::<debug::RenderPerfStats>()
         .init_resource::<chunk::ChunkUpdateQueue>()
+        .init_resource::<chunk::PendingChunkRemesh>()
         .init_resource::<chunk::ChunkRenderState>()
         .init_resource::<chunk::ChunkStore>()
         .init_resource::<chunk::ChunkRenderAssets>()
@@ -117,18 +118,19 @@ impl Plugin for RenderPlugin {
 fn enqueue_chunk_meshes(
     mut commands: Commands,
     mut queue: ResMut<chunk::ChunkUpdateQueue>,
+    mut pending: ResMut<chunk::PendingChunkRemesh>,
     mut store: ResMut<chunk::ChunkStore>,
     mut state: ResMut<chunk::ChunkRenderState>,
     async_mesh: Res<async_mesh::MeshAsyncResources>,
     mut in_flight: ResMut<async_mesh::MeshInFlight>,
     mut generation: ResMut<async_mesh::MeshGeneration>,
-    render_debug: Res<debug::RenderDebugSettings>,
+    mut render_debug: ResMut<debug::RenderDebugSettings>,
     mut perf: ResMut<debug::RenderPerfStats>,
     assets: Res<chunk::ChunkRenderAssets>,
     camera_query: Query<&GlobalTransform, With<components::PlayerCamera>>,
 ) {
     let start = std::time::Instant::now();
-    if queue.0.is_empty() {
+    if queue.0.is_empty() && pending.keys.is_empty() && !render_debug.clear_and_rebuild_meshes {
         perf.in_flight = in_flight.chunks.len() as u32;
         return;
     }
@@ -137,6 +139,7 @@ fn enqueue_chunk_meshes(
     let raw_updates = queue.0.len() as u32;
     let mut reset_world = false;
     let mut unloaded_keys = Vec::new();
+    let clear_and_rebuild = std::mem::take(&mut render_debug.clear_and_rebuild_meshes);
     for update in queue.0.drain(..) {
         match update {
             chunk::WorldUpdate::Reset => {
@@ -148,6 +151,7 @@ fn enqueue_chunk_meshes(
             chunk::WorldUpdate::ChunkData(chunk) => {
                 let key = (chunk.x, chunk.z);
                 chunk::update_store(&mut store, chunk);
+                pending.keys.insert(key);
                 updated_keys.insert(key);
                 // If the neighbor chunk wasn't loaded when this chunk was meshed, it may have
                 // generated border faces. Remesh neighbors when new chunk data arrives to
@@ -155,19 +159,21 @@ fn enqueue_chunk_meshes(
                 for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                     let nk = (key.0 + dx, key.1 + dz);
                     if store.chunks.contains_key(&nk) {
+                        pending.keys.insert(nk);
                         updated_keys.insert(nk);
                     }
                 }
             }
             chunk::WorldUpdate::BlockUpdate(block_update) => {
                 for key in chunk::apply_block_update(&mut store, block_update) {
+                    pending.keys.insert(key);
                     updated_keys.insert(key);
                 }
             }
         }
     }
 
-    if reset_world || !unloaded_keys.is_empty() {
+    if reset_world || !unloaded_keys.is_empty() || clear_and_rebuild {
         generation.0 = generation.0.wrapping_add(1);
         in_flight.chunks.clear();
         in_flight.pending_remesh.clear();
@@ -178,17 +184,26 @@ fn enqueue_chunk_meshes(
             commands.entity(entry.entity).despawn_recursive();
         }
         store.chunks.clear();
+        pending.keys.clear();
         perf.in_flight = 0;
         updated_keys.clear();
+    } else if clear_and_rebuild {
+        for (_, entry) in state.entries.drain() {
+            commands.entity(entry.entity).despawn_recursive();
+        }
+        pending.keys.clear();
+        pending.keys.extend(store.chunks.keys().copied());
     } else {
         for key in unloaded_keys {
             store.chunks.remove(&key);
+            pending.keys.remove(&key);
             if let Some(entry) = state.entries.remove(&key) {
                 commands.entity(entry.entity).despawn_recursive();
             }
             for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                 let neighbor = (key.0 + dx, key.1 + dz);
                 if store.chunks.contains_key(&neighbor) {
+                    pending.keys.insert(neighbor);
                     updated_keys.insert(neighbor);
                 }
             }
@@ -196,7 +211,7 @@ fn enqueue_chunk_meshes(
     }
     let updates_len = updated_keys.len() as u32;
 
-    let mut ordered_keys = updated_keys.into_iter().collect::<Vec<_>>();
+    let mut ordered_keys = pending.keys.iter().copied().collect::<Vec<_>>();
     if let Ok(cam) = camera_query.get_single() {
         let cam_pos = cam.translation();
         let cam_fwd = cam.forward();
@@ -209,9 +224,15 @@ fn enqueue_chunk_meshes(
         ordered_keys.sort_unstable();
     }
 
-    for key in ordered_keys {
+    let in_flight_limit = render_debug.mesh_max_in_flight.max(1) as usize;
+    let enqueue_budget = render_debug.mesh_enqueue_budget_per_frame.max(1) as usize;
+    let available_slots = in_flight_limit.saturating_sub(in_flight.chunks.len());
+    let dispatch_limit = enqueue_budget.min(available_slots);
+
+    for key in ordered_keys.into_iter().take(dispatch_limit) {
         if in_flight.chunks.contains(&key) {
             in_flight.pending_remesh.insert(key);
+            pending.keys.remove(&key);
             continue;
         }
         let snapshot = chunk::snapshot_for_chunk(&store, key);
@@ -230,6 +251,7 @@ fn enqueue_chunk_meshes(
         };
         if async_mesh.job_tx.send(job).is_ok() {
             in_flight.chunks.insert(key);
+            pending.keys.remove(&key);
         }
     }
 
@@ -250,7 +272,7 @@ fn mesh_priority_score(key: (i32, i32), cam_pos: Vec3, cam_forward: Vec3) -> f32
     let to = center - cam_pos;
     let dist2 = to.length_squared();
     let front_bias = to.normalize_or_zero().dot(cam_forward).max(0.0);
-    dist2 - front_bias * 1024.0
+    dist2 - front_bias * 64.0
 }
 
 fn apply_mesh_results(
@@ -272,8 +294,12 @@ fn apply_mesh_results(
         .result_rx
         .lock()
         .expect("mesh result receiver lock poisoned");
+    let apply_budget = render_debug.mesh_apply_budget_per_frame.max(1);
 
-    while let Ok(result) = receiver.try_recv() {
+    while applied < apply_budget {
+        let Ok(result) = receiver.try_recv() else {
+            break;
+        };
         let key = result.chunk_key;
         if result.generation != generation.0 || !store.chunks.contains_key(&key) {
             in_flight.chunks.remove(&key);
