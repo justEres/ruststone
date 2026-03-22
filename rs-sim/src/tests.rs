@@ -754,3 +754,36 @@ fn open_door_allows_forward_motion() {
         state.pos.x
     );
 }
+
+#[test]
+fn missing_chunk_does_not_hard_stop_player_motion() {
+    let world = WorldCollision::empty();
+    let prev = PlayerSimState {
+        pos: Vec3::new(0.5, 80.0, 0.5),
+        vel: Vec3::new(0.12, 0.0, 0.0),
+        on_ground: false,
+        collided_horizontally: false,
+        jump_ticks: 0,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+    let input = InputState {
+        forward: 1.0,
+        strafe: 0.0,
+        jump: false,
+        sprint: false,
+        sneak: false,
+        can_fly: false,
+        flying: false,
+        flying_speed: 0.05,
+        speed_multiplier: 1.0,
+        jump_boost_amplifier: None,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
+
+    let next = simulate_tick(&prev, &input, &world);
+    assert!(next.pos.x > prev.pos.x, "expected motion through missing chunk");
+    assert!(!next.on_ground, "missing chunk fallback should not pin player");
+    assert!(!next.collided_horizontally);
+}

@@ -1289,10 +1289,7 @@ pub fn simulate_tick(
         state.jump_ticks = 0;
     }
     if !world.has_chunk_at_pos(state.pos) {
-        state.vel = Vec3::ZERO;
-        state.on_ground = true;
-        state.collided_horizontally = false;
-        return state;
+        return simulate_tick_unloaded_chunk(state, input);
     }
     let sprinting = effective_sprint(input);
     let flying = input.can_fly && input.flying;
@@ -1427,6 +1424,83 @@ pub fn simulate_tick(
         state.vel.x *= f4;
         state.vel.z *= f4;
     }
+    state
+}
+
+fn simulate_tick_unloaded_chunk(mut state: PlayerSimState, input: &InputState) -> PlayerSimState {
+    let sprinting = effective_sprint(input);
+    let flying = input.can_fly && input.flying;
+
+    if flying {
+        let fly_speed = input.flying_speed.max(0.0);
+        let fly_move_speed = fly_speed * if sprinting { FLY_SPRINT_MULT } else { 1.0 };
+
+        let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
+        if wish.length_squared() > 1.0 {
+            wish = wish.normalize();
+        }
+
+        move_flying(&mut state.vel, wish.x, wish.z, fly_move_speed, state.yaw);
+
+        if input.sneak {
+            state.vel.y -= fly_speed * FLY_VERTICAL_ACCEL_MULT;
+        }
+        if input.jump {
+            state.vel.y += fly_speed * FLY_VERTICAL_ACCEL_MULT;
+        }
+
+        state.pos += state.vel;
+        state.on_ground = false;
+        state.collided_horizontally = false;
+        state.vel.x *= FLY_HORIZONTAL_DAMPING;
+        state.vel.z *= FLY_HORIZONTAL_DAMPING;
+        state.vel.y *= FLY_VERTICAL_DAMPING;
+        return state;
+    }
+
+    let on_ground_for_move = state.on_ground;
+
+    if on_ground_for_move && input.jump && state.jump_ticks == 0 {
+        let jump_boost = input
+            .jump_boost_amplifier
+            .map_or(0.0, |amp| 0.1 * (f32::from(amp) + 1.0));
+        state.vel.y = JUMP_VEL + jump_boost;
+        state.jump_ticks = 10;
+        if sprinting {
+            let (sin_yaw, cos_yaw) = state.yaw.sin_cos();
+            let forward = Vec3::new(-sin_yaw, 0.0, -cos_yaw);
+            state.vel.x += forward.x * 0.2;
+            state.vel.z += forward.z * 0.2;
+        }
+    }
+
+    let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
+    if wish.length_squared() > 1.0 {
+        wish = wish.normalize();
+    }
+    if input.sneak {
+        wish.x *= SNEAK_INPUT_SCALE;
+        wish.z *= SNEAK_INPUT_SCALE;
+    }
+
+    let move_speed =
+        BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
+    let accel = if on_ground_for_move {
+        move_speed * 0.16277136 / (0.91 * 0.91 * 0.91)
+    } else if sprinting {
+        SPEED_IN_AIR * 1.3
+    } else {
+        SPEED_IN_AIR
+    };
+    move_flying(&mut state.vel, wish.x, wish.z, accel, state.yaw);
+
+    state.pos += state.vel;
+    state.on_ground = false;
+    state.collided_horizontally = false;
+    state.vel.y += GRAVITY;
+    state.vel.x *= AIR_DRAG;
+    state.vel.z *= AIR_DRAG;
+    state.vel.y *= AIR_DRAG;
     state
 }
 
