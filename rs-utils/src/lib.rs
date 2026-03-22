@@ -1438,6 +1438,7 @@ pub enum ToNetMessage {
         auth_mode: AuthMode,
         auth_account_uuid: Option<String>,
         prism_accounts_path: Option<String>,
+        requested_view_distance: u8,
     },
     Disconnect,
     Shutdown,

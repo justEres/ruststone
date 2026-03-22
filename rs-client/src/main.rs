@@ -109,6 +109,7 @@ fn main() {
             auth_mode: cli.auth_mode.into(),
             auth_account_uuid: None,
             prism_accounts_path: None,
+            requested_view_distance: 12,
         });
     }
 

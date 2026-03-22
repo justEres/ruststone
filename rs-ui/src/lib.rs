@@ -770,6 +770,9 @@ fn connect_ui(
                                 auth_mode: state.auth_mode,
                                 auth_account_uuid,
                                 prism_accounts_path: Some(state.prism_accounts_path.clone()),
+                                requested_view_distance: render_debug
+                                    .render_distance_chunks
+                                    .clamp(2, 64) as u8,
                             }) {
                                 Ok(()) => {
                                     *app_state = AppState(ApplicationState::Connecting);
@@ -1012,6 +1015,26 @@ fn connect_ui(
                             )
                             .changed();
                         render_debug.render_distance_chunks = render_distance;
+                        ui.label(
+                            "Reconnect after changing render distance if you want the server to send more chunks.",
+                        );
+                        options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.flight_speed_boost_enabled,
+                                "Boost creative flight speed",
+                            )
+                            .changed();
+                        if render_debug.flight_speed_boost_enabled {
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.flight_speed_boost_multiplier,
+                                        1.0..=10.0,
+                                    )
+                                    .text("Flight speed multiplier"),
+                                )
+                                .changed();
+                        }
                         let mut selected_aa_mode = render_debug.aa_mode;
                         egui::ComboBox::from_label("Anti-aliasing")
                             .selected_text(selected_aa_mode.label())
@@ -2033,6 +2056,8 @@ struct ClientOptionsFile {
     pub scoreboard_font_size: f32,
     pub title_background_opacity: f32,
     pub title_font_size: f32,
+    pub flight_speed_boost_enabled: bool,
+    pub flight_speed_boost_multiplier: f32,
     pub cutout_debug_mode: u8,
     pub show_layer_entities: bool,
     pub show_layer_chunks_opaque: bool,
@@ -2130,6 +2155,8 @@ impl Default for ClientOptionsFile {
             scoreboard_font_size: 15.5,
             title_background_opacity: 80.0,
             title_font_size: 34.0,
+            flight_speed_boost_enabled: render.flight_speed_boost_enabled,
+            flight_speed_boost_multiplier: render.flight_speed_boost_multiplier,
             cutout_debug_mode: render.cutout_debug_mode,
             show_layer_entities: render.show_layer_entities,
             show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -2231,6 +2258,8 @@ fn options_to_file(
         scoreboard_font_size: state.scoreboard_font_size,
         title_background_opacity: state.title_background_opacity,
         title_font_size: state.title_font_size,
+        flight_speed_boost_enabled: render.flight_speed_boost_enabled,
+        flight_speed_boost_multiplier: render.flight_speed_boost_multiplier,
         cutout_debug_mode: render.cutout_debug_mode,
         show_layer_entities: render.show_layer_entities,
         show_layer_chunks_opaque: render.show_layer_chunks_opaque,
@@ -2335,6 +2364,8 @@ fn apply_options(
     state.scoreboard_font_size = options.scoreboard_font_size.clamp(10.0, 28.0);
     state.title_background_opacity = options.title_background_opacity.clamp(0.0, 255.0);
     state.title_font_size = options.title_font_size.clamp(14.0, 56.0);
+    render.flight_speed_boost_enabled = options.flight_speed_boost_enabled;
+    render.flight_speed_boost_multiplier = options.flight_speed_boost_multiplier.clamp(1.0, 10.0);
     render.cutout_debug_mode = options.cutout_debug_mode.clamp(0, 8);
     render.show_layer_entities = options.show_layer_entities;
     render.show_layer_chunks_opaque = options.show_layer_chunks_opaque;

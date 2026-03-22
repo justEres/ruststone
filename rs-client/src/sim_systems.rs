@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::MouseMotion;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -80,6 +81,16 @@ pub struct MovementSoundState {
     pub was_in_water: bool,
 }
 
+#[derive(SystemParam)]
+pub struct FixedSimParams<'w, 's> {
+    pub render_debug: Res<'w, RenderDebugSettings>,
+    pub to_net: Res<'w, ToNet>,
+    pub remote_entities: Res<'w, RemoteEntityRegistry>,
+    pub sim_ready: Res<'w, crate::sim::SimReady>,
+    pub timings: ResMut<'w, PerfTimings>,
+    pub _marker: std::marker::PhantomData<&'s ()>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PerfMonitorSample {
     pub frame_ms: f32,
@@ -158,6 +169,18 @@ fn client_abilities_flags(player_status: &rs_utils::PlayerStatus) -> u8 {
         flags |= 0x08;
     }
     flags
+}
+
+fn effective_flying_speed(
+    base_speed: f32,
+    render_debug: &RenderDebugSettings,
+    player_status: &rs_utils::PlayerStatus,
+) -> f32 {
+    if render_debug.flight_speed_boost_enabled && player_status.flying && player_status.can_fly {
+        base_speed * render_debug.flight_speed_boost_multiplier.clamp(1.0, 10.0)
+    } else {
+        base_speed
+    }
 }
 
 fn yaw_pitch_from_forward(forward: Vec3) -> (f32, f32) {
@@ -699,23 +722,25 @@ pub fn fixed_sim_tick_system(
     mut move_pkt_state: ResMut<MovementPacketState>,
     collision_map: Res<WorldCollisionMap>,
     app_state: Res<AppState>,
-    to_net: Res<ToNet>,
-    remote_entities: Res<RemoteEntityRegistry>,
-    sim_ready: Res<crate::sim::SimReady>,
-    mut timings: ResMut<PerfTimings>,
+    mut params: FixedSimParams,
 ) {
     let timer = Timing::start();
-    if !matches!(app_state.0, ApplicationState::Connected) || !sim_ready.0 {
+    if !matches!(app_state.0, ApplicationState::Connected) || !params.sim_ready.0 {
         move_pkt_state.initialized = false;
         move_pkt_state.ticks_since_pos = 0;
         action_state.jump_was_pressed = false;
         action_state.fly_toggle_timer = 0;
-        timings.fixed_tick_ms = timer.ms();
+        params.timings.fixed_tick_ms = timer.ms();
         return;
     }
     let world = WorldCollision::with_map(&collision_map);
     let tick = sim_clock.tick;
     let mut input_snapshot = input.0;
+    let boosted_flying_speed = effective_flying_speed(
+        player_status.flying_speed,
+        &params.render_debug,
+        &player_status,
+    );
 
     let gamemode_allows_flight = matches!(player_status.gamemode, 1 | 3);
     if !gamemode_allows_flight {
@@ -738,9 +763,9 @@ pub fn fixed_sim_tick_system(
             } else {
                 player_status.flying = !player_status.flying;
                 action_state.fly_toggle_timer = 0;
-                let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+                let _ = params.to_net.0.send(ToNetMessage::ClientAbilities {
                     flags: client_abilities_flags(&player_status),
-                    flying_speed: player_status.flying_speed,
+                    flying_speed: boosted_flying_speed,
                     walking_speed: player_status.walking_speed,
                 });
             }
@@ -748,16 +773,16 @@ pub fn fixed_sim_tick_system(
     } else if player_status.flying {
         player_status.flying = false;
         action_state.fly_toggle_timer = 0;
-        let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+        let _ = params.to_net.0.send(ToNetMessage::ClientAbilities {
             flags: client_abilities_flags(&player_status),
-            flying_speed: player_status.flying_speed,
+            flying_speed: boosted_flying_speed,
             walking_speed: player_status.walking_speed,
         });
     }
 
     input_snapshot.can_fly = player_status.can_fly;
     input_snapshot.flying = player_status.flying;
-    input_snapshot.flying_speed = player_status.flying_speed;
+    input_snapshot.flying_speed = boosted_flying_speed;
     input_snapshot.speed_multiplier = match player_status.speed_effect_amplifier {
         Some(amplifier) => 1.0 + 0.2 * (f32::from(amplifier) + 1.0),
         None => 1.0,
@@ -811,9 +836,9 @@ pub fn fixed_sim_tick_system(
     if player_status.flying && player_status.gamemode != 3 && sim_state.current.on_ground {
         // Vanilla behavior: landing cancels flying outside spectator mode.
         player_status.flying = false;
-        let _ = to_net.0.send(ToNetMessage::ClientAbilities {
+        let _ = params.to_net.0.send(ToNetMessage::ClientAbilities {
             flags: client_abilities_flags(&player_status),
-            flying_speed: player_status.flying_speed,
+            flying_speed: boosted_flying_speed,
             walking_speed: player_status.walking_speed,
         });
     }
@@ -824,7 +849,7 @@ pub fn fixed_sim_tick_system(
         if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) =
             correction_guard.pending_ack.take()
         {
-            let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
                 x: ack_pos.x as f64,
                 y: ack_pos.y as f64,
                 z: ack_pos.z as f64,
@@ -833,12 +858,12 @@ pub fn fixed_sim_tick_system(
                 on_ground: ack_on_ground,
             });
             latency.last_sent = Some(Instant::now());
-            timings.fixed_tick_ms = timer.ms();
+            params.timings.fixed_tick_ms = timer.ms();
             return;
         }
         if correction_guard.skip_send_ticks > 0 {
             correction_guard.skip_send_ticks = correction_guard.skip_send_ticks.saturating_sub(1);
-            timings.fixed_tick_ms = timer.ms();
+            params.timings.fixed_tick_ms = timer.ms();
             return;
         }
         let current_sneak = input_snapshot.sneak;
@@ -846,8 +871,8 @@ pub fn fixed_sim_tick_system(
 
         if current_sneak != action_state.sneaking {
             let action_id = if current_sneak { 0 } else { 1 };
-            if let Some(entity_id) = remote_entities.local_entity_id {
-                let _ = to_net.0.send(ToNetMessage::PlayerAction {
+            if let Some(entity_id) = params.remote_entities.local_entity_id {
+                let _ = params.to_net.0.send(ToNetMessage::PlayerAction {
                     entity_id,
                     action_id,
                 });
@@ -856,8 +881,8 @@ pub fn fixed_sim_tick_system(
         }
         if current_sprint != action_state.sprinting {
             let action_id = if current_sprint { 3 } else { 4 };
-            if let Some(entity_id) = remote_entities.local_entity_id {
-                let _ = to_net.0.send(ToNetMessage::PlayerAction {
+            if let Some(entity_id) = params.remote_entities.local_entity_id {
+                let _ = params.to_net.0.send(ToNetMessage::PlayerAction {
                     entity_id,
                     action_id,
                 });
@@ -895,7 +920,7 @@ pub fn fixed_sim_tick_system(
         };
 
         if moved && rotated {
-            let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
                 x: pos.x as f64,
                 y: pos.y as f64,
                 z: pos.z as f64,
@@ -904,20 +929,20 @@ pub fn fixed_sim_tick_system(
                 on_ground,
             });
         } else if moved {
-            let _ = to_net.0.send(ToNetMessage::PlayerMovePos {
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMovePos {
                 x: pos.x as f64,
                 y: pos.y as f64,
                 z: pos.z as f64,
                 on_ground,
             });
         } else if rotated {
-            let _ = to_net.0.send(ToNetMessage::PlayerMoveLook {
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMoveLook {
                 yaw,
                 pitch,
                 on_ground,
             });
         } else {
-            let _ = to_net.0.send(ToNetMessage::PlayerMoveGround { on_ground });
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMoveGround { on_ground });
         }
 
         if moved {
@@ -931,7 +956,7 @@ pub fn fixed_sim_tick_system(
         move_pkt_state.initialized = true;
         latency.last_sent = Some(Instant::now());
     }
-    timings.fixed_tick_ms = timer.ms();
+    params.timings.fixed_tick_ms = timer.ms();
 }
 
 fn is_water_state(block_state: u16) -> bool {

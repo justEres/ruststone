@@ -43,7 +43,12 @@ pub fn start_networking(
             Ok(mut conn) => {
                 info!("Connected to server");
                 let _ = to_main.send(FromNetMessage::Connected);
-                let shutdown = run_connected_session(&mut conn, &from_main, &to_main);
+                let shutdown = run_connected_session(
+                    &mut conn,
+                    &from_main,
+                    &to_main,
+                    connect_req.requested_view_distance,
+                );
                 let _ = to_main.send(FromNetMessage::Disconnected);
                 if shutdown {
                     break;
@@ -64,6 +69,7 @@ struct ConnectRequest {
     auth_mode: AuthMode,
     auth_account_uuid: Option<String>,
     prism_accounts_path: Option<String>,
+    requested_view_distance: u8,
 }
 
 fn wait_for_connect_request(
@@ -80,6 +86,7 @@ fn wait_for_connect_request(
                 auth_mode,
                 auth_account_uuid,
                 prism_accounts_path,
+                requested_view_distance,
             } => {
                 return Some(ConnectRequest {
                     username,
@@ -87,6 +94,7 @@ fn wait_for_connect_request(
                     auth_mode,
                     auth_account_uuid,
                     prism_accounts_path,
+                    requested_view_distance,
                 });
             }
             ToNetMessage::Shutdown => return None,
@@ -99,6 +107,7 @@ fn run_connected_session(
     conn: &mut Conn,
     from_main: &crossbeam::channel::Receiver<ToNetMessage>,
     to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    requested_view_distance: u8,
 ) -> bool {
     let (pkt_tx, pkt_rx) = crossbeam::channel::unbounded::<Result<Packet, String>>();
     let mut reader_conn = conn.clone();
@@ -144,7 +153,9 @@ fn run_connected_session(
             }
             recv(pkt_rx) -> incoming => {
                 match incoming {
-                    Ok(Ok(pkt)) => handle_packet::handle_packet(pkt, to_main, conn),
+                    Ok(Ok(pkt)) => {
+                        handle_packet::handle_packet(pkt, to_main, conn, requested_view_distance)
+                    }
                     Ok(Err(err)) => {
                         warn!("Error reading packet: {}", err);
                         return false;

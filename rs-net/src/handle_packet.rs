@@ -19,11 +19,12 @@ fn send_join_game(
     conn: &mut Conn,
     entity_id: i32,
     gamemode: u8,
+    requested_view_distance: u8,
 ) {
     if let Err(err) = rs_protocol::protocol::packet::send_client_settings(
         conn,
         "en_US".to_string(),
-        12,
+        requested_view_distance.clamp(2, 64),
         0,
         true,
         0x7f,
@@ -80,14 +81,39 @@ pub fn handle_packet(
     pkt: Packet,
     to_main: &crossbeam::channel::Sender<FromNetMessage>,
     conn: &mut Conn,
+    requested_view_distance: u8,
 ) {
     use rs_protocol::protocol::packet::Packet;
     match pkt {
-        Packet::JoinGame_i8(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i32(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i8(jg) => send_join_game(
+            to_main,
+            conn,
+            jg.entity_id,
+            jg.gamemode,
+            requested_view_distance,
+        ),
+        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(
+            to_main,
+            conn,
+            jg.entity_id,
+            jg.gamemode,
+            requested_view_distance,
+        ),
+        Packet::JoinGame_i32(jg) => send_join_game(
+            to_main,
+            conn,
+            jg.entity_id,
+            jg.gamemode,
+            requested_view_distance,
+        ),
         Packet::JoinGame_i32_ViewDistance(jg) => {
-            send_join_game(to_main, conn, jg.entity_id, jg.gamemode)
+            send_join_game(
+                to_main,
+                conn,
+                jg.entity_id,
+                jg.gamemode,
+                requested_view_distance,
+            )
         }
         Packet::ChunkData(cd) => {
             let bitmask = cd.bitmask.0 as u16;
