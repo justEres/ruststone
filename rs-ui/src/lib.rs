@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::app::Plugin;
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::window::WindowFocused;
@@ -16,9 +17,10 @@ use rs_render::{
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,
-    InventoryItemStack, InventoryState, InventoryWindowInfo, PerfTimings, PlayerStatus, ToNet,
-    ToNetMessage, UiState, block_model_kind, block_registry_key, block_texture_name,
-    item_max_durability, item_name, item_registry_key, item_texture_candidates,
+    InventoryItemStack, InventoryState, InventoryWindowInfo, PerfTimings, PlayerStatus,
+    ScoreboardState, TabListHeaderFooter, TitleOverlayState, ToNet, ToNetMessage, UiState,
+    WorldTime, block_model_kind, block_registry_key, block_texture_name, item_max_durability,
+    item_name, item_registry_key, item_texture_candidates,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -383,6 +385,17 @@ impl ChatAutocompleteState {
     }
 }
 
+#[derive(SystemParam)]
+struct HudParams<'w, 's> {
+    player_status: Res<'w, PlayerStatus>,
+    world_time: Res<'w, WorldTime>,
+    title_overlay: Res<'w, TitleOverlayState>,
+    tab_list_header_footer: Res<'w, TabListHeaderFooter>,
+    scoreboard: Res<'w, ScoreboardState>,
+    break_indicator: Res<'w, BreakIndicator>,
+    _marker: std::marker::PhantomData<&'s ()>,
+}
+
 fn option_matches_query(entry: &OptionSearchEntry, query: &str) -> bool {
     if query.is_empty() {
         return true;
@@ -415,14 +428,19 @@ fn connect_ui(
     mut ui_state: ResMut<UiState>,
     mut inventory_state: ResMut<InventoryState>,
     mut item_icons: ResMut<ItemIconCache>,
-    player_status: Res<PlayerStatus>,
-    break_indicator: Res<BreakIndicator>,
+    hud: HudParams,
     mut render_debug: ResMut<RenderDebugSettings>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut window_events: EventReader<WindowFocused>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let start = std::time::Instant::now();
+    let player_status = &hud.player_status;
+    let world_time = &hud.world_time;
+    let title_overlay = &hud.title_overlay;
+    let tab_list_header_footer = &hud.tab_list_header_footer;
+    let scoreboard = &hud.scoreboard;
+    let break_indicator = &hud.break_indicator;
 
     for ev in window_events.read() {
         if ev.focused {
@@ -739,6 +757,13 @@ fn connect_ui(
                         egui::RichText::new(format!("10s avg: {:.1}", avg_10s))
                             .color(egui::Color32::from_gray(220)),
                     );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Time: {}",
+                            world_time.time_of_day.rem_euclid(24_000)
+                        ))
+                        .color(egui::Color32::from_gray(220)),
+                    );
                 });
             });
 
@@ -814,6 +839,14 @@ fn connect_ui(
                     }
                 });
             });
+
+        draw_scoreboard_sidebar(ctx, &scoreboard);
+        draw_title_overlay(ctx, &title_overlay);
+        draw_action_bar_overlay(ctx, &title_overlay);
+
+        if keys.pressed(KeyCode::Tab) {
+            draw_tab_list_overlay(ctx, &tab_list_header_footer);
+        }
     }
 
     if matches!(app_state.0, ApplicationState::Connected) && player_status.dead {
@@ -2946,6 +2979,214 @@ fn handle_chat_tab_complete(
     chat_autocomplete.query_snapshot = chat.1.clone();
     chat_autocomplete.suppress_next_clear = true;
     chat_autocomplete.selected = (idx + 1) % len;
+}
+
+fn draw_scoreboard_sidebar(ctx: &egui::Context, scoreboard: &ScoreboardState) {
+    let Some((_, objective)) = scoreboard.sidebar_objective() else {
+        return;
+    };
+    let lines = scoreboard.sidebar_lines();
+    if lines.is_empty() {
+        return;
+    }
+
+    egui::Area::new(egui::Id::new("scoreboard_sidebar"))
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            let frame = egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(112))
+                .inner_margin(egui::Margin::same(8))
+                .corner_radius(4.0);
+            frame.show(ui, |ui| {
+                ui.set_min_width(180.0);
+                draw_legacy_text(ui, objective.display_name.as_str(), true);
+                ui.add_space(4.0);
+                for (name, value) in lines {
+                    ui.horizontal(|ui| {
+                        let available_width = (ui.available_width() - 36.0).max(40.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(available_width, 18.0),
+                            egui::Layout::left_to_right(egui::Align::Min),
+                            |ui| draw_legacy_text(ui, name.as_str(), false),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(value.to_string())
+                                    .color(egui::Color32::from_gray(220)),
+                            );
+                        });
+                    });
+                }
+            });
+        });
+}
+
+fn draw_title_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayState) {
+    let Some(alpha) = overlay_alpha(title_overlay.title_started_at, title_overlay.times) else {
+        return;
+    };
+    if title_overlay.title.is_empty() && title_overlay.subtitle.is_empty() {
+        return;
+    }
+
+    let alpha_u8 = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    egui::Area::new(egui::Id::new("title_overlay"))
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -90.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                if !title_overlay.title.is_empty() {
+                    let title = strip_legacy_codes(title_overlay.title.as_str());
+                    ui.label(
+                        egui::RichText::new(title)
+                            .size(34.0)
+                            .strong()
+                            .color(egui::Color32::from_white_alpha(alpha_u8)),
+                    );
+                }
+                if !title_overlay.subtitle.is_empty() {
+                    let subtitle = strip_legacy_codes(title_overlay.subtitle.as_str());
+                    ui.label(
+                        egui::RichText::new(subtitle)
+                            .size(20.0)
+                            .color(egui::Color32::from_white_alpha(alpha_u8)),
+                    );
+                }
+            });
+        });
+}
+
+fn draw_action_bar_overlay(ctx: &egui::Context, title_overlay: &TitleOverlayState) {
+    if title_overlay.action_bar.is_empty() {
+        return;
+    }
+    let Some(alpha) = overlay_alpha(title_overlay.action_bar_started_at, title_overlay.times) else {
+        return;
+    };
+
+    let alpha_u8 = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    egui::Area::new(egui::Id::new("action_bar_overlay"))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -86.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            let frame = egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha((alpha * 112.0).round() as u8))
+                .inner_margin(egui::Margin::same(6))
+                .corner_radius(4.0);
+            frame.show(ui, |ui| {
+                let text = strip_legacy_codes(title_overlay.action_bar.as_str());
+                ui.label(
+                    egui::RichText::new(text)
+                        .size(18.0)
+                        .color(egui::Color32::from_white_alpha(alpha_u8)),
+                );
+            });
+        });
+}
+
+fn draw_tab_list_overlay(ctx: &egui::Context, tab_list_header_footer: &TabListHeaderFooter) {
+    if tab_list_header_footer.header.trim().is_empty() && tab_list_header_footer.footer.trim().is_empty()
+    {
+        return;
+    }
+
+    egui::Area::new(egui::Id::new("tab_list_overlay"))
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            let frame = egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(112))
+                .inner_margin(egui::Margin::same(10))
+                .corner_radius(4.0);
+            frame.show(ui, |ui| {
+                ui.set_width(320.0);
+                if !tab_list_header_footer.header.trim().is_empty() {
+                    draw_legacy_text(ui, tab_list_header_footer.header.as_str(), true);
+                }
+                if !tab_list_header_footer.footer.trim().is_empty() {
+                    if !tab_list_header_footer.header.trim().is_empty() {
+                        ui.add_space(8.0);
+                    }
+                    draw_legacy_text(ui, tab_list_header_footer.footer.as_str(), false);
+                }
+            });
+        });
+}
+
+fn overlay_alpha(started_at: Option<std::time::Instant>, times: rs_utils::TitleTimes) -> Option<f32> {
+    let started_at = started_at?;
+    let elapsed_ticks = started_at.elapsed().as_secs_f32() / 0.05;
+    let fade_in = times.fade_in_ticks.max(0) as f32;
+    let stay = times.stay_ticks.max(0) as f32;
+    let fade_out = times.fade_out_ticks.max(0) as f32;
+    let total = fade_in + stay + fade_out;
+    if elapsed_ticks >= total.max(1.0) {
+        return None;
+    }
+    if fade_in > 0.0 && elapsed_ticks < fade_in {
+        return Some((elapsed_ticks / fade_in).clamp(0.0, 1.0));
+    }
+    if elapsed_ticks < fade_in + stay {
+        return Some(1.0);
+    }
+    if fade_out > 0.0 {
+        let fade_elapsed = elapsed_ticks - fade_in - stay;
+        return Some((1.0 - fade_elapsed / fade_out).clamp(0.0, 1.0));
+    }
+    Some(1.0)
+}
+
+fn draw_legacy_text(ui: &mut egui::Ui, text: &str, centered: bool) {
+    let segments = parse_legacy_chat_segments(text);
+    let layout_job = legacy_layout_job(&segments);
+    if centered {
+        ui.horizontal_centered(|ui| {
+            ui.label(layout_job.clone());
+        });
+    } else {
+        ui.label(layout_job);
+    }
+}
+
+fn legacy_layout_job(segments: &[ChatSegment]) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    for segment in segments {
+        if segment.text.is_empty() {
+            continue;
+        }
+        let mut format = egui::TextFormat {
+            color: segment.color,
+            ..Default::default()
+        };
+        if segment.bold {
+            format.font_id = egui::FontId::proportional(15.5);
+        }
+        if segment.italic {
+            format.italics = true;
+        }
+        if segment.underlined {
+            format.underline = egui::Stroke::new(1.0, segment.color);
+        }
+        if segment.strikethrough {
+            format.strikethrough = egui::Stroke::new(1.0, segment.color);
+        }
+        job.append(segment.text.as_str(), 0.0, format);
+    }
+    job
+}
+
+fn strip_legacy_codes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '§' {
+            let _ = chars.next();
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[derive(Clone)]

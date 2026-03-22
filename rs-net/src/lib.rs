@@ -41,6 +41,7 @@ pub fn start_networking(
             connect_req.prism_accounts_path.as_deref(),
         ) {
             Ok(mut conn) => {
+                let _ = send_initial_client_settings(&mut conn);
                 info!("Connected to server");
                 let _ = to_main.send(FromNetMessage::Connected);
                 let shutdown = run_connected_session(&mut conn, &from_main, &to_main);
@@ -155,6 +156,18 @@ fn run_connected_session(
             }
         }
     }
+}
+
+fn send_initial_client_settings(conn: &mut Conn) -> Result<(), rs_protocol::protocol::Error> {
+    rs_protocol::protocol::packet::send_client_settings(
+        conn,
+        "en_US".to_string(),
+        12,
+        0,
+        true,
+        0x7f,
+        rs_protocol::protocol::packet::Hand::MainHand,
+    )
 }
 
 fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
@@ -533,13 +546,17 @@ const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft
 
 fn default_prism_accounts_pathbuf() -> PathBuf {
     // On Windows prefer %APPDATA%/PrismLauncher/accounts.json
-    if let Ok(appdata) = std::env::var("APPDATA") && !appdata.trim().is_empty() {
+    if let Ok(appdata) = std::env::var("APPDATA")
+        && !appdata.trim().is_empty()
+    {
         return PathBuf::from(appdata)
             .join("PrismLauncher")
             .join("accounts.json");
     }
     // Fallback to the common Linux location ~/.local/share/PrismLauncher/accounts.json
-    if let Ok(home) = std::env::var("HOME") && !home.trim().is_empty() {
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
         return PathBuf::from(home)
             .join(".local")
             .join("share")

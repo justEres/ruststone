@@ -7,7 +7,8 @@ use rs_protocol::types::Value as MetadataValue;
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryEnchantment, InventoryItemMeta, InventoryItemStack,
     InventoryMessage, InventoryWindowInfo, MobKind, NetEntityAnimation, NetEntityKind,
-    NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, item_name,
+    NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, ScoreboardMessage,
+    TitleMessage, item_name,
 };
 use tracing::{debug, warn};
 
@@ -671,6 +672,10 @@ pub fn handle_packet(
             let text = component_to_legacy(&sm.message);
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
+        Packet::Disconnect(disconnect) => {
+            let reason = component_to_legacy(&disconnect.reason);
+            let _ = to_main.send(FromNetMessage::DisconnectReason(reason));
+        }
         Packet::TabCompleteReply(reply) => {
             let _ = to_main.send(FromNetMessage::TabCompleteReply(reply.matches.data));
         }
@@ -712,6 +717,12 @@ pub fn handle_packet(
                     });
                 }
             }
+        }
+        Packet::TimeUpdate(time_update) => {
+            let _ = to_main.send(FromNetMessage::TimeUpdate {
+                world_age: time_update.world_age,
+                time_of_day: time_update.time_of_day,
+            });
         }
         Packet::Respawn_Gamemode(respawn) => {
             let _ = to_main.send(FromNetMessage::GameMode {
@@ -834,6 +845,146 @@ pub fn handle_packet(
                 item: protocol_stack_to_inventory_item(slot.item),
             }));
         }
+        Packet::PlayerListHeaderFooter(list_header_footer) => {
+            let _ = to_main.send(FromNetMessage::TabListHeaderFooter {
+                header: component_to_legacy(&list_header_footer.header),
+                footer: component_to_legacy(&list_header_footer.footer),
+            });
+        }
+        Packet::Title(title) => {
+            send_title_packet(
+                to_main,
+                title.action.0,
+                title.title.as_ref(),
+                title.sub_title.as_ref(),
+                title.action_bar_text.as_deref(),
+                title.fade_in,
+                title.fade_stay,
+                title.fade_out,
+            );
+        }
+        Packet::Title_notext(title) => {
+            match title.action.0 {
+                0 => {
+                    if let Some(title) = title.title.as_ref() {
+                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
+                            text: component_to_legacy(title),
+                        }));
+                    }
+                }
+                1 => {
+                    if let Some(subtitle) = title.sub_title.as_ref() {
+                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
+                            text: component_to_legacy(subtitle),
+                        }));
+                    }
+                }
+                2 => send_title_times(to_main, title.fade_in, title.fade_stay, title.fade_out),
+                3 => {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
+                }
+                4 => {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
+                }
+                _ => {}
+            }
+        }
+        Packet::Title_notext_component(title) => {
+            match title.action.0 {
+                0 => {
+                    if let Some(title) = title.title.as_ref() {
+                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
+                            text: component_to_legacy(title),
+                        }));
+                    }
+                }
+                1 => {
+                    if let Some(subtitle) = title.sub_title.as_ref() {
+                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
+                            text: component_to_legacy(subtitle),
+                        }));
+                    }
+                }
+                3 => {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
+                }
+                4 => {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
+                }
+                _ => {}
+            }
+        }
+        Packet::ScoreboardDisplay(display) => {
+            let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::Display {
+                position: display.position,
+                objective_name: display.name,
+            }));
+        }
+        Packet::ScoreboardObjective(objective) => {
+            let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::Objective {
+                name: objective.name,
+                mode: Some(objective.mode),
+                display_name: objective.value,
+                render_type: Some(objective.ty),
+            }));
+        }
+        Packet::ScoreboardObjective_NoMode(objective) => {
+            let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::Objective {
+                name: objective.name,
+                mode: None,
+                display_name: objective.value,
+                render_type: Some(objective.ty.to_string()),
+            }));
+        }
+        Packet::UpdateScore(score) => {
+            let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::UpdateScore {
+                entry_name: score.name,
+                action: score.action,
+                objective_name: score.object_name,
+                value: score.value.map(|value| value.0),
+            }));
+        }
+        Packet::UpdateScore_i32(score) => {
+            let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::UpdateScore {
+                entry_name: score.name,
+                action: score.action,
+                objective_name: score.object_name,
+                value: score.value,
+            }));
+        }
+        Packet::Teams_u8(teams) => {
+            send_team_packet(
+                to_main,
+                teams.name,
+                teams.mode,
+                teams.display_name,
+                teams.prefix,
+                teams.suffix,
+                teams.players.map(|players| players.data),
+            );
+        }
+        Packet::Teams_NoVisColor(teams) => {
+            send_team_packet(
+                to_main,
+                teams.name,
+                teams.mode,
+                teams.display_name,
+                teams.prefix,
+                teams.suffix,
+                teams.players.map(|players| players.data),
+            );
+        }
+        Packet::Teams_VarInt(teams) => {
+            send_team_packet(
+                to_main,
+                teams.name,
+                teams.mode,
+                teams.display_name,
+                teams.prefix,
+                teams.suffix,
+                teams.players.map(|players| players.data),
+            );
+        }
         Packet::ConfirmTransaction(tx) => {
             let _ = to_main.send(FromNetMessage::Inventory(
                 InventoryMessage::ConfirmTransaction {
@@ -851,6 +1002,85 @@ pub fn handle_packet(
 
         _other => {}
     }
+}
+
+fn send_title_packet(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    action: i32,
+    title: Option<&Component>,
+    subtitle: Option<&Component>,
+    action_bar_text: Option<&str>,
+    fade_in: Option<i32>,
+    fade_stay: Option<i32>,
+    fade_out: Option<i32>,
+) {
+    match action {
+        0 => {
+            if let Some(title) = title {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
+                    text: component_to_legacy(title),
+                }));
+            }
+        }
+        1 => {
+            if let Some(subtitle) = subtitle {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
+                    text: component_to_legacy(subtitle),
+                }));
+            }
+        }
+        2 => {
+            let text = action_bar_text
+                .map(ToString::to_string)
+                .or_else(|| title.map(component_to_legacy))
+                .or_else(|| subtitle.map(component_to_legacy));
+            if let Some(text) = text {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetActionBar { text }));
+            }
+        }
+        3 => {
+            send_title_times(to_main, fade_in, fade_stay, fade_out);
+        }
+        4 => {
+            let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
+        }
+        5 => {
+            let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
+        }
+        _ => {}
+    }
+}
+
+fn send_title_times(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    fade_in: Option<i32>,
+    fade_stay: Option<i32>,
+    fade_out: Option<i32>,
+) {
+    let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTimes {
+        fade_in_ticks: fade_in.unwrap_or(10),
+        stay_ticks: fade_stay.unwrap_or(70),
+        fade_out_ticks: fade_out.unwrap_or(20),
+    }));
+}
+
+fn send_team_packet(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    name: String,
+    mode: u8,
+    display_name: Option<String>,
+    prefix: Option<String>,
+    suffix: Option<String>,
+    players: Option<Vec<String>>,
+) {
+    let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::Team {
+        name,
+        mode,
+        display_name,
+        prefix,
+        suffix,
+        players,
+    }));
 }
 
 fn angle_i8_to_degrees(angle: i8) -> f32 {
@@ -959,11 +1189,13 @@ fn handle_entity_metadata(
     if let Some(MetadataValue::Byte(sheep_flags)) = metadata.get_raw(16) {
         let fleece_color = (*sheep_flags & 0x0F) as u8;
         let sheared = (*sheep_flags & 0x10) != 0;
-        let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::SheepAppearance {
-            entity_id,
-            fleece_color,
-            sheared,
-        }));
+        let _ = to_main.send(FromNetMessage::NetEntity(
+            NetEntityMessage::SheepAppearance {
+                entity_id,
+                fleece_color,
+                sheared,
+            },
+        ));
     }
 }
 

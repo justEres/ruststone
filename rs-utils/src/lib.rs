@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use bevy::{ecs::resource::Resource, prelude::Vec3};
 use crossbeam::channel::{Receiver, Sender};
@@ -65,6 +66,249 @@ pub struct UiState {
     pub paused: bool,
     pub inventory_open: bool,
     pub ui_hidden: bool,
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct WorldTime {
+    pub world_age: i64,
+    pub time_of_day: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TitleTimes {
+    pub fade_in_ticks: i32,
+    pub stay_ticks: i32,
+    pub fade_out_ticks: i32,
+}
+
+impl Default for TitleTimes {
+    fn default() -> Self {
+        Self {
+            fade_in_ticks: 10,
+            stay_ticks: 70,
+            fade_out_ticks: 20,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct TitleOverlayState {
+    pub title: String,
+    pub subtitle: String,
+    pub action_bar: String,
+    pub times: TitleTimes,
+    pub title_started_at: Option<Instant>,
+    pub action_bar_started_at: Option<Instant>,
+}
+
+impl TitleOverlayState {
+    pub fn clear(&mut self) {
+        self.title.clear();
+        self.subtitle.clear();
+        self.title_started_at = None;
+    }
+
+    pub fn reset(&mut self) {
+        self.clear();
+        self.action_bar.clear();
+        self.action_bar_started_at = None;
+        self.times = TitleTimes::default();
+    }
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct TabListHeaderFooter {
+    pub header: String,
+    pub footer: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ScoreboardObjectiveState {
+    pub display_name: String,
+    pub render_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ScoreboardTeamState {
+    pub display_name: String,
+    pub prefix: String,
+    pub suffix: String,
+    pub players: Vec<String>,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ScoreboardState {
+    pub objectives: HashMap<String, ScoreboardObjectiveState>,
+    pub display_slots: HashMap<u8, String>,
+    pub scores: HashMap<(String, String), i32>,
+    pub teams: HashMap<String, ScoreboardTeamState>,
+    pub player_teams: HashMap<String, String>,
+}
+
+impl ScoreboardState {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn set_display_slot(&mut self, position: u8, objective_name: String) {
+        if objective_name.is_empty() {
+            self.display_slots.remove(&position);
+        } else {
+            self.display_slots.insert(position, objective_name);
+        }
+    }
+
+    pub fn remove_objective(&mut self, objective_name: &str) {
+        self.objectives.remove(objective_name);
+        self.display_slots
+            .retain(|_, name| name.as_str() != objective_name);
+        self.scores
+            .retain(|(_, objective), _| objective.as_str() != objective_name);
+    }
+
+    pub fn set_objective(
+        &mut self,
+        objective_name: String,
+        display_name: String,
+        render_type: Option<String>,
+    ) {
+        self.objectives.insert(
+            objective_name,
+            ScoreboardObjectiveState {
+                display_name,
+                render_type,
+            },
+        );
+    }
+
+    pub fn set_score(&mut self, entry_name: String, objective_name: String, value: i32) {
+        self.scores.insert((entry_name, objective_name), value);
+    }
+
+    pub fn remove_score(&mut self, entry_name: &str, objective_name: &str) {
+        self.scores
+            .remove(&(entry_name.to_string(), objective_name.to_string()));
+    }
+
+    pub fn apply_team(
+        &mut self,
+        team_name: String,
+        mode: u8,
+        display_name: Option<String>,
+        prefix: Option<String>,
+        suffix: Option<String>,
+        players: Option<Vec<String>>,
+    ) {
+        match mode {
+            0 => {
+                let players = players.unwrap_or_default();
+                self.detach_players(&players);
+                for player in &players {
+                    self.player_teams.insert(player.clone(), team_name.clone());
+                }
+                self.teams.insert(
+                    team_name,
+                    ScoreboardTeamState {
+                        display_name: display_name.unwrap_or_default(),
+                        prefix: prefix.unwrap_or_default(),
+                        suffix: suffix.unwrap_or_default(),
+                        players,
+                    },
+                );
+            }
+            1 => {
+                if let Some(team) = self.teams.remove(&team_name) {
+                    for player in team.players {
+                        self.player_teams.remove(&player);
+                    }
+                }
+            }
+            2 => {
+                let team = self.teams.entry(team_name).or_default();
+                if let Some(display_name) = display_name {
+                    team.display_name = display_name;
+                }
+                if let Some(prefix) = prefix {
+                    team.prefix = prefix;
+                }
+                if let Some(suffix) = suffix {
+                    team.suffix = suffix;
+                }
+            }
+            3 => {
+                let players = players.unwrap_or_default();
+                self.detach_players(&players);
+                let team = self.teams.entry(team_name.clone()).or_default();
+                for player in players {
+                    if !team.players.iter().any(|existing| existing == &player) {
+                        team.players.push(player.clone());
+                    }
+                    self.player_teams.insert(player, team_name.clone());
+                }
+            }
+            4 => {
+                if let Some(team) = self.teams.get_mut(&team_name) {
+                    for player in players.unwrap_or_default() {
+                        team.players.retain(|existing| existing != &player);
+                        if self
+                            .player_teams
+                            .get(&player)
+                            .is_some_and(|mapped_team| mapped_team == &team_name)
+                        {
+                            self.player_teams.remove(&player);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn sidebar_objective(&self) -> Option<(&str, &ScoreboardObjectiveState)> {
+        let name = self.display_slots.get(&1)?;
+        let objective = self.objectives.get(name)?;
+        Some((name.as_str(), objective))
+    }
+
+    pub fn sidebar_lines(&self) -> Vec<(String, i32)> {
+        let Some((objective_name, _)) = self.sidebar_objective() else {
+            return Vec::new();
+        };
+
+        let mut lines: Vec<(String, i32)> = self
+            .scores
+            .iter()
+            .filter(|((_, objective), _)| objective == objective_name)
+            .map(|((entry, _), value)| (self.format_entry(entry), *value))
+            .collect();
+        lines.sort_by(|(name_a, value_a), (name_b, value_b)| {
+            value_b.cmp(value_a).then_with(|| name_a.cmp(name_b))
+        });
+        if lines.len() > 15 {
+            lines.truncate(15);
+        }
+        lines
+    }
+
+    fn format_entry(&self, entry_name: &str) -> String {
+        let Some(team_name) = self.player_teams.get(entry_name) else {
+            return entry_name.to_string();
+        };
+        let Some(team) = self.teams.get(team_name) else {
+            return entry_name.to_string();
+        };
+        format!("{}{}{}", team.prefix, entry_name, team.suffix)
+    }
+
+    fn detach_players(&mut self, players: &[String]) {
+        for player in players {
+            if let Some(previous_team) = self.player_teams.remove(player)
+                && let Some(team) = self.teams.get_mut(&previous_team)
+            {
+                team.players.retain(|existing| existing != player);
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1081,6 +1325,52 @@ pub enum ToNetMessage {
     },
 }
 
+pub enum ScoreboardMessage {
+    Display {
+        position: u8,
+        objective_name: String,
+    },
+    Objective {
+        name: String,
+        mode: Option<u8>,
+        display_name: String,
+        render_type: Option<String>,
+    },
+    UpdateScore {
+        entry_name: String,
+        action: u8,
+        objective_name: String,
+        value: Option<i32>,
+    },
+    Team {
+        name: String,
+        mode: u8,
+        display_name: Option<String>,
+        prefix: Option<String>,
+        suffix: Option<String>,
+        players: Option<Vec<String>>,
+    },
+}
+
+pub enum TitleMessage {
+    SetTitle {
+        text: String,
+    },
+    SetSubtitle {
+        text: String,
+    },
+    SetActionBar {
+        text: String,
+    },
+    SetTimes {
+        fade_in_ticks: i32,
+        stay_ticks: i32,
+        fade_out_ticks: i32,
+    },
+    Clear,
+    Reset,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthMode {
     #[default]
@@ -1099,6 +1389,7 @@ use rs_protocol::protocol::packet::Packet;
 pub enum FromNetMessage {
     Connected,
     Disconnected,
+    DisconnectReason(String),
     Packet(Packet),
     ChatMessage(String),
     TabCompleteReply(Vec<String>),
@@ -1118,6 +1409,10 @@ pub enum FromNetMessage {
     GameMode {
         gamemode: u8,
     },
+    TimeUpdate {
+        world_age: i64,
+        time_of_day: i64,
+    },
     PlayerAbilities {
         flags: u8,
         flying_speed: f32,
@@ -1134,5 +1429,52 @@ pub enum FromNetMessage {
         effect_id: i8,
     },
     Inventory(InventoryMessage),
+    Title(TitleMessage),
+    TabListHeaderFooter {
+        header: String,
+        footer: String,
+    },
+    Scoreboard(ScoreboardMessage),
     NetEntity(NetEntityMessage),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scoreboard_sidebar_applies_team_prefix_and_suffix() {
+        let mut scoreboard = ScoreboardState::default();
+        scoreboard.set_objective(
+            "bedwars".to_string(),
+            "Bedwars".to_string(),
+            Some("integer".to_string()),
+        );
+        scoreboard.set_display_slot(1, "bedwars".to_string());
+        scoreboard.apply_team(
+            "red".to_string(),
+            0,
+            Some("Red".to_string()),
+            Some("§c[R] ".to_string()),
+            Some(" §7*".to_string()),
+            Some(vec!["Alice".to_string()]),
+        );
+        scoreboard.set_score("Alice".to_string(), "bedwars".to_string(), 12);
+
+        let lines = scoreboard.sidebar_lines();
+        assert_eq!(lines, vec![("§c[R] Alice §7*".to_string(), 12)]);
+    }
+
+    #[test]
+    fn scoreboard_remove_objective_clears_sidebar_slot_and_scores() {
+        let mut scoreboard = ScoreboardState::default();
+        scoreboard.set_objective("bw".to_string(), "Bedwars".to_string(), None);
+        scoreboard.set_display_slot(1, "bw".to_string());
+        scoreboard.set_score("Alice".to_string(), "bw".to_string(), 5);
+
+        scoreboard.remove_objective("bw");
+
+        assert!(scoreboard.sidebar_objective().is_none());
+        assert!(scoreboard.sidebar_lines().is_empty());
+    }
 }

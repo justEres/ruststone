@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use rs_ui::ConnectUiState;
 use rs_utils::{
     AppState, ApplicationState, BreakIndicator, Chat, FromNet, InventoryState, PerfTimings,
-    PlayerStatus, ToNet, UiState,
+    PlayerStatus, ScoreboardState, TabListHeaderFooter, TitleOverlayState, ToNet, UiState,
+    WorldTime,
 };
 
 use crate::entities;
@@ -70,6 +71,10 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(UiState::default())
             .insert_resource(InventoryState::default())
             .insert_resource(PlayerStatus::default())
+            .insert_resource(WorldTime::default())
+            .insert_resource(TitleOverlayState::default())
+            .insert_resource(TabListHeaderFooter::default())
+            .insert_resource(ScoreboardState::default())
             .insert_resource(BreakIndicator::default())
             .insert_resource(PerfTimings::default())
             .insert_resource(net::events::NetEventQueue::default())

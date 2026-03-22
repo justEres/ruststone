@@ -1,12 +1,14 @@
 use std::time::Instant;
 
+use bevy::ecs::system::SystemParam;
 use bevy::ecs::system::ResMut;
 use bevy::prelude::*;
 use rs_render::{ChunkUpdateQueue, WorldUpdate};
-use rs_ui::ChatAutocompleteState;
+use rs_ui::{ChatAutocompleteState, ConnectUiState};
 use rs_utils::{
     AppState, ApplicationState, Chat, FromNet, FromNetMessage, InventoryMessage, InventoryState,
-    PlayerStatus,
+    PlayerStatus, ScoreboardMessage, ScoreboardState, TabListHeaderFooter, TitleMessage,
+    TitleOverlayState, WorldTime,
 };
 use tracing::{debug, info};
 
@@ -23,78 +25,118 @@ const FLAG_REL_Z: u8 = 0x04;
 const FLAG_REL_YAW: u8 = 0x08;
 const FLAG_REL_PITCH: u8 = 0x10;
 
+#[derive(SystemParam)]
+pub(crate) struct MessageUiState<'w, 's> {
+    app_state: ResMut<'w, AppState>,
+    connect_ui: ResMut<'w, ConnectUiState>,
+    chat: ResMut<'w, Chat>,
+    chat_autocomplete: ResMut<'w, ChatAutocompleteState>,
+    inventory_state: ResMut<'w, InventoryState>,
+    _marker: std::marker::PhantomData<&'s ()>,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct GameplayState<'w, 's> {
+    player_status: ResMut<'w, PlayerStatus>,
+    world_time: ResMut<'w, WorldTime>,
+    title_overlay: ResMut<'w, TitleOverlayState>,
+    tab_list_header_footer: ResMut<'w, TabListHeaderFooter>,
+    scoreboard: ResMut<'w, ScoreboardState>,
+    sim_render: ResMut<'w, SimRenderState>,
+    sim_clock: ResMut<'w, SimClock>,
+    sim_ready: ResMut<'w, SimReady>,
+    history: ResMut<'w, PredictionHistory>,
+    _marker: std::marker::PhantomData<&'s ()>,
+}
+
 pub fn handle_messages(
     from_net: ResMut<FromNet>,
-    mut app_state: ResMut<AppState>,
-    mut chat: ResMut<Chat>,
-    mut chat_autocomplete: ResMut<ChatAutocompleteState>,
+    mut ui: MessageUiState,
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
     mut remote_entity_events: ResMut<RemoteEntityEventQueue>,
     remote_entity_registry: Res<RemoteEntityRegistry>,
     mut collision_map: ResMut<WorldCollisionMap>,
-    mut player_status: ResMut<PlayerStatus>,
+    mut game: GameplayState,
     sim_state: Res<SimState>,
-    mut sim_render: ResMut<SimRenderState>,
-    mut sim_clock: ResMut<SimClock>,
-    mut sim_ready: ResMut<SimReady>,
-    mut history: ResMut<PredictionHistory>,
-    mut inventory_state: ResMut<InventoryState>,
 ) {
     let timer = Timing::start();
     while let Ok(msg) = from_net.0.try_recv() {
         match msg {
             FromNetMessage::Connected => {
-                *app_state = AppState(ApplicationState::Connected);
-                chat_autocomplete.clear();
-                player_status.dead = false;
-                player_status.gamemode = 0;
-                player_status.can_fly = false;
-                player_status.flying = false;
-                player_status.flying_speed = 0.05;
-                player_status.walking_speed = 0.1;
-                player_status.speed_effect_amplifier = None;
-                player_status.jump_boost_amplifier = None;
-                sim_clock.tick = 0;
-                sim_ready.0 = false;
-                history.0 = PredictionHistory::default().0;
-                sim_render.previous = sim_state.current;
-                inventory_state.reset();
+                *ui.app_state = AppState(ApplicationState::Connected);
+                ui.connect_ui.connect_feedback.clear();
+                ui.chat_autocomplete.clear();
+                game.player_status.dead = false;
+                game.player_status.gamemode = 0;
+                game.player_status.can_fly = false;
+                game.player_status.flying = false;
+                game.player_status.flying_speed = 0.05;
+                game.player_status.walking_speed = 0.1;
+                game.player_status.speed_effect_amplifier = None;
+                game.player_status.jump_boost_amplifier = None;
+                game.world_time.world_age = 0;
+                game.world_time.time_of_day = 0;
+                game.title_overlay.reset();
+                game.tab_list_header_footer.header.clear();
+                game.tab_list_header_footer.footer.clear();
+                game.scoreboard.reset();
+                game.sim_clock.tick = 0;
+                game.sim_ready.0 = false;
+                game.history.0 = PredictionHistory::default().0;
+                game.sim_render.previous = sim_state.current;
+                ui.inventory_state.reset();
                 info!("Connected to server");
             }
             FromNetMessage::Disconnected => {
-                *app_state = AppState(ApplicationState::Disconnected);
-                chat_autocomplete.clear();
-                sim_ready.0 = false;
-                sim_render.previous = sim_state.current;
-                inventory_state.reset();
-                player_status.gamemode = 0;
-                player_status.can_fly = false;
-                player_status.flying = false;
-                player_status.speed_effect_amplifier = None;
-                player_status.jump_boost_amplifier = None;
+                *ui.app_state = AppState(ApplicationState::Disconnected);
+                ui.chat_autocomplete.clear();
+                game.title_overlay.reset();
+                game.tab_list_header_footer.header.clear();
+                game.tab_list_header_footer.footer.clear();
+                game.scoreboard.reset();
+                game.sim_ready.0 = false;
+                game.sim_render.previous = sim_state.current;
+                ui.inventory_state.reset();
+                game.player_status.gamemode = 0;
+                game.player_status.can_fly = false;
+                game.player_status.flying = false;
+                game.player_status.speed_effect_amplifier = None;
+                game.player_status.jump_boost_amplifier = None;
+            }
+            FromNetMessage::DisconnectReason(reason) => {
+                ui.connect_ui.connect_feedback = reason.clone();
+                ui.chat.0.push_back(format!("Disconnected: {reason}"));
+                ui.chat.0.truncate(100);
+                *ui.app_state = AppState(ApplicationState::Disconnected);
+                game.title_overlay.reset();
+                game.tab_list_header_footer.header.clear();
+                game.tab_list_header_footer.footer.clear();
+                game.scoreboard.reset();
+                game.sim_ready.0 = false;
+                ui.inventory_state.reset();
             }
             FromNetMessage::ChatMessage(msg) => {
-                chat.0.push_back(msg);
-                chat.0.truncate(100); // Keep only the last 100 messages
+                ui.chat.0.push_back(msg);
+                ui.chat.0.truncate(100); // Keep only the last 100 messages
             }
             FromNetMessage::TabCompleteReply(matches) => {
-                let Some(pending_query) = chat_autocomplete.pending_query.take() else {
+                let Some(pending_query) = ui.chat_autocomplete.pending_query.take() else {
                     continue;
                 };
-                if chat.1 != pending_query {
+                if ui.chat.1 != pending_query {
                     continue;
                 }
                 let mut unique = std::collections::HashSet::new();
-                chat_autocomplete.suggestions = matches
+                ui.chat_autocomplete.suggestions = matches
                     .into_iter()
                     .map(|entry| entry.trim().to_string())
                     .filter(|entry| !entry.is_empty())
                     .filter(|entry| unique.insert(entry.clone()))
                     .collect();
-                chat_autocomplete.selected = 0;
-                chat_autocomplete.query_snapshot = chat.1.clone();
-                chat_autocomplete.suppress_next_clear = false;
+                ui.chat_autocomplete.selected = 0;
+                ui.chat_autocomplete.query_snapshot = ui.chat.1.clone();
+                ui.chat_autocomplete.suppress_next_clear = false;
             }
             FromNetMessage::ChunkData(chunk) => {
                 collision_map.update_chunk(chunk.clone());
@@ -111,17 +153,17 @@ pub fn handle_messages(
                 food,
                 food_saturation,
             } => {
-                let was_dead = player_status.dead;
-                player_status.health = health;
-                player_status.food = food;
-                player_status.food_saturation = food_saturation;
-                player_status.dead = health <= 0.0;
+                let was_dead = game.player_status.dead;
+                game.player_status.health = health;
+                game.player_status.food = food;
+                game.player_status.food_saturation = food_saturation;
+                game.player_status.dead = health <= 0.0;
                 // Respawn transition: reset prediction and wait for authoritative position packet.
-                if was_dead && !player_status.dead {
-                    sim_clock.tick = 0;
-                    sim_ready.0 = false;
-                    history.0 = PredictionHistory::default().0;
-                    sim_render.previous = sim_state.current;
+                if was_dead && !game.player_status.dead {
+                    game.sim_clock.tick = 0;
+                    game.sim_ready.0 = false;
+                    game.history.0 = PredictionHistory::default().0;
+                    game.sim_render.previous = sim_state.current;
                 }
             }
             FromNetMessage::PlayerPosition(pos) => {
@@ -173,7 +215,7 @@ pub fn handle_messages(
                 let on_ground = pos.on_ground.unwrap_or(false);
                 debug!(
                     "[net/correction] tick={} raw_pos={:?} raw_yaw={:?} raw_pitch={:?} flags={:?} raw_on_ground={:?} -> resolved_pos=({:.4},{:.4},{:.4}) resolved_yaw={:.4}rad resolved_pitch={:.4}rad resolved_on_ground={}",
-                    sim_clock.tick,
+                    game.sim_clock.tick,
                     raw_position,
                     raw_yaw,
                     raw_pitch,
@@ -213,19 +255,26 @@ pub fn handle_messages(
                 level,
                 total_experience,
             } => {
-                player_status.experience_bar = experience_bar.clamp(0.0, 1.0);
-                player_status.level = level.max(0);
-                player_status.total_experience = total_experience.max(0);
+                game.player_status.experience_bar = experience_bar.clamp(0.0, 1.0);
+                game.player_status.level = level.max(0);
+                game.player_status.total_experience = total_experience.max(0);
             }
             FromNetMessage::GameMode { gamemode } => {
                 // 1.8 join packet: lower 3 bits hold game mode, bit 3 is hardcore flag.
                 let mode = gamemode & 0x07;
-                player_status.gamemode = mode;
+                game.player_status.gamemode = mode;
                 let can_fly = matches!(mode, 1 | 3);
-                player_status.can_fly = can_fly;
+                game.player_status.can_fly = can_fly;
                 if !can_fly {
-                    player_status.flying = false;
+                    game.player_status.flying = false;
                 }
+            }
+            FromNetMessage::TimeUpdate {
+                world_age,
+                time_of_day,
+            } => {
+                game.world_time.world_age = world_age;
+                game.world_time.time_of_day = time_of_day;
             }
             FromNetMessage::PlayerAbilities {
                 flags,
@@ -235,11 +284,11 @@ pub fn handle_messages(
                 // 1.8 abilities flags: 0x01 invuln, 0x02 flying, 0x04 mayfly, 0x08 creative.
                 // For vanilla-accurate movement/anticheat parity, gate flight by gamemode
                 // instead of trusting mayfly from plugins/server-side capability toggles.
-                let gm_allows_flight = matches!(player_status.gamemode, 1 | 3);
-                player_status.can_fly = gm_allows_flight;
-                player_status.flying = (flags & 0x02) != 0 && gm_allows_flight;
-                player_status.flying_speed = flying_speed;
-                player_status.walking_speed = walking_speed;
+                let gm_allows_flight = matches!(game.player_status.gamemode, 1 | 3);
+                game.player_status.can_fly = gm_allows_flight;
+                game.player_status.flying = (flags & 0x02) != 0 && gm_allows_flight;
+                game.player_status.flying_speed = flying_speed;
+                game.player_status.walking_speed = walking_speed;
             }
             FromNetMessage::PotionEffect {
                 entity_id,
@@ -250,8 +299,8 @@ pub fn handle_messages(
                 if remote_entity_registry.local_entity_id == Some(entity_id) {
                     let amp = amplifier.max(0) as u8;
                     match effect_id {
-                        1 => player_status.speed_effect_amplifier = Some(amp),
-                        8 => player_status.jump_boost_amplifier = Some(amp),
+                        1 => game.player_status.speed_effect_amplifier = Some(amp),
+                        8 => game.player_status.jump_boost_amplifier = Some(amp),
                         _ => {}
                     }
                 }
@@ -262,15 +311,87 @@ pub fn handle_messages(
             } => {
                 if remote_entity_registry.local_entity_id == Some(entity_id) {
                     match effect_id {
-                        1 => player_status.speed_effect_amplifier = None,
-                        8 => player_status.jump_boost_amplifier = None,
+                        1 => game.player_status.speed_effect_amplifier = None,
+                        8 => game.player_status.jump_boost_amplifier = None,
                         _ => {}
                     }
                 }
             }
             FromNetMessage::Inventory(event) => {
-                apply_inventory_message(&mut inventory_state, event);
+                apply_inventory_message(&mut ui.inventory_state, event);
             }
+            FromNetMessage::Title(event) => match event {
+                TitleMessage::SetTitle { text } => {
+                    game.title_overlay.title = text;
+                    game.title_overlay.title_started_at = Some(Instant::now());
+                }
+                TitleMessage::SetSubtitle { text } => {
+                    game.title_overlay.subtitle = text;
+                    if game.title_overlay.title_started_at.is_none() {
+                        game.title_overlay.title_started_at = Some(Instant::now());
+                    }
+                }
+                TitleMessage::SetActionBar { text } => {
+                    game.title_overlay.action_bar = text;
+                    game.title_overlay.action_bar_started_at = Some(Instant::now());
+                }
+                TitleMessage::SetTimes {
+                    fade_in_ticks,
+                    stay_ticks,
+                    fade_out_ticks,
+                } => {
+                    game.title_overlay.times.fade_in_ticks = fade_in_ticks.max(0);
+                    game.title_overlay.times.stay_ticks = stay_ticks.max(0);
+                    game.title_overlay.times.fade_out_ticks = fade_out_ticks.max(0);
+                }
+                TitleMessage::Clear => game.title_overlay.clear(),
+                TitleMessage::Reset => game.title_overlay.reset(),
+            },
+            FromNetMessage::TabListHeaderFooter { header, footer } => {
+                game.tab_list_header_footer.header = header;
+                game.tab_list_header_footer.footer = footer;
+            }
+            FromNetMessage::Scoreboard(event) => match event {
+                ScoreboardMessage::Display {
+                    position,
+                    objective_name,
+                } => {
+                    game.scoreboard.set_display_slot(position, objective_name);
+                }
+                ScoreboardMessage::Objective {
+                    name,
+                    mode,
+                    display_name,
+                    render_type,
+                } => match mode.unwrap_or(0) {
+                    0 | 2 => game.scoreboard.set_objective(name, display_name, render_type),
+                    1 => game.scoreboard.remove_objective(&name),
+                    _ => {}
+                },
+                ScoreboardMessage::UpdateScore {
+                    entry_name,
+                    action,
+                    objective_name,
+                    value,
+                } => match action {
+                    0 => game
+                        .scoreboard
+                        .set_score(entry_name, objective_name, value.unwrap_or(0)),
+                    1 => game.scoreboard.remove_score(&entry_name, &objective_name),
+                    _ => {}
+                },
+                ScoreboardMessage::Team {
+                    name,
+                    mode,
+                    display_name,
+                    prefix,
+                    suffix,
+                    players,
+                } => {
+                    game.scoreboard
+                        .apply_team(name, mode, display_name, prefix, suffix, players);
+                }
+            },
             _ => { /* Ignore other messages for now */ }
         }
     }
