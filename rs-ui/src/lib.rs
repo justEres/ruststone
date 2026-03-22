@@ -62,6 +62,11 @@ const OPTION_SEARCH_ENTRIES: &[OptionSearchEntry] = &[
         aliases: &["chunks", "distance"],
     },
     OptionSearchEntry {
+        label: "Infinite local render distance",
+        target: OptionSearchTarget::General,
+        aliases: &["infinite", "unlimited render distance"],
+    },
+    OptionSearchEntry {
         label: "Anti-aliasing",
         target: OptionSearchTarget::General,
         aliases: &["aa", "msaa"],
@@ -1020,6 +1025,15 @@ fn connect_ui(
                         );
                         options_changed |= ui
                             .checkbox(
+                                &mut render_debug.infinite_render_distance,
+                                "Infinite local render distance",
+                            )
+                            .changed();
+                        ui.label(
+                            "Keeps all received chunks visible locally. This does not make the server send more chunks.",
+                        );
+                        options_changed |= ui
+                            .checkbox(
                                 &mut render_debug.flight_speed_boost_enabled,
                                 "Boost creative flight speed",
                             )
@@ -1972,6 +1986,7 @@ impl Default for ConnectUiState {
 struct ClientOptionsFile {
     pub fov_deg: f32,
     pub render_distance_chunks: i32,
+    pub infinite_render_distance: bool,
     pub mesh_enqueue_budget_per_frame: u32,
     pub mesh_apply_budget_per_frame: u32,
     pub mesh_max_in_flight: u32,
@@ -2071,6 +2086,7 @@ impl Default for ClientOptionsFile {
         Self {
             fov_deg: render.fov_deg,
             render_distance_chunks: render.render_distance_chunks,
+            infinite_render_distance: render.infinite_render_distance,
             mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
             mesh_apply_budget_per_frame: render.mesh_apply_budget_per_frame,
             mesh_max_in_flight: render.mesh_max_in_flight,
@@ -2174,6 +2190,7 @@ fn options_to_file(
     ClientOptionsFile {
         fov_deg: render.fov_deg,
         render_distance_chunks: render.render_distance_chunks,
+        infinite_render_distance: render.infinite_render_distance,
         mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
         mesh_apply_budget_per_frame: render.mesh_apply_budget_per_frame,
         mesh_max_in_flight: render.mesh_max_in_flight,
@@ -2277,6 +2294,7 @@ fn apply_options(
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
     render.render_distance_chunks = options.render_distance_chunks.clamp(2, 64);
+    render.infinite_render_distance = options.infinite_render_distance;
     render.mesh_enqueue_budget_per_frame = options.mesh_enqueue_budget_per_frame.clamp(1, 128);
     render.mesh_apply_budget_per_frame = options.mesh_apply_budget_per_frame.clamp(1, 64);
     render.mesh_max_in_flight = options.mesh_max_in_flight.clamp(1, 256);

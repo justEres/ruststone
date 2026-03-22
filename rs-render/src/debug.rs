@@ -85,6 +85,7 @@ pub struct RenderDebugSettings {
     pub shadows_enabled: bool,
     pub shadow_distance_scale: f32,
     pub render_distance_chunks: i32,
+    pub infinite_render_distance: bool,
     pub fov_deg: f32,
     pub use_greedy_meshing: bool,
     pub wireframe_enabled: bool,
@@ -177,6 +178,7 @@ impl Default for RenderDebugSettings {
             shadows_enabled: true,
             shadow_distance_scale: 1.0,
             render_distance_chunks: 12,
+            infinite_render_distance: false,
             fov_deg: 110.0,
             use_greedy_meshing: true,
             wireframe_enabled: false,
@@ -591,7 +593,7 @@ pub fn apply_render_debug_settings(
     for (entity, chunk, mut visibility) in &mut params.p0() {
         let dx = (chunk.key.0 - player_chunk_x).abs();
         let dz = (chunk.key.1 - player_chunk_z).abs();
-        let visible = dx <= max_dist && dz <= max_dist;
+        let visible = settings.infinite_render_distance || (dx <= max_dist && dz <= max_dist);
         let vis = if visible {
             Visibility::Visible
         } else {
