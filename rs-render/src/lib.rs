@@ -78,6 +78,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<chunk::ChunkRenderAssets>()
         .init_resource::<async_mesh::MeshAsyncResources>()
         .init_resource::<async_mesh::MeshInFlight>()
+        .init_resource::<async_mesh::MeshGeneration>()
         .init_resource::<DynamicBlockLightState>()
         .add_systems(Startup, (world::setup_world, camera::spawn_player))
         .add_systems(
@@ -114,10 +115,13 @@ impl Plugin for RenderPlugin {
 }
 
 fn enqueue_chunk_meshes(
+    mut commands: Commands,
     mut queue: ResMut<chunk::ChunkUpdateQueue>,
     mut store: ResMut<chunk::ChunkStore>,
+    mut state: ResMut<chunk::ChunkRenderState>,
     async_mesh: Res<async_mesh::MeshAsyncResources>,
     mut in_flight: ResMut<async_mesh::MeshInFlight>,
+    mut generation: ResMut<async_mesh::MeshGeneration>,
     render_debug: Res<debug::RenderDebugSettings>,
     mut perf: ResMut<debug::RenderPerfStats>,
     assets: Res<chunk::ChunkRenderAssets>,
@@ -131,8 +135,16 @@ fn enqueue_chunk_meshes(
 
     let mut updated_keys = std::collections::HashSet::new();
     let raw_updates = queue.0.len() as u32;
+    let mut reset_world = false;
+    let mut unloaded_keys = Vec::new();
     for update in queue.0.drain(..) {
         match update {
+            chunk::WorldUpdate::Reset => {
+                reset_world = true;
+            }
+            chunk::WorldUpdate::UnloadChunk(x, z) => {
+                unloaded_keys.push((x, z));
+            }
             chunk::WorldUpdate::ChunkData(chunk) => {
                 let key = (chunk.x, chunk.z);
                 chunk::update_store(&mut store, chunk);
@@ -150,6 +162,34 @@ fn enqueue_chunk_meshes(
             chunk::WorldUpdate::BlockUpdate(block_update) => {
                 for key in chunk::apply_block_update(&mut store, block_update) {
                     updated_keys.insert(key);
+                }
+            }
+        }
+    }
+
+    if reset_world || !unloaded_keys.is_empty() {
+        generation.0 = generation.0.wrapping_add(1);
+        in_flight.chunks.clear();
+        in_flight.pending_remesh.clear();
+    }
+
+    if reset_world {
+        for (_, entry) in state.entries.drain() {
+            commands.entity(entry.entity).despawn_recursive();
+        }
+        store.chunks.clear();
+        perf.in_flight = 0;
+        updated_keys.clear();
+    } else {
+        for key in unloaded_keys {
+            store.chunks.remove(&key);
+            if let Some(entry) = state.entries.remove(&key) {
+                commands.entity(entry.entity).despawn_recursive();
+            }
+            for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let neighbor = (key.0 + dx, key.1 + dz);
+                if store.chunks.contains_key(&neighbor) {
+                    updated_keys.insert(neighbor);
                 }
             }
         }
@@ -176,6 +216,7 @@ fn enqueue_chunk_meshes(
         }
         let snapshot = chunk::snapshot_for_chunk(&store, key);
         let job = async_mesh::MeshJob {
+            generation: generation.0,
             chunk_key: key,
             snapshot,
             use_greedy: render_debug.use_greedy_meshing,
@@ -216,6 +257,7 @@ fn apply_mesh_results(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     store: Res<chunk::ChunkStore>,
+    generation: Res<async_mesh::MeshGeneration>,
     render_debug: Res<debug::RenderDebugSettings>,
     assets: Res<chunk::ChunkRenderAssets>,
     mut state: ResMut<chunk::ChunkRenderState>,
@@ -233,6 +275,11 @@ fn apply_mesh_results(
 
     while let Ok(result) = receiver.try_recv() {
         let key = result.chunk_key;
+        if result.generation != generation.0 || !store.chunks.contains_key(&key) {
+            in_flight.chunks.remove(&key);
+            in_flight.pending_remesh.remove(&key);
+            continue;
+        }
         let mesh_batch = result.mesh;
         last_build_ms = result.build_ms;
 
@@ -376,6 +423,7 @@ fn apply_mesh_results(
         if in_flight.pending_remesh.remove(&key) {
             let snapshot = chunk::snapshot_for_chunk(&store, key);
             let job = async_mesh::MeshJob {
+                generation: generation.0,
                 chunk_key: key,
                 snapshot,
                 use_greedy: render_debug.use_greedy_meshing,

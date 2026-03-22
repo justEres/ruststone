@@ -957,7 +957,10 @@ pub fn local_movement_sound_system(
 
     let previous = sim_render.previous;
     let current = sim_state.current;
-    let horizontal_delta = Vec2::new(current.pos.x - previous.pos.x, current.pos.z - previous.pos.z);
+    let horizontal_delta = Vec2::new(
+        current.pos.x - previous.pos.x,
+        current.pos.z - previous.pos.z,
+    );
     let horizontal_distance = horizontal_delta.length();
     if horizontal_distance <= f32::EPSILON {
         return;
@@ -971,12 +974,7 @@ pub fn local_movement_sound_system(
     let in_water = is_water_state(feet_block);
 
     if in_water && !movement_sound.was_in_water {
-        emit_ui_sound(
-            &mut sound_queue,
-            "minecraft:random.splash",
-            0.5,
-            1.0,
-        );
+        emit_ui_sound(&mut sound_queue, "minecraft:random.splash", 0.5, 1.0);
     }
     movement_sound.was_in_water = in_water;
 
@@ -1008,7 +1006,9 @@ pub fn local_movement_sound_system(
         return;
     }
 
-    let below = Vec3::new(current.pos.x, current.pos.y - 0.2, current.pos.z).floor().as_ivec3();
+    let below = Vec3::new(current.pos.x, current.pos.y - 0.2, current.pos.z)
+        .floor()
+        .as_ivec3();
     let ground_state = collision_map.block_at(below.x, below.y, below.z);
     emit_world_sound(
         &mut sound_queue,

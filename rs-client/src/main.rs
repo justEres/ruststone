@@ -3,12 +3,12 @@ use bevy::window::PresentMode;
 use bevy::{log::LogPlugin, prelude::*};
 use clap::{Parser, ValueEnum};
 use rs_render::RenderPlugin;
+use rs_sound::SoundPlugin;
 use rs_ui::{ConnectUiState, UiPlugin};
 use rs_utils::{ApplicationState, AuthMode, FromNet, RUSTSTONE_ASSETS_ROOT_ENV, ToNet};
 use rs_utils::{FromNetMessage, ToNetMessage};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use rs_sound::SoundPlugin;
 
 mod embedded_assets;
 mod inventory_systems;

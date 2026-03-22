@@ -1452,11 +1452,8 @@ fn connect_ui(
                     .show(ui, |ui| {
                         options_changed |= ui
                             .add(
-                                egui::Slider::new(
-                                    &mut state.chat_background_opacity,
-                                    0.0..=255.0,
-                                )
-                                .text("Chat background opacity"),
+                                egui::Slider::new(&mut state.chat_background_opacity, 0.0..=255.0)
+                                    .text("Chat background opacity"),
                             )
                             .changed();
                         options_changed |= ui
@@ -1482,11 +1479,8 @@ fn connect_ui(
                             .changed();
                         options_changed |= ui
                             .add(
-                                egui::Slider::new(
-                                    &mut state.title_background_opacity,
-                                    0.0..=255.0,
-                                )
-                                .text("Title background opacity"),
+                                egui::Slider::new(&mut state.title_background_opacity, 0.0..=255.0)
+                                    .text("Title background opacity"),
                             )
                             .changed();
                         options_changed |= ui
@@ -3414,7 +3408,10 @@ fn draw_scoreboard_sidebar(
             );
             painter.rect_filled(separator_rect, 0.0, row_bg);
             painter.text(
-                egui::pos2((left + right) * 0.5 - 1.0, title_top + row_height * 0.5 - 1.0),
+                egui::pos2(
+                    (left + right) * 0.5 - 1.0,
+                    title_top + row_height * 0.5 - 1.0,
+                ),
                 egui::Align2::CENTER_CENTER,
                 title_text,
                 font_id,
@@ -3478,7 +3475,8 @@ fn draw_action_bar_overlay(
     if title_overlay.action_bar.is_empty() {
         return;
     }
-    let Some(alpha) = overlay_alpha(title_overlay.action_bar_started_at, title_overlay.times) else {
+    let Some(alpha) = overlay_alpha(title_overlay.action_bar_started_at, title_overlay.times)
+    else {
         return;
     };
 
@@ -3509,7 +3507,8 @@ fn draw_tab_list_overlay(
     tab_list_header_footer: &TabListHeaderFooter,
     state: &ConnectUiState,
 ) {
-    if tab_list_header_footer.header.trim().is_empty() && tab_list_header_footer.footer.trim().is_empty()
+    if tab_list_header_footer.header.trim().is_empty()
+        && tab_list_header_footer.footer.trim().is_empty()
     {
         return;
     }
@@ -3549,7 +3548,10 @@ fn draw_tab_list_overlay(
         });
 }
 
-fn overlay_alpha(started_at: Option<std::time::Instant>, times: rs_utils::TitleTimes) -> Option<f32> {
+fn overlay_alpha(
+    started_at: Option<std::time::Instant>,
+    times: rs_utils::TitleTimes,
+) -> Option<f32> {
     let started_at = started_at?;
     let elapsed_ticks = started_at.elapsed().as_secs_f32() / 0.05;
     let fade_in = times.fade_in_ticks.max(0) as f32;

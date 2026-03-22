@@ -78,6 +78,8 @@ impl MaterialExtension for AtlasTextureExtension {
 
 #[derive(Clone)]
 pub enum WorldUpdate {
+    Reset,
+    UnloadChunk(i32, i32),
     ChunkData(ChunkData),
     BlockUpdate(BlockUpdate),
 }
@@ -135,15 +137,9 @@ impl ChunkColumn {
     fn set_full(&mut self) {
         self.full = true;
         for idx in 0..self.sections.len() {
-            if self.sections[idx].is_none() {
-                self.sections[idx] = Some(vec![0u16; 4096]);
-            }
-            if self.block_light_sections[idx].is_none() {
-                self.block_light_sections[idx] = Some(vec![0u8; 4096]);
-            }
-            if self.sky_light_sections[idx].is_none() {
-                self.sky_light_sections[idx] = Some(vec![15u8; 4096]);
-            }
+            self.sections[idx] = Some(vec![0u16; 4096]);
+            self.block_light_sections[idx] = Some(vec![0u8; 4096]);
+            self.sky_light_sections[idx] = Some(vec![15u8; 4096]);
         }
     }
 
@@ -3056,6 +3052,9 @@ fn is_ao_occluder(block_state: u16) -> bool {
     if id == 0 {
         return false;
     }
+    if id == 78 {
+        return false;
+    }
     if is_transparent_block(id) {
         return false;
     }
@@ -3538,4 +3537,44 @@ fn face_is_occluded(block_id: u16, neighbor_id: u16, leaf_depth_layer_faces: boo
         return this_type == neighbor_type && block_id == neighbor_id;
     }
     is_occluding_block(neighbor_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rs_utils::ChunkSection;
+
+    fn full_chunk_with_section(y: u8, fill: u16) -> ChunkData {
+        ChunkData {
+            x: 0,
+            z: 0,
+            full: true,
+            sections: vec![ChunkSection {
+                y,
+                blocks: vec![fill; 16 * 16 * 16],
+                block_light: vec![0; 16 * 16 * 16],
+                sky_light: Some(vec![15; 16 * 16 * 16]),
+            }],
+            biomes: None,
+        }
+    }
+
+    #[test]
+    fn full_chunk_update_replaces_old_render_sections() {
+        let mut store = ChunkStore::default();
+        update_store(&mut store, full_chunk_with_section(5, 1 << 4));
+        let chunk = store.chunks.get(&(0, 0)).unwrap();
+        assert_eq!(chunk.sections[5].as_ref().unwrap()[0], 1 << 4);
+
+        update_store(&mut store, full_chunk_with_section(0, 2 << 4));
+        let chunk = store.chunks.get(&(0, 0)).unwrap();
+        assert_eq!(chunk.sections[0].as_ref().unwrap()[0], 2 << 4);
+        assert_eq!(chunk.sections[5].as_ref().unwrap()[0], 0);
+    }
+
+    #[test]
+    fn snow_layers_do_not_occlude_ao_neighbors() {
+        assert!(!is_ao_occluder(78 << 4));
+        assert!(is_ao_occluder(80 << 4));
+    }
 }

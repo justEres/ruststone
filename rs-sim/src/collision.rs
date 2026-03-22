@@ -71,6 +71,14 @@ impl WorldCollisionMap {
         }
     }
 
+    pub fn remove_chunk(&mut self, chunk_x: i32, chunk_z: i32) {
+        self.chunks.remove(&(chunk_x, chunk_z));
+    }
+
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+    }
+
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> u16 {
         if y < 0 {
             return block_state_from_id(1);
@@ -111,6 +119,38 @@ impl WorldCollisionMap {
             .entry((chunk_x, chunk_z))
             .or_insert_with(|| ChunkColumn::new(false));
         column.set_block(local_x, update.y, local_z, update.block_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rs_utils::ChunkSection;
+
+    fn full_chunk_with_section(y: u8, fill: u16) -> ChunkData {
+        ChunkData {
+            x: 0,
+            z: 0,
+            full: true,
+            sections: vec![ChunkSection {
+                y,
+                blocks: vec![fill; 16 * 16 * 16],
+                block_light: vec![0; 16 * 16 * 16],
+                sky_light: None,
+            }],
+            biomes: None,
+        }
+    }
+
+    #[test]
+    fn full_chunk_replaces_old_sections() {
+        let mut map = WorldCollisionMap::default();
+        map.update_chunk(full_chunk_with_section(5, block_state_from_id(1)));
+        assert_eq!(map.block_at(0, 5 * 16, 0), block_state_from_id(1));
+
+        map.update_chunk(full_chunk_with_section(0, block_state_from_id(2)));
+        assert_eq!(map.block_at(0, 0, 0), block_state_from_id(2));
+        assert_eq!(map.block_at(0, 5 * 16, 0), 0);
     }
 }
 

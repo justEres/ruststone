@@ -1604,7 +1604,12 @@ pub enum FromNetMessage {
     Packet(Packet),
     ChatMessage(String),
     TabCompleteReply(Vec<String>),
+    Respawn,
     ChunkData(ChunkData),
+    ChunkUnload {
+        x: i32,
+        z: i32,
+    },
     BlockUpdates(Vec<BlockUpdate>),
     PlayerPosition(PlayerPosition),
     UpdateHealth {

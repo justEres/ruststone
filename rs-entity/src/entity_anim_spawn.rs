@@ -449,7 +449,8 @@ pub(super) fn spawn_remote_player_model(
         } else {
             Color::srgb(0.85, 0.78, 0.72)
         },
-        base_color_texture: player_skin,
+        base_color_texture: player_skin.clone(),
+        emissive_texture: player_skin,
         alpha_mode: AlphaMode::Mask(0.5),
         perceptual_roughness: 0.95,
         metallic: 0.0,

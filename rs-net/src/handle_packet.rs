@@ -29,7 +29,10 @@ fn send_join_game(
         0x7f,
         rs_protocol::protocol::packet::Hand::MainHand,
     ) {
-        warn!("Failed to send initial ClientSettings after JoinGame: {}", err);
+        warn!(
+            "Failed to send initial ClientSettings after JoinGame: {}",
+            err
+        );
     }
     let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
         entity_id,
@@ -81,9 +84,7 @@ pub fn handle_packet(
     use rs_protocol::protocol::packet::Packet;
     match pkt {
         Packet::JoinGame_i8(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i8_NoDebug(jg) => {
-            send_join_game(to_main, conn, jg.entity_id, jg.gamemode)
-        }
+        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
         Packet::JoinGame_i32(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
         Packet::JoinGame_i32_ViewDistance(jg) => {
             send_join_game(to_main, conn, jg.entity_id, jg.gamemode)
@@ -127,6 +128,12 @@ pub fn handle_packet(
                     }
                 }
             }
+        }
+        Packet::ChunkUnload(unload) => {
+            let _ = to_main.send(FromNetMessage::ChunkUnload {
+                x: unload.x,
+                z: unload.z,
+            });
         }
         Packet::TeleportPlayer_NoConfirm(tp) => send_player_position(
             to_main,
@@ -805,21 +812,25 @@ pub fn handle_packet(
             });
         }
         Packet::Respawn_Gamemode(respawn) => {
+            let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_HashedSeed(respawn) => {
+            let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_NBT(respawn) => {
+            let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_WorldName(respawn) => {
+            let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
@@ -943,57 +954,53 @@ pub fn handle_packet(
                 title.fade_out,
             );
         }
-        Packet::Title_notext(title) => {
-            match title.action.0 {
-                0 => {
-                    if let Some(title) = title.title.as_ref() {
-                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
-                            text: component_to_legacy(title),
-                        }));
-                    }
+        Packet::Title_notext(title) => match title.action.0 {
+            0 => {
+                if let Some(title) = title.title.as_ref() {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
+                        text: component_to_legacy(title),
+                    }));
                 }
-                1 => {
-                    if let Some(subtitle) = title.sub_title.as_ref() {
-                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
-                            text: component_to_legacy(subtitle),
-                        }));
-                    }
-                }
-                2 => send_title_times(to_main, title.fade_in, title.fade_stay, title.fade_out),
-                3 => {
-                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
-                }
-                4 => {
-                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
-                }
-                _ => {}
             }
-        }
-        Packet::Title_notext_component(title) => {
-            match title.action.0 {
-                0 => {
-                    if let Some(title) = title.title.as_ref() {
-                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
-                            text: component_to_legacy(title),
-                        }));
-                    }
+            1 => {
+                if let Some(subtitle) = title.sub_title.as_ref() {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
+                        text: component_to_legacy(subtitle),
+                    }));
                 }
-                1 => {
-                    if let Some(subtitle) = title.sub_title.as_ref() {
-                        let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
-                            text: component_to_legacy(subtitle),
-                        }));
-                    }
-                }
-                3 => {
-                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
-                }
-                4 => {
-                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
-                }
-                _ => {}
             }
-        }
+            2 => send_title_times(to_main, title.fade_in, title.fade_stay, title.fade_out),
+            3 => {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
+            }
+            4 => {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
+            }
+            _ => {}
+        },
+        Packet::Title_notext_component(title) => match title.action.0 {
+            0 => {
+                if let Some(title) = title.title.as_ref() {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetTitle {
+                        text: component_to_legacy(title),
+                    }));
+                }
+            }
+            1 => {
+                if let Some(subtitle) = title.sub_title.as_ref() {
+                    let _ = to_main.send(FromNetMessage::Title(TitleMessage::SetSubtitle {
+                        text: component_to_legacy(subtitle),
+                    }));
+                }
+            }
+            3 => {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::Clear));
+            }
+            4 => {
+                let _ = to_main.send(FromNetMessage::Title(TitleMessage::Reset));
+            }
+            _ => {}
+        },
         Packet::ScoreboardDisplay(display) => {
             let _ = to_main.send(FromNetMessage::Scoreboard(ScoreboardMessage::Display {
                 position: display.position,
@@ -1422,24 +1429,98 @@ fn send_aux_sound_effect(
         1002 => Some(("minecraft:random.bow", SoundCategory::Player, 1.0, 1.2)),
         1003 => Some(("minecraft:random.door_open", SoundCategory::Block, 1.0, 1.0)),
         1004 => Some(("minecraft:random.fizz", SoundCategory::Block, 0.5, 2.6)),
-        1005 => record_name_from_item_id(data)
-            .map(|name| (name, SoundCategory::Record, 4.0, 1.0)),
-        1006 => Some(("minecraft:random.door_close", SoundCategory::Block, 1.0, 1.0)),
-        1007 => Some(("minecraft:mob.ghast.charge", SoundCategory::Hostile, 10.0, 1.0)),
-        1008 => Some(("minecraft:mob.ghast.fireball", SoundCategory::Hostile, 10.0, 1.0)),
-        1009 => Some(("minecraft:mob.ghast.fireball", SoundCategory::Hostile, 2.0, 1.0)),
-        1010 => Some(("minecraft:mob.zombie.wood", SoundCategory::Hostile, 2.0, 1.0)),
-        1011 => Some(("minecraft:mob.zombie.metal", SoundCategory::Hostile, 2.0, 1.0)),
-        1012 => Some(("minecraft:mob.zombie.woodbreak", SoundCategory::Hostile, 2.0, 1.0)),
-        1013 => Some(("minecraft:mob.wither.spawn", SoundCategory::Hostile, 1.0, 1.0)),
-        1014 => Some(("minecraft:mob.wither.shoot", SoundCategory::Hostile, 2.0, 1.0)),
-        1015 => Some(("minecraft:mob.bat.takeoff", SoundCategory::Ambient, 0.05, 1.0)),
-        1016 => Some(("minecraft:mob.zombie.infect", SoundCategory::Hostile, 2.0, 1.0)),
-        1017 => Some(("minecraft:mob.zombie.unfect", SoundCategory::Hostile, 2.0, 1.0)),
-        1018 => Some(("minecraft:mob.enderdragon.end", SoundCategory::Hostile, 5.0, 1.0)),
-        1020 => Some(("minecraft:random.anvil_break", SoundCategory::Block, 1.0, 1.0)),
+        1005 => record_name_from_item_id(data).map(|name| (name, SoundCategory::Record, 4.0, 1.0)),
+        1006 => Some((
+            "minecraft:random.door_close",
+            SoundCategory::Block,
+            1.0,
+            1.0,
+        )),
+        1007 => Some((
+            "minecraft:mob.ghast.charge",
+            SoundCategory::Hostile,
+            10.0,
+            1.0,
+        )),
+        1008 => Some((
+            "minecraft:mob.ghast.fireball",
+            SoundCategory::Hostile,
+            10.0,
+            1.0,
+        )),
+        1009 => Some((
+            "minecraft:mob.ghast.fireball",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1010 => Some((
+            "minecraft:mob.zombie.wood",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1011 => Some((
+            "minecraft:mob.zombie.metal",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1012 => Some((
+            "minecraft:mob.zombie.woodbreak",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1013 => Some((
+            "minecraft:mob.wither.spawn",
+            SoundCategory::Hostile,
+            1.0,
+            1.0,
+        )),
+        1014 => Some((
+            "minecraft:mob.wither.shoot",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1015 => Some((
+            "minecraft:mob.bat.takeoff",
+            SoundCategory::Ambient,
+            0.05,
+            1.0,
+        )),
+        1016 => Some((
+            "minecraft:mob.zombie.infect",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1017 => Some((
+            "minecraft:mob.zombie.unfect",
+            SoundCategory::Hostile,
+            2.0,
+            1.0,
+        )),
+        1018 => Some((
+            "minecraft:mob.enderdragon.end",
+            SoundCategory::Hostile,
+            5.0,
+            1.0,
+        )),
+        1020 => Some((
+            "minecraft:random.anvil_break",
+            SoundCategory::Block,
+            1.0,
+            1.0,
+        )),
         1021 => Some(("minecraft:random.anvil_use", SoundCategory::Block, 1.0, 1.0)),
-        1022 => Some(("minecraft:random.anvil_land", SoundCategory::Block, 0.3, 1.0)),
+        1022 => Some((
+            "minecraft:random.anvil_land",
+            SoundCategory::Block,
+            0.3,
+            1.0,
+        )),
         _ => None,
     };
     if let Some((event_id, category, volume, pitch)) = mapped {

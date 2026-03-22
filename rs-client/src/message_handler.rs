@@ -140,9 +140,23 @@ pub fn handle_messages(
                 ui.chat_autocomplete.query_snapshot = ui.chat.1.clone();
                 ui.chat_autocomplete.suppress_next_clear = false;
             }
+            FromNetMessage::Respawn => {
+                game.sim_clock.tick = 0;
+                game.sim_ready.0 = false;
+                game.history.0 = PredictionHistory::default().0;
+                game.sim_render.previous = sim_state.current;
+                net_events.events.clear();
+                collision_map.clear();
+                chunk_updates.0.clear();
+                chunk_updates.0.push(WorldUpdate::Reset);
+            }
             FromNetMessage::ChunkData(chunk) => {
                 collision_map.update_chunk(chunk.clone());
                 chunk_updates.0.push(WorldUpdate::ChunkData(chunk));
+            }
+            FromNetMessage::ChunkUnload { x, z } => {
+                collision_map.remove_chunk(x, z);
+                chunk_updates.0.push(WorldUpdate::UnloadChunk(x, z));
             }
             FromNetMessage::BlockUpdates(updates) => {
                 for update in updates {

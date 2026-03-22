@@ -30,10 +30,12 @@ impl FromWorld for MeshAsyncResources {
                 let runtime_clone = runtime_clone.clone();
                 runtime_clone.spawn_blocking(move || {
                     let start = std::time::Instant::now();
+                    let generation = job.generation;
                     let chunk_key = job.chunk_key;
                     let mesh = job.build_mesh();
                     let build_ms = start.elapsed().as_secs_f32() * 1000.0;
                     let _ = result_tx.send(MeshResult {
+                        generation,
                         chunk_key,
                         mesh,
                         build_ms,
@@ -56,7 +58,11 @@ pub struct MeshInFlight {
     pub pending_remesh: HashSet<(i32, i32)>,
 }
 
+#[derive(Resource, Default)]
+pub struct MeshGeneration(pub u64);
+
 pub struct MeshJob {
+    pub generation: u64,
     pub chunk_key: (i32, i32),
     pub snapshot: ChunkColumnSnapshot,
     pub use_greedy: bool,
@@ -85,6 +91,7 @@ impl MeshJob {
 }
 
 pub struct MeshResult {
+    pub generation: u64,
     pub chunk_key: (i32, i32),
     pub mesh: MeshBatch,
     pub build_ms: f32,

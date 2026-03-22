@@ -1593,12 +1593,10 @@ pub fn apply_remote_player_skins(
             let Some(material) = materials.get_mut(mat_handle) else {
                 continue;
             };
-            if material.base_color_texture.as_ref() != Some(&texture_handle) {
-                material.base_color_texture = Some(texture_handle.clone());
-                material.emissive_texture = Some(texture_handle.clone());
-                material.alpha_mode = AlphaMode::Mask(0.5);
-                material.unlit = false;
-            }
+            material.base_color_texture = Some(texture_handle.clone());
+            material.emissive_texture = Some(texture_handle.clone());
+            material.alpha_mode = AlphaMode::Mask(0.5);
+            material.unlit = false;
             material.base_color = Color::WHITE;
             material.emissive = emissive;
         }
@@ -1822,11 +1820,10 @@ pub fn update_local_player_skin_system(
     let Some(desired) = desired else {
         return;
     };
-    if material.base_color_texture.as_ref() != Some(&desired) {
-        material.base_color_texture = Some(desired.clone());
-        material.emissive_texture = Some(desired);
-        material.base_color = Color::WHITE;
-    }
+    material.base_color_texture = Some(desired.clone());
+    material.emissive_texture = Some(desired);
+    material.alpha_mode = AlphaMode::Mask(0.5);
+    material.unlit = false;
     material.base_color = Color::WHITE;
     material.emissive = player_shadow_emissive_strength(render_debug.player_shadow_opacity);
 }

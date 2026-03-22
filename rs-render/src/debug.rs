@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::async_mesh::{MeshAsyncResources, MeshInFlight, MeshJob};
+use crate::async_mesh::{MeshAsyncResources, MeshGeneration, MeshInFlight, MeshJob};
 use crate::chunk::{
     ChunkFace, ChunkOcclusionData, ChunkRenderAssets, ChunkRenderState, ChunkStore,
     snapshot_for_chunk,
@@ -605,6 +605,7 @@ pub fn remesh_on_meshing_toggle(
     mut state: ResMut<MeshingToggleState>,
     store: Res<ChunkStore>,
     async_mesh: Res<MeshAsyncResources>,
+    mut generation: ResMut<MeshGeneration>,
     mut in_flight: ResMut<MeshInFlight>,
     assets: Res<ChunkRenderAssets>,
 ) {
@@ -623,10 +624,13 @@ pub fn remesh_on_meshing_toggle(
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
     state.last_barrier_billboard = settings.barrier_billboard;
     settings.force_remesh = false;
+    generation.0 = generation.0.wrapping_add(1);
     in_flight.chunks.clear();
+    in_flight.pending_remesh.clear();
     for key in store.chunks.keys().copied() {
         let snapshot = snapshot_for_chunk(&store, key);
         let job = MeshJob {
+            generation: generation.0,
             chunk_key: key,
             snapshot,
             use_greedy: settings.use_greedy_meshing,

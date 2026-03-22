@@ -1,8 +1,8 @@
 use super::super::*;
 use super::world::raycast_block;
-use bevy::ecs::system::SystemParam;
 use crate::sim::movement::collision_parity_expected_box_count;
 use crate::sim_systems::{PerfMonitorSample, PerformanceMonitorState};
+use bevy::ecs::system::SystemParam;
 
 #[derive(SystemParam)]
 pub(crate) struct DebugOverlayParams<'w, 's> {
@@ -460,7 +460,10 @@ pub fn debug_overlay_system(
                     ui.separator();
                     ui.label(format!("tick: {}", params.sim_clock.tick));
                     ui.label(format!("history cap: {}", params.history.0.capacity()));
-                    ui.label(format!("last correction: {:.4}", params.debug.last_correction));
+                    ui.label(format!(
+                        "last correction: {:.4}",
+                        params.debug.last_correction
+                    ));
                     ui.label(format!("last replay ticks: {}", params.debug.last_replay));
                     ui.label(format!(
                         "last velocity correction: {:.4}",
@@ -647,11 +650,7 @@ pub fn debug_overlay_system(
     params.timings.debug_ui_ms = elapsed_ms;
 }
 
-fn draw_performance_monitor(
-    ctx: &egui::Context,
-    monitor: &PerformanceMonitorState,
-    compact: bool,
-) {
+fn draw_performance_monitor(ctx: &egui::Context, monitor: &PerformanceMonitorState, compact: bool) {
     let Some(latest) = monitor.samples.back().copied() else {
         return;
     };

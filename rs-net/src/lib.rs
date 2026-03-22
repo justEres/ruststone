@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
 use rand::Rng;
-use rs_protocol::protocol::{Conn, Direction, State, packet};
 use rs_protocol::protocol::login::{Account, AccountType};
 use rs_protocol::protocol::packet::Packet;
+use rs_protocol::protocol::{Conn, Direction, State, packet};
 use rs_utils::{AuthMode, EntityUseAction, FromNetMessage, InventoryItemStack, ToNetMessage};
 use serde::Deserialize;
 use serde_json::Value;
