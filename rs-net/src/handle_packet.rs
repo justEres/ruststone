@@ -16,9 +16,21 @@ use crate::chunk_decode;
 
 fn send_join_game(
     to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    conn: &mut Conn,
     entity_id: i32,
     gamemode: u8,
 ) {
+    if let Err(err) = rs_protocol::protocol::packet::send_client_settings(
+        conn,
+        "en_US".to_string(),
+        12,
+        0,
+        true,
+        0x7f,
+        rs_protocol::protocol::packet::Hand::MainHand,
+    ) {
+        warn!("Failed to send initial ClientSettings after JoinGame: {}", err);
+    }
     let _ = to_main.send(FromNetMessage::NetEntity(NetEntityMessage::LocalPlayerId {
         entity_id,
     }));
@@ -68,10 +80,14 @@ pub fn handle_packet(
 ) {
     use rs_protocol::protocol::packet::Packet;
     match pkt {
-        Packet::JoinGame_i8(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i32(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
-        Packet::JoinGame_i32_ViewDistance(jg) => send_join_game(to_main, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i8(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i8_NoDebug(jg) => {
+            send_join_game(to_main, conn, jg.entity_id, jg.gamemode)
+        }
+        Packet::JoinGame_i32(jg) => send_join_game(to_main, conn, jg.entity_id, jg.gamemode),
+        Packet::JoinGame_i32_ViewDistance(jg) => {
+            send_join_game(to_main, conn, jg.entity_id, jg.gamemode)
+        }
         Packet::ChunkData(cd) => {
             let bitmask = cd.bitmask.0 as u16;
             match chunk_decode::decode_chunk(
