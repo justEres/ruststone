@@ -1683,6 +1683,7 @@ pub fn spawn_local_player_model_system(
         .spawn((
             Name::new("LocalPlayerModel"),
             LocalPlayerModel,
+            RenderLayers::layer(LOCAL_PLAYER_RENDER_LAYER),
             // Match the remote player model facing (player root doesn't include the +PI).
             Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
             GlobalTransform::default(),
@@ -1702,6 +1703,7 @@ pub fn spawn_local_player_model_system(
         &base_mat,
         skin_model,
         &texture_debug,
+        Some(LOCAL_PLAYER_RENDER_LAYER),
     );
     commands.entity(model_root).add_child(parts.head);
     commands.entity(model_root).add_child(parts.body);
@@ -1721,7 +1723,6 @@ pub fn spawn_local_player_model_system(
 }
 
 pub fn apply_local_player_model_visibility_system(
-    mut commands: Commands,
     render_debug: Res<RenderDebugSettings>,
     perspective: Res<CameraPerspectiveState>,
     freecam: Res<FreecamState>,
@@ -1748,9 +1749,6 @@ pub fn apply_local_player_model_visibility_system(
         if let Ok(mut v) = vis_query.get_mut(e) {
             *v = target;
         }
-        commands
-            .entity(e)
-            .insert(RenderLayers::layer(LOCAL_PLAYER_RENDER_LAYER));
         if let Ok(children) = children_query.get(e) {
             for child in children.iter() {
                 stack.push(child);
@@ -2035,6 +2033,7 @@ pub fn first_person_viewmodel_system(
         player_right_arm_meshes(skin_model.0, &texture_debug),
         base_pose_translation,
         arm_child_offset,
+        None,
     );
     if let Ok(mut arm_cmd) = commands.get_entity(arm_right) {
         arm_cmd.insert(Transform {

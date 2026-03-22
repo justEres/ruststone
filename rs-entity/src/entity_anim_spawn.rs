@@ -464,6 +464,7 @@ pub(super) fn spawn_remote_player_model(
         player_head_meshes(texture_debug),
         Vec3::new(0.0, player_head_pivot_y(), 0.0),
         head_child_offset(),
+        None,
     );
     let body = spawn_player_part(
         commands,
@@ -473,6 +474,7 @@ pub(super) fn spawn_remote_player_model(
         player_body_meshes(texture_debug),
         Vec3::new(0.0, player_body_pivot_y(), 0.0),
         torso_child_offset(),
+        None,
     );
     let arm_left = spawn_player_part(
         commands,
@@ -486,6 +488,7 @@ pub(super) fn spawn_remote_player_model(
             limb_child_offset().y,
             0.0,
         ),
+        None,
     );
     let arm_right = spawn_player_part(
         commands,
@@ -499,6 +502,7 @@ pub(super) fn spawn_remote_player_model(
             limb_child_offset().y,
             0.0,
         ),
+        None,
     );
     let leg_left = spawn_player_part(
         commands,
@@ -512,6 +516,7 @@ pub(super) fn spawn_remote_player_model(
             player_leg_pivot_z_sneak(0.0),
         ),
         limb_child_offset(),
+        None,
     );
     let leg_right = spawn_player_part(
         commands,
@@ -525,6 +530,7 @@ pub(super) fn spawn_remote_player_model(
             player_leg_pivot_z_sneak(0.0),
         ),
         limb_child_offset(),
+        None,
     );
 
     (
@@ -547,6 +553,7 @@ pub(super) fn spawn_player_model_with_material(
     base_material: &Handle<StandardMaterial>,
     skin_model: PlayerSkinModel,
     texture_debug: &PlayerTextureDebugSettings,
+    render_layer: Option<usize>,
 ) -> LocalPlayerModelParts {
     let head = spawn_player_part(
         commands,
@@ -556,6 +563,7 @@ pub(super) fn spawn_player_model_with_material(
         player_head_meshes(texture_debug),
         Vec3::new(0.0, player_head_pivot_y(), 0.0),
         head_child_offset(),
+        render_layer,
     );
     let body = spawn_player_part(
         commands,
@@ -565,6 +573,7 @@ pub(super) fn spawn_player_model_with_material(
         player_body_meshes(texture_debug),
         Vec3::new(0.0, player_body_pivot_y(), 0.0),
         torso_child_offset(),
+        render_layer,
     );
     let arm_left = spawn_player_part(
         commands,
@@ -578,6 +587,7 @@ pub(super) fn spawn_player_model_with_material(
             limb_child_offset().y,
             0.0,
         ),
+        render_layer,
     );
     let arm_right = spawn_player_part(
         commands,
@@ -591,6 +601,7 @@ pub(super) fn spawn_player_model_with_material(
             limb_child_offset().y,
             0.0,
         ),
+        render_layer,
     );
     let leg_left = spawn_player_part(
         commands,
@@ -604,6 +615,7 @@ pub(super) fn spawn_player_model_with_material(
             player_leg_pivot_z_sneak(0.0),
         ),
         limb_child_offset(),
+        render_layer,
     );
     let leg_right = spawn_player_part(
         commands,
@@ -617,6 +629,7 @@ pub(super) fn spawn_player_model_with_material(
             player_leg_pivot_z_sneak(0.0),
         ),
         limb_child_offset(),
+        render_layer,
     );
 
     LocalPlayerModelParts {
@@ -637,32 +650,37 @@ pub(super) fn spawn_player_part(
     part_meshes: Vec<Mesh>,
     translation: Vec3,
     child_offset: Vec3,
+    render_layer: Option<usize>,
 ) -> Entity {
     let mut children = Vec::new();
     for mesh in part_meshes {
-        let child = commands
-            .spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(base_material.clone()),
-                Transform::from_translation(child_offset),
-                GlobalTransform::default(),
-                Visibility::Visible,
-                InheritedVisibility::default(),
-                ViewVisibility::default(),
-            ))
-            .id();
-        children.push(child);
-    }
-
-    let pivot = commands
-        .spawn((
-            Transform::from_translation(translation),
+        let mut child = commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(base_material.clone()),
+            Transform::from_translation(child_offset),
             GlobalTransform::default(),
             Visibility::Visible,
             InheritedVisibility::default(),
             ViewVisibility::default(),
-        ))
-        .id();
+        ));
+        if let Some(layer) = render_layer {
+            child.insert(bevy::render::view::RenderLayers::layer(layer));
+        }
+        let child = child.id();
+        children.push(child);
+    }
+
+    let mut pivot = commands.spawn((
+        Transform::from_translation(translation),
+        GlobalTransform::default(),
+        Visibility::Visible,
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
+    ));
+    if let Some(layer) = render_layer {
+        pivot.insert(bevy::render::view::RenderLayers::layer(layer));
+    }
+    let pivot = pivot.id();
 
     for child in children {
         commands.entity(pivot).add_child(child);
