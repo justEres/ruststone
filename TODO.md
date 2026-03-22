@@ -16,8 +16,16 @@
         -> the mask in in the texture folder
 
     - ✅ in f5 / front perspective mode the controls are inverted. always go from cameras perspective when deciding walk direction. 
+    - when players respawn, the something in the material goes missing and they just shade grey
 
     - sometimes chunks are missing. 
+    - ambient occlusion for snow layers
+
+- Controls:
+    - make controls editable using a gui in the settings and save and load them from config
+
+- Performance monitor
+    -  use egui plotters and draw a cpu and gpu and ram usage monitor graph, togglable with hotkeys
 
 - Animations:
     - ✅ Block breaking animation

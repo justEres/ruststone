@@ -64,10 +64,9 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            EnvFilter::new("info,wgpu_hal::vulkan=error,naga::back::spv::writer=warn")
-        });
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("info,wgpu_hal::vulkan=error,naga::back::spv::writer=warn")
+    });
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .without_time()

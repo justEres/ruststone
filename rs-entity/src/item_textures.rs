@@ -140,7 +140,10 @@ impl ItemTextureCache {
         None
     }
 
-    pub fn resolution_for_stack(&self, stack: &InventoryItemStack) -> Option<ItemTextureResolution> {
+    pub fn resolution_for_stack(
+        &self,
+        stack: &InventoryItemStack,
+    ) -> Option<ItemTextureResolution> {
         let key = ItemTexKey {
             item_id: stack.item_id,
             damage: stack.damage,
@@ -159,9 +162,9 @@ impl ItemTextureCache {
             };
             if self.materials.contains_key(&base) {
                 return Some(match self.status.get(&base).copied() {
-                    Some(ItemTexLoadStatus::Exact) => ItemTextureResolution::DamageFallback {
-                        fallback_damage: 0,
-                    },
+                    Some(ItemTexLoadStatus::Exact) => {
+                        ItemTextureResolution::DamageFallback { fallback_damage: 0 }
+                    }
                     Some(ItemTexLoadStatus::Missing) | None => ItemTextureResolution::Missing,
                 });
             }

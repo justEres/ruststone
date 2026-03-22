@@ -227,11 +227,7 @@ fn approx_eq(a: f32, b: f32) -> bool {
     (a - b).abs() <= 1e-4
 }
 
-fn boxes_contain(
-    boxes: &[(Vec3, Vec3)],
-    min: (f32, f32, f32),
-    max: (f32, f32, f32),
-) -> bool {
+fn boxes_contain(boxes: &[(Vec3, Vec3)], min: (f32, f32, f32), max: (f32, f32, f32)) -> bool {
     boxes.iter().any(|(box_min, box_max)| {
         approx_eq(box_min.x, min.0)
             && approx_eq(box_min.y, min.1)
@@ -296,10 +292,7 @@ fn stair_inner_right_shape_collision_boxes() {
     // center: north-facing stair; back neighbor: east-facing stair => inner-right corner.
     apply_blocks(
         &mut map,
-        &[
-            (0, 0, 0, block_state(53, 3)),
-            (0, 0, 1, block_state(53, 0)),
-        ],
+        &[(0, 0, 0, block_state(53, 3)), (0, 0, 1, block_state(53, 0))],
     );
     let world = WorldCollision::with_map(&map);
     let boxes = debug_block_collision_boxes(&world, block_state(53, 3), 0, 0, 0);
@@ -390,8 +383,16 @@ fn diagonal_stair_sprint_regression_stays_stable() {
         assert!(state.vel.is_finite());
     }
     // Regression guard: forward progress happens, but simulation remains bounded and stable.
-    assert!(state.pos.x > 0.4, "expected forward progress, got x={}", state.pos.x);
-    assert!(state.pos.y >= 0.9 && state.pos.y <= 2.1, "unexpected y={}", state.pos.y);
+    assert!(
+        state.pos.x > 0.4,
+        "expected forward progress, got x={}",
+        state.pos.x
+    );
+    assert!(
+        state.pos.y >= 0.9 && state.pos.y <= 2.1,
+        "unexpected y={}",
+        state.pos.y
+    );
 }
 
 #[test]
@@ -561,7 +562,11 @@ fn sneak_edge_clamps_over_slab_drop() {
 
     let next = simulate_tick(&initial, &input, &world);
     assert!(next.pos.x < 1.3, "sneak edge should clamp forward progress");
-    assert!(next.pos.y >= 1.49, "player should stay on the slab, y={}", next.pos.y);
+    assert!(
+        next.pos.y >= 1.49,
+        "player should stay on the slab, y={}",
+        next.pos.y
+    );
 }
 
 #[test]
@@ -599,8 +604,15 @@ fn mixed_step_up_stays_bounded() {
         assert!(state.pos.is_finite());
         assert!(state.vel.is_finite());
     }
-    assert!(state.pos.x > 1.0, "expected progress into mixed obstacle run");
-    assert!(state.pos.y <= 2.1, "unexpected vertical pop: y={}", state.pos.y);
+    assert!(
+        state.pos.x > 1.0,
+        "expected progress into mixed obstacle run"
+    );
+    assert!(
+        state.pos.y <= 2.1,
+        "unexpected vertical pop: y={}",
+        state.pos.y
+    );
 }
 
 #[test]
@@ -639,11 +651,22 @@ fn water_entry_and_surface_step_stay_stable() {
         state = simulate_tick(&state, &input, &world);
         assert!(state.pos.is_finite());
         assert!(state.vel.is_finite());
-        assert!(state.pos.y < 3.5, "unexpected water pop at tick {tick}: y={}", state.pos.y);
+        assert!(
+            state.pos.y < 3.5,
+            "unexpected water pop at tick {tick}: y={}",
+            state.pos.y
+        );
     }
 
-    assert!(state.pos.y > 1.0, "expected to remain near the water surface");
-    assert!(state.vel.y > -0.3, "unexpected vertical sink speed: {}", state.vel.y);
+    assert!(
+        state.pos.y > 1.0,
+        "expected to remain near the water surface"
+    );
+    assert!(
+        state.vel.y > -0.3,
+        "unexpected vertical sink speed: {}",
+        state.vel.y
+    );
 }
 
 #[test]

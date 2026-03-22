@@ -432,10 +432,16 @@ mod tests {
     #[test]
     fn metadata_variant_candidates_prioritize_exact_match() {
         let wool = item_texture_candidates(35, 14);
-        assert_eq!(wool.first().map(String::as_str), Some("blocks/wool_colored_red.png"));
+        assert_eq!(
+            wool.first().map(String::as_str),
+            Some("blocks/wool_colored_red.png")
+        );
 
         let planks = item_texture_candidates(5, 5);
-        assert_eq!(planks.first().map(String::as_str), Some("blocks/planks_big_oak.png"));
+        assert_eq!(
+            planks.first().map(String::as_str),
+            Some("blocks/planks_big_oak.png")
+        );
     }
 
     #[test]

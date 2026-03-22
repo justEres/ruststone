@@ -447,7 +447,8 @@ pub fn debug_overlay_system(
                     ));
                     ui.label(format!(
                         "last server tick: {}",
-                        debug.last_reconciled_server_tick
+                        debug
+                            .last_reconciled_server_tick
                             .map(|tick| tick.to_string())
                             .unwrap_or_else(|| "n/a".to_string())
                     ));

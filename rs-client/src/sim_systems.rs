@@ -683,7 +683,11 @@ pub fn fixed_sim_tick_system(
     let forward_strong = input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let sprint_eligible = player_status.food > 6 || player_status.can_fly;
     let mut sprinting_state = action_state.sprinting;
-    if !sprinting_state && sprint_key_down && forward_strong && sprint_eligible && !input_snapshot.sneak
+    if !sprinting_state
+        && sprint_key_down
+        && forward_strong
+        && sprint_eligible
+        && !input_snapshot.sneak
     {
         sprinting_state = true;
     }
@@ -1128,7 +1132,6 @@ fn clip_camera_to_world(world: &WorldCollisionMap, anchor: Vec3, desired: Vec3) 
 
     desired
 }
-
 
 #[path = "sim_interaction/mod.rs"]
 mod sim_interaction;

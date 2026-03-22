@@ -11,5 +11,6 @@ binary_greedy_mesher_demo
 
 rs-client/assets/texturepack/atlas_cache.png
 ruststone_options.toml
+commands.md
 
 rustone.exe

@@ -1,7 +1,7 @@
 use byteorder::WriteBytesExt;
-use tracing::debug;
 /// Implements https://wiki.vg/Minecraft_Forge_Handshake
 use std::io;
+use tracing::debug;
 
 use super::{Error, LenPrefixed, Serializable, VarInt};
 

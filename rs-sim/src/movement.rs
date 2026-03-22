@@ -1189,16 +1189,23 @@ pub fn collision_parity_expected_box_count(
     let block_id = block_state_id(block_state);
     let meta = block_state_meta(block_state);
     match block_model_kind(block_id) {
-        BlockModelKind::Stairs => Some(match stair_shape(world, block_state, block_x, block_y, block_z) {
-            StairShape::InnerLeft | StairShape::InnerRight => 3,
-            StairShape::Straight | StairShape::OuterLeft | StairShape::OuterRight => 2,
-        }),
+        BlockModelKind::Stairs => Some(
+            match stair_shape(world, block_state, block_x, block_y, block_z) {
+                StairShape::InnerLeft | StairShape::InnerRight => 3,
+                StairShape::Straight | StairShape::OuterLeft | StairShape::OuterRight => 2,
+            },
+        ),
         BlockModelKind::Fence => {
             let connect_east = fence_connects_to(world.block_at(block_x + 1, block_y, block_z));
             let connect_west = fence_connects_to(world.block_at(block_x - 1, block_y, block_z));
             let connect_south = fence_connects_to(world.block_at(block_x, block_y, block_z + 1));
             let connect_north = fence_connects_to(world.block_at(block_x, block_y, block_z - 1));
-            Some(1 + usize::from(connect_east) + usize::from(connect_west) + usize::from(connect_south) + usize::from(connect_north))
+            Some(
+                1 + usize::from(connect_east)
+                    + usize::from(connect_west)
+                    + usize::from(connect_south)
+                    + usize::from(connect_north),
+            )
         }
         BlockModelKind::Pane => {
             let connect_east = pane_connects_to(world.block_at(block_x + 1, block_y, block_z));
