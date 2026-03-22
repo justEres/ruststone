@@ -176,6 +176,8 @@ pub struct DebugUiState {
     pub render_show_layers: bool,
     pub perf_show_schedules: bool,
     pub perf_show_render_stats: bool,
+    pub perf_monitor_open: bool,
+    pub perf_monitor_compact: bool,
 }
 
 impl Default for DebugUiState {
@@ -188,6 +190,8 @@ impl Default for DebugUiState {
             render_show_layers: false,
             perf_show_schedules: false,
             perf_show_render_stats: false,
+            perf_monitor_open: false,
+            perf_monitor_compact: false,
         }
     }
 }

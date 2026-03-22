@@ -24,8 +24,10 @@
 - Controls:
     - make controls editable using a gui in the settings and save and load them from config
 
+
 - Performance monitor
-    -  use egui plotters and draw a cpu and gpu and ram usage monitor graph, togglable with hotkeys
+    - ✅ draw a CPU / GPU(render proxy) / RAM usage monitor graph, togglable with hotkeys
+    - there is a systemstat crate
 
 - Animations:
     - ✅ Block breaking animation
@@ -98,6 +100,8 @@
         - ✅ first high-impact custom model batch implemented (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
         - ⬜ remaining special blocks/states
     - ✅ better antialiasing
+    - textures on non full block models are currently stretched to each face. instead use correct scaling and uv mapping
+        - examples: stairs, doors, fences and so on
 
     - Lods (optional, very late in development, experimental)
 
@@ -152,6 +156,14 @@
 
 - Networking
     - implement all packets, ignore some that we dont need yet but at least decode them
+    - ✅ practical server HUD packet batch
+        - `ClientSettings`
+        - `Disconnect`
+        - `TimeUpdate`
+        - `ChangeGameState`
+        - Titles / action bar
+        - Tab list header / footer
+        - Scoreboard display / objective / score / teams
 
 <!-- - Debugging: 
     - better timing analysis support -->
@@ -161,10 +173,12 @@
     - bake assets into binary -> whole project single executable + accounts + options files 
 
 - Sounds
-    - implement full directional sound support:
-        - block breaking and placing
-        - steps 
-        - entity sounds -> e.g. animals
+    - 🚧 implement full directional sound support:
+        - ✅ new `rs-sound` crate with Bevy spatial playback, category sliders, lazy asset loading, and local sound cache
+        - ✅ block breaking and placing
+        - ✅ steps
+        - ✅ basic player/UI/world sounds (hurt, level-up, pickups, chest open/close, swim splash/swim, packet-driven world sounds)
+        - ⬜ broader entity sound coverage -> e.g. animals / mob ambient loops / sustained sounds
 
 - Chat
     - 🚧 transparent chat in bottom left corner

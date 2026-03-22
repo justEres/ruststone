@@ -1,6 +1,27 @@
 use super::super::*;
 use super::world::raycast_block;
+use bevy::ecs::system::SystemParam;
 use crate::sim::movement::collision_parity_expected_box_count;
+use crate::sim_systems::{PerfMonitorSample, PerformanceMonitorState};
+
+#[derive(SystemParam)]
+pub(crate) struct DebugOverlayParams<'w, 's> {
+    debug: Res<'w, DebugStats>,
+    sim_clock: Res<'w, SimClock>,
+    history: Res<'w, PredictionHistory>,
+    diagnostics: Res<'w, DiagnosticsStore>,
+    time: Res<'w, Time>,
+    debug_ui: ResMut<'w, DebugUiState>,
+    render_debug: ResMut<'w, RenderDebugSettings>,
+    render_perf: Res<'w, RenderPerfStats>,
+    sim_state: Res<'w, SimState>,
+    input: Res<'w, CurrentInput>,
+    ui_state: Res<'w, UiState>,
+    player_status: Res<'w, rs_utils::PlayerStatus>,
+    monitor: Res<'w, PerformanceMonitorState>,
+    timings: ResMut<'w, PerfTimings>,
+    _marker: std::marker::PhantomData<&'s ()>,
+}
 
 pub fn draw_entity_hitboxes_system(
     mut gizmos: Gizmos,
@@ -256,37 +277,34 @@ fn block_model_kind_label(kind: rs_utils::BlockModelKind) -> &'static str {
 
 pub fn debug_overlay_system(
     mut contexts: EguiContexts,
-    debug: Res<DebugStats>,
-    sim_clock: Res<SimClock>,
-    history: Res<PredictionHistory>,
-    diagnostics: Res<DiagnosticsStore>,
-    time: Res<Time>,
-    mut debug_ui: ResMut<DebugUiState>,
-    mut render_debug: ResMut<RenderDebugSettings>,
-    render_perf: Res<RenderPerfStats>,
-    sim_state: Res<SimState>,
-    input: Res<CurrentInput>,
-    ui_state: Res<UiState>,
-    player_status: Res<rs_utils::PlayerStatus>,
+    mut params: DebugOverlayParams,
     collision_map: Res<WorldCollisionMap>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
-    if !debug_ui.open || ui_state.ui_hidden {
-        timings.debug_ui_ms = 0.0;
+    if params.ui_state.ui_hidden {
+        params.timings.debug_ui_ms = 0.0;
         return;
     }
     let ctx = contexts.ctx_mut().unwrap();
+    if params.debug_ui.perf_monitor_open {
+        draw_performance_monitor(ctx, &params.monitor, params.debug_ui.perf_monitor_compact);
+    }
+    if !params.debug_ui.open {
+        params.timings.debug_ui_ms = timer.ms();
+        return;
+    }
     egui::Window::new("Debug")
         .default_pos(egui::pos2(12.0, 12.0))
         .show(ctx, |ui| {
-            let frame_ms = (time.delta_secs_f64() * 1000.0) as f32;
+            let frame_ms = (params.time.delta_secs_f64() * 1000.0) as f32;
             let performance_section = egui::CollapsingHeader::new("Performance")
-                .default_open(debug_ui.show_performance)
+                .default_open(params.debug_ui.show_performance)
                 .show(ui, |ui| {
                     ui.separator();
-                    if let Some(fps) = diagnostics
+                    ui.label("Hotkeys: F6 monitor, F7 compact");
+                    if let Some(fps) = params
+                        .diagnostics
                         .get(&FrameTimeDiagnosticsPlugin::FPS)
                         .and_then(|d| d.smoothed())
                     {
@@ -297,53 +315,56 @@ pub fn debug_overlay_system(
                     ui.label(format!("frame ms (delta): {:.2}", frame_ms));
                     ui.label(format!(
                         "main thread ms: {:.2} {}",
-                        timings.main_thread_ms,
+                        params.timings.main_thread_ms,
                         if frame_ms > 0.0 {
-                            format!("{:.1}%", (timings.main_thread_ms / frame_ms) * 100.0)
+                            format!("{:.1}%", (params.timings.main_thread_ms / frame_ms) * 100.0)
                         } else {
                             "n/a".to_string()
                         }
                     ));
                 });
-            debug_ui.show_performance = performance_section.fully_open();
+            params.debug_ui.show_performance = performance_section.fully_open();
 
             let render_section = egui::CollapsingHeader::new("Render")
-                .default_open(debug_ui.show_render)
+                .default_open(params.debug_ui.show_render)
                 .show(ui, |ui| {
                     ui.separator();
                     let layers_section = egui::CollapsingHeader::new("Layers")
-                        .default_open(debug_ui.render_show_layers)
+                        .default_open(params.debug_ui.render_show_layers)
                         .show(ui, |ui| {
                             ui.separator();
-                            ui.checkbox(&mut render_debug.show_layer_entities, "Layer: entities");
                             ui.checkbox(
-                                &mut render_debug.show_layer_chunks_opaque,
+                                &mut params.render_debug.show_layer_entities,
+                                "Layer: entities",
+                            );
+                            ui.checkbox(
+                                &mut params.render_debug.show_layer_chunks_opaque,
                                 "Layer: chunks opaque",
                             );
                             ui.checkbox(
-                                &mut render_debug.show_layer_chunks_cutout,
+                                &mut params.render_debug.show_layer_chunks_cutout,
                                 "Layer: chunks cutout",
                             );
                             ui.checkbox(
-                                &mut render_debug.show_layer_chunks_transparent,
+                                &mut params.render_debug.show_layer_chunks_transparent,
                                 "Layer: chunks transparent",
                             );
                         });
-                    debug_ui.render_show_layers = layers_section.fully_open();
+                    params.debug_ui.render_show_layers = layers_section.fully_open();
                     ui.separator();
-                    ui.checkbox(&mut render_debug.show_coordinates, "Coordinates");
-                    ui.checkbox(&mut render_debug.show_look_info, "Look info");
-                    ui.checkbox(&mut render_debug.show_look_ray, "Look ray");
+                    ui.checkbox(&mut params.render_debug.show_coordinates, "Coordinates");
+                    ui.checkbox(&mut params.render_debug.show_look_info, "Look info");
+                    ui.checkbox(&mut params.render_debug.show_look_ray, "Look ray");
                     ui.checkbox(
-                        &mut render_debug.show_target_block_outline,
+                        &mut params.render_debug.show_target_block_outline,
                         "Target block outline",
                     );
 
-                    if render_debug.show_coordinates || render_debug.show_look_info {
+                    if params.render_debug.show_coordinates || params.render_debug.show_look_info {
                         ui.separator();
                     }
-                    if render_debug.show_coordinates {
-                        let pos = sim_state.current.pos;
+                    if params.render_debug.show_coordinates {
+                        let pos = params.sim_state.current.pos;
                         let block = pos.floor().as_ivec3();
                         let chunk_x = block.x.div_euclid(16);
                         let chunk_z = block.z.div_euclid(16);
@@ -351,9 +372,9 @@ pub fn debug_overlay_system(
                         ui.label(format!("block: {} {} {}", block.x, block.y, block.z));
                         ui.label(format!("chunk: {} {}", chunk_x, chunk_z));
                     }
-                    if render_debug.show_look_info {
-                        let yaw_mc = (std::f32::consts::PI - input.0.yaw).to_degrees();
-                        let pitch_mc = (-input.0.pitch).to_degrees();
+                    if params.render_debug.show_look_info {
+                        let yaw_mc = (std::f32::consts::PI - params.input.0.yaw).to_degrees();
+                        let pitch_mc = (-params.input.0.pitch).to_degrees();
                         let (card, axis) = yaw_deg_to_cardinal(yaw_mc);
                         ui.label(format!("yaw/pitch: {:.1} / {:.1}", yaw_mc, pitch_mc));
                         ui.label(format!("facing: {} ({})", card, axis));
@@ -361,7 +382,7 @@ pub fn debug_overlay_system(
                         if let Ok(camera_transform) = camera_query.get_single() {
                             let origin = camera_transform.translation();
                             let dir = *camera_transform.forward();
-                            let max_reach = if player_status.gamemode == 1 {
+                            let max_reach = if params.player_status.gamemode == 1 {
                                 CREATIVE_BLOCK_REACH
                             } else {
                                 SURVIVAL_BLOCK_REACH
@@ -431,45 +452,46 @@ pub fn debug_overlay_system(
                         }
                     }
                 });
-            debug_ui.show_render = render_section.fully_open();
+            params.debug_ui.show_render = render_section.fully_open();
 
             let prediction_section = egui::CollapsingHeader::new("Prediction")
-                .default_open(debug_ui.show_prediction)
+                .default_open(params.debug_ui.show_prediction)
                 .show(ui, |ui| {
                     ui.separator();
-                    ui.label(format!("tick: {}", sim_clock.tick));
-                    ui.label(format!("history cap: {}", history.0.capacity()));
-                    ui.label(format!("last correction: {:.4}", debug.last_correction));
-                    ui.label(format!("last replay ticks: {}", debug.last_replay));
+                    ui.label(format!("tick: {}", params.sim_clock.tick));
+                    ui.label(format!("history cap: {}", params.history.0.capacity()));
+                    ui.label(format!("last correction: {:.4}", params.debug.last_correction));
+                    ui.label(format!("last replay ticks: {}", params.debug.last_replay));
                     ui.label(format!(
                         "last velocity correction: {:.4}",
-                        debug.last_velocity_correction
+                        params.debug.last_velocity_correction
                     ));
                     ui.label(format!(
                         "last server tick: {}",
-                        debug
+                        params
+                            .debug
                             .last_reconciled_server_tick
                             .map(|tick| tick.to_string())
                             .unwrap_or_else(|| "n/a".to_string())
                     ));
                     ui.label(format!(
                         "smoothing offset: {:.4}",
-                        debug.smoothing_offset_len
+                        params.debug.smoothing_offset_len
                     ));
-                    ui.label(format!("one-way ticks: {}", debug.one_way_ticks));
+                    ui.label(format!("one-way ticks: {}", params.debug.one_way_ticks));
                 });
-            debug_ui.show_prediction = prediction_section.fully_open();
+            params.debug_ui.show_prediction = prediction_section.fully_open();
 
-            if debug_ui.show_performance {
+            if params.debug_ui.show_performance {
                 ui.separator();
                 let schedule_section = egui::CollapsingHeader::new("Schedule Timings")
-                    .default_open(debug_ui.perf_show_schedules)
+                    .default_open(params.debug_ui.perf_show_schedules)
                     .show(ui, |_ui| {});
-                debug_ui.perf_show_schedules = schedule_section.fully_open();
+                params.debug_ui.perf_show_schedules = schedule_section.fully_open();
                 let render_stats_section = egui::CollapsingHeader::new("Render Timings")
-                    .default_open(debug_ui.perf_show_render_stats)
+                    .default_open(params.debug_ui.perf_show_render_stats)
                     .show(ui, |_ui| {});
-                debug_ui.perf_show_render_stats = render_stats_section.fully_open();
+                params.debug_ui.perf_show_render_stats = render_stats_section.fully_open();
                 let pct = |ms: f32| {
                     if frame_ms <= 0.0 {
                         None
@@ -482,144 +504,272 @@ pub fn debug_overlay_system(
                         .map(|p| format!("{:.1}%", p))
                         .unwrap_or_else(|| "n/a".to_string())
                 };
-                if debug_ui.perf_show_schedules {
+                if params.debug_ui.perf_show_schedules {
                     ui.label(format!(
                         "handle_messages: {:.3}ms {}",
-                        timings.handle_messages_ms,
-                        fmt_pct(timings.handle_messages_ms)
+                        params.timings.handle_messages_ms,
+                        fmt_pct(params.timings.handle_messages_ms)
                     ));
                     ui.label(format!(
                         "update schedule: {:.3}ms {}",
-                        timings.update_ms,
-                        fmt_pct(timings.update_ms)
+                        params.timings.update_ms,
+                        fmt_pct(params.timings.update_ms)
                     ));
                     ui.label(format!(
                         "post update: {:.3}ms {}",
-                        timings.post_update_ms,
-                        fmt_pct(timings.post_update_ms)
+                        params.timings.post_update_ms,
+                        fmt_pct(params.timings.post_update_ms)
                     ));
                     ui.label(format!(
                         "fixed update: {:.3}ms {}",
-                        timings.fixed_update_ms,
-                        fmt_pct(timings.fixed_update_ms)
+                        params.timings.fixed_update_ms,
+                        fmt_pct(params.timings.fixed_update_ms)
                     ));
                     ui.label(format!(
                         "input_collect: {:.3}ms {}",
-                        timings.input_collect_ms,
-                        fmt_pct(timings.input_collect_ms)
+                        params.timings.input_collect_ms,
+                        fmt_pct(params.timings.input_collect_ms)
                     ));
                     ui.label(format!(
                         "net_apply: {:.3}ms {}",
-                        timings.net_apply_ms,
-                        fmt_pct(timings.net_apply_ms)
+                        params.timings.net_apply_ms,
+                        fmt_pct(params.timings.net_apply_ms)
                     ));
                     ui.label(format!(
                         "fixed_tick: {:.3}ms {}",
-                        timings.fixed_tick_ms,
-                        fmt_pct(timings.fixed_tick_ms)
+                        params.timings.fixed_tick_ms,
+                        fmt_pct(params.timings.fixed_tick_ms)
                     ));
                     ui.label(format!(
                         "smoothing: {:.3}ms {}",
-                        timings.smoothing_ms,
-                        fmt_pct(timings.smoothing_ms)
+                        params.timings.smoothing_ms,
+                        fmt_pct(params.timings.smoothing_ms)
                     ));
                     ui.label(format!(
                         "apply_transform: {:.3}ms {}",
-                        timings.apply_transform_ms,
-                        fmt_pct(timings.apply_transform_ms)
+                        params.timings.apply_transform_ms,
+                        fmt_pct(params.timings.apply_transform_ms)
                     ));
                     ui.label(format!(
                         "debug_ui: {:.3}ms {}",
-                        timings.debug_ui_ms,
-                        fmt_pct(timings.debug_ui_ms)
+                        params.timings.debug_ui_ms,
+                        fmt_pct(params.timings.debug_ui_ms)
                     ));
                     ui.label(format!(
                         "ui: {:.3}ms {}",
-                        timings.ui_ms,
-                        fmt_pct(timings.ui_ms)
+                        params.timings.ui_ms,
+                        fmt_pct(params.timings.ui_ms)
                     ));
                 }
-                if debug_ui.perf_show_render_stats {
+                if params.debug_ui.perf_show_render_stats {
                     ui.separator();
                     ui.label(format!(
                         "mesh build ms: {:.2} (avg {:.2}) [async]",
-                        render_perf.last_mesh_build_ms, render_perf.avg_mesh_build_ms
+                        params.render_perf.last_mesh_build_ms, params.render_perf.avg_mesh_build_ms
                     ));
                     ui.label(format!(
                         "mesh apply ms: {:.2} (avg {:.2}) {}",
-                        render_perf.last_apply_ms,
-                        render_perf.avg_apply_ms,
-                        fmt_pct(render_perf.last_apply_ms)
+                        params.render_perf.last_apply_ms,
+                        params.render_perf.avg_apply_ms,
+                        fmt_pct(params.render_perf.last_apply_ms)
                     ));
                     ui.label(format!(
                         "mesh enqueue ms: {:.2} (avg {:.2}) {}",
-                        render_perf.last_enqueue_ms,
-                        render_perf.avg_enqueue_ms,
-                        fmt_pct(render_perf.last_enqueue_ms)
+                        params.render_perf.last_enqueue_ms,
+                        params.render_perf.avg_enqueue_ms,
+                        fmt_pct(params.render_perf.last_enqueue_ms)
                     ));
                     ui.label(format!(
                         "occlusion cull ms: {:.2} {}",
-                        render_perf.occlusion_cull_ms,
-                        fmt_pct(render_perf.occlusion_cull_ms)
+                        params.render_perf.occlusion_cull_ms,
+                        fmt_pct(params.render_perf.occlusion_cull_ms)
                     ));
                     ui.label(format!(
                         "render debug ms: {:.2} {}",
-                        render_perf.apply_debug_ms,
-                        fmt_pct(render_perf.apply_debug_ms)
+                        params.render_perf.apply_debug_ms,
+                        fmt_pct(params.render_perf.apply_debug_ms)
                     ));
                     ui.label(format!(
                         "render stats ms: {:.2} {}",
-                        render_perf.gather_stats_ms,
-                        fmt_pct(render_perf.gather_stats_ms)
+                        params.render_perf.gather_stats_ms,
+                        fmt_pct(params.render_perf.gather_stats_ms)
                     ));
                     ui.label(format!(
                         "mesh applied: {} in_flight: {} updates: {} (raw {})",
-                        render_perf.last_meshes_applied,
-                        render_perf.in_flight,
-                        render_perf.last_updates,
-                        render_perf.last_updates_raw
+                        params.render_perf.last_meshes_applied,
+                        params.render_perf.in_flight,
+                        params.render_perf.last_updates,
+                        params.render_perf.last_updates_raw
                     ));
                     ui.label(format!(
                         "meshes: dist {} / {} view {} / {}",
-                        render_perf.visible_meshes_distance,
-                        render_perf.total_meshes,
-                        render_perf.visible_meshes_view,
-                        render_perf.total_meshes
+                        params.render_perf.visible_meshes_distance,
+                        params.render_perf.total_meshes,
+                        params.render_perf.visible_meshes_view,
+                        params.render_perf.total_meshes
                     ));
                     ui.label(format!(
                         "chunks: {} / {} (distance)",
-                        render_perf.visible_chunks, render_perf.total_chunks
+                        params.render_perf.visible_chunks, params.render_perf.total_chunks
                     ));
                     ui.label(format!(
                         "chunks after occlusion: {} (occluded {})",
-                        render_perf.visible_chunks_after_occlusion, render_perf.occluded_chunks
+                        params.render_perf.visible_chunks_after_occlusion,
+                        params.render_perf.occluded_chunks
                     ));
                     ui.separator();
                     ui.label(format!(
                         "mat pass w: o={:.1} c={:.1} cc={:.1} t={:.1}",
-                        render_perf.mat_pass_opaque,
-                        render_perf.mat_pass_cutout,
-                        render_perf.mat_pass_cutout_culled,
-                        render_perf.mat_pass_transparent
+                        params.render_perf.mat_pass_opaque,
+                        params.render_perf.mat_pass_cutout,
+                        params.render_perf.mat_pass_cutout_culled,
+                        params.render_perf.mat_pass_transparent
                     ));
                     ui.label(format!(
                         "mat alpha: o={} c={} cc={} t={}",
-                        render_perf.mat_alpha_opaque,
-                        render_perf.mat_alpha_cutout,
-                        render_perf.mat_alpha_cutout_culled,
-                        render_perf.mat_alpha_transparent
+                        params.render_perf.mat_alpha_opaque,
+                        params.render_perf.mat_alpha_cutout,
+                        params.render_perf.mat_alpha_cutout_culled,
+                        params.render_perf.mat_alpha_transparent
                     ));
                     ui.label(format!(
                         "mat unlit: o={} c={} cc={} t={}",
-                        render_perf.mat_unlit_opaque,
-                        render_perf.mat_unlit_cutout,
-                        render_perf.mat_unlit_cutout_culled,
-                        render_perf.mat_unlit_transparent
+                        params.render_perf.mat_unlit_opaque,
+                        params.render_perf.mat_unlit_cutout,
+                        params.render_perf.mat_unlit_cutout_culled,
+                        params.render_perf.mat_unlit_transparent
                     ));
                 }
             }
         });
 
     let elapsed_ms = timer.ms();
-    timings.debug_ui_ms = elapsed_ms;
+    params.timings.debug_ui_ms = elapsed_ms;
+}
+
+fn draw_performance_monitor(
+    ctx: &egui::Context,
+    monitor: &PerformanceMonitorState,
+    compact: bool,
+) {
+    let Some(latest) = monitor.samples.back().copied() else {
+        return;
+    };
+    let graph_size = if compact {
+        egui::vec2(150.0, 44.0)
+    } else {
+        egui::vec2(220.0, 72.0)
+    };
+    let margin = if compact { 8 } else { 10 };
+    let spacing = if compact { 6.0 } else { 10.0 };
+
+    egui::Area::new(egui::Id::new("performance_monitor_overlay"))
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(176))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(70)))
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::same(margin))
+                .show(ui, |ui| {
+                    if !compact {
+                        ui.horizontal(|ui| {
+                            ui.strong("Performance Monitor");
+                            ui.label("F6 toggle, F7 compact");
+                        });
+                        ui.add_space(4.0);
+                    }
+                    draw_monitor_row(
+                        ui,
+                        "CPU",
+                        latest.cpu_percent,
+                        "%",
+                        graph_size,
+                        egui::Color32::from_rgb(244, 117, 96),
+                        &monitor.samples,
+                        |sample| sample.cpu_percent,
+                        100.0,
+                    );
+                    ui.add_space(spacing);
+                    draw_monitor_row(
+                        ui,
+                        "GPU / Render",
+                        latest.render_ms,
+                        "ms",
+                        graph_size,
+                        egui::Color32::from_rgb(114, 182, 255),
+                        &monitor.samples,
+                        |sample| sample.render_ms,
+                        16.67,
+                    );
+                    ui.add_space(spacing);
+                    draw_monitor_row(
+                        ui,
+                        "RAM",
+                        latest.ram_mb,
+                        "MB",
+                        graph_size,
+                        egui::Color32::from_rgb(128, 211, 120),
+                        &monitor.samples,
+                        |sample| sample.ram_mb,
+                        latest.ram_mb.max(256.0),
+                    );
+                    if !compact {
+                        ui.add_space(6.0);
+                        ui.label(format!("frame {:.2} ms", latest.frame_ms));
+                    }
+                });
+        });
+}
+
+fn draw_monitor_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    latest: f32,
+    unit: &str,
+    graph_size: egui::Vec2,
+    color: egui::Color32,
+    samples: &std::collections::VecDeque<PerfMonitorSample>,
+    value_of: impl Fn(&PerfMonitorSample) -> f32,
+    baseline_max: f32,
+) {
+    ui.label(format!("{label} {:.1}{unit}", latest));
+    let (rect, _) = ui.allocate_exact_size(graph_size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, egui::Color32::from_black_alpha(84));
+    painter.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        egui::StrokeKind::Outside,
+    );
+    if samples.len() < 2 {
+        return;
+    }
+
+    let max_value = samples
+        .iter()
+        .map(&value_of)
+        .fold(baseline_max.max(1.0), f32::max)
+        .max(1.0);
+    let width = rect.width().max(1.0);
+    let height = rect.height().max(1.0);
+    let count = (samples.len() - 1).max(1) as f32;
+    let mut points = Vec::with_capacity(samples.len());
+    for (idx, sample) in samples.iter().enumerate() {
+        let x = rect.left() + width * (idx as f32 / count);
+        let normalized = (value_of(sample) / max_value).clamp(0.0, 1.0);
+        let y = rect.bottom() - normalized * height;
+        points.push(egui::pos2(x, y));
+    }
+
+    let baseline_y = rect.bottom() - ((baseline_max / max_value).clamp(0.0, 1.0) * height);
+    painter.line_segment(
+        [
+            egui::pos2(rect.left(), baseline_y),
+            egui::pos2(rect.right(), baseline_y),
+        ],
+        egui::Stroke::new(1.0, egui::Color32::from_gray(45)),
+    );
+    painter.add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
 }

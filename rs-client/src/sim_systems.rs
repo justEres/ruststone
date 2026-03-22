@@ -30,6 +30,7 @@ use rs_utils::{
     BreakIndicator, EntityUseAction, InventoryState, PerfTimings, block_model_kind,
     block_registry_key, block_state_id, block_state_meta,
 };
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::entities::{ItemSpriteStack, RemoteVisual};
 use crate::entities::{RemoteEntity, RemoteEntityRegistry};
@@ -77,6 +78,32 @@ pub struct MovementSoundState {
     pub accumulated_ground_distance: f32,
     pub accumulated_swim_distance: f32,
     pub was_in_water: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PerfMonitorSample {
+    pub frame_ms: f32,
+    pub cpu_percent: f32,
+    pub ram_mb: f32,
+    pub render_ms: f32,
+}
+
+#[derive(Resource)]
+pub struct PerformanceMonitorState {
+    pub samples: std::collections::VecDeque<PerfMonitorSample>,
+    pub pid: Option<Pid>,
+    pub max_samples: usize,
+}
+
+impl Default for PerformanceMonitorState {
+    fn default() -> Self {
+        let pid = sysinfo::get_current_pid().ok();
+        Self {
+            samples: std::collections::VecDeque::with_capacity(240),
+            pid,
+            max_samples: 240,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -401,6 +428,50 @@ pub fn frame_timing_end(mut state: ResMut<FrameTimingState>, mut timings: ResMut
     }
 }
 
+pub fn performance_monitor_sample_system(
+    timings: Res<PerfTimings>,
+    render_perf: Res<RenderPerfStats>,
+    mut monitor: ResMut<PerformanceMonitorState>,
+    mut system: Local<Option<System>>,
+) {
+    let frame_ms = if timings.frame_delta_ms > 0.0 {
+        timings.frame_delta_ms
+    } else {
+        timings.main_thread_ms
+    };
+    let render_ms = (render_perf.last_apply_ms
+        + render_perf.last_enqueue_ms
+        + render_perf.occlusion_cull_ms
+        + render_perf.apply_debug_ms
+        + render_perf.gather_stats_ms)
+        .max(0.0);
+
+    let system = system.get_or_insert_with(System::new);
+    let (cpu_percent, ram_mb) = if let Some(pid) = monitor.pid {
+        let _ = system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        if let Some(process) = system.process(pid) {
+            (
+                process.cpu_usage().max(0.0),
+                process.memory() as f32 / (1024.0 * 1024.0),
+            )
+        } else {
+            (0.0, 0.0)
+        }
+    } else {
+        (0.0, 0.0)
+    };
+
+    if monitor.samples.len() >= monitor.max_samples {
+        monitor.samples.pop_front();
+    }
+    monitor.samples.push_back(PerfMonitorSample {
+        frame_ms,
+        cpu_percent,
+        ram_mb,
+        render_ms,
+    });
+}
+
 pub fn update_timing_start(mut state: ResMut<FrameTimingState>) {
     state.update_start = Some(Instant::now());
 }
@@ -451,6 +522,12 @@ pub fn debug_toggle_system(
     }
     if keys.just_pressed(KeyCode::KeyH) {
         hitbox_debug.enabled = !hitbox_debug.enabled;
+    }
+    if keys.just_pressed(KeyCode::F6) {
+        debug_ui.perf_monitor_open = !debug_ui.perf_monitor_open;
+    }
+    if keys.just_pressed(KeyCode::F7) {
+        debug_ui.perf_monitor_compact = !debug_ui.perf_monitor_compact;
     }
 }
 

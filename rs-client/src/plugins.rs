@@ -102,6 +102,7 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(sim_systems::LatencyEstimate::default())
             .insert_resource(sim_systems::ActionState::default())
             .insert_resource(sim_systems::MovementSoundState::default())
+            .insert_resource(sim_systems::PerformanceMonitorState::default())
             .insert_resource(sim_systems::FrameTimingState::default())
             .insert_resource(sim_systems::EntityHitboxDebug::default())
             .insert_resource(item_textures::ItemTextureCache::default())
@@ -287,7 +288,14 @@ impl Plugin for ClientTimingPlugin {
                 FixedUpdate,
                 sim_systems::fixed_update_timing_end.after(sim_systems::fixed_sim_tick_system),
             )
-            .add_systems(Last, sim_systems::frame_timing_end);
+            .add_systems(
+                Last,
+                (
+                    sim_systems::frame_timing_end,
+                    sim_systems::performance_monitor_sample_system
+                        .after(sim_systems::frame_timing_end),
+                ),
+            );
     }
 }
 
