@@ -104,6 +104,8 @@ pub struct RenderDebugSettings {
     pub render_self_model: bool,
     pub shader_quality_mode: u8, // 0 fast .. 3 fancy
     pub enable_pbr_terrain_lighting: bool,
+    pub sync_sun_with_time: bool,
+    pub render_sun_sprite: bool,
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
     pub sun_strength: f32,
@@ -188,6 +190,8 @@ impl Default for RenderDebugSettings {
             render_self_model: true,
             shader_quality_mode: 2,
             enable_pbr_terrain_lighting: false,
+            sync_sun_with_time: true,
+            render_sun_sprite: true,
             sun_azimuth_deg: 62.0,
             sun_elevation_deg: 62.0,
             sun_strength: 0.56,

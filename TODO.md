@@ -6,6 +6,8 @@
 
 - ✅ F1 key for toggling ui rendering -> skip egui layer if enabled
 
+- ✅ option to sync sun with day and night / time, also render a sun (should be in textures) and sync it with the light source
+
 - Bugfixes:
     - ✅ block outline for water -> should not be there
     - ✅ when hand is empty, the hand is still rendered. also when placing blocks, it does not always remove the item directly

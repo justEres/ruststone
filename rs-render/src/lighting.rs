@@ -14,6 +14,7 @@ use crate::chunk::{AtlasLightingUniform, ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
 use crate::debug::{AntiAliasingMode, RenderDebugSettings, RenderPerfStats};
 use crate::reflection::DEFAULT_WATER_PLANE_Y;
+use rs_utils::WorldTime;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -136,14 +137,39 @@ fn sun_color_from_warmth(warmth: f32) -> Color {
     Color::srgb(1.0, 1.0 - 0.18 * t, 1.0 - 0.38 * t)
 }
 
+pub fn vanilla_celestial_angle(world_time: i64, partial_ticks: f32) -> f32 {
+    let day_time = world_time.rem_euclid(24_000) as f32;
+    let mut f = (day_time + partial_ticks) / 24_000.0 - 0.25;
+    if f < 0.0 {
+        f += 1.0;
+    }
+    if f > 1.0 {
+        f -= 1.0;
+    }
+    let base = f;
+    let curved = 1.0 - (((base * std::f32::consts::PI).cos() + 1.0) * 0.5);
+    base + (curved - base) / 3.0
+}
+
+pub fn effective_sun_direction(settings: &RenderDebugSettings, world_time: Option<&WorldTime>) -> Vec3 {
+    if settings.sync_sun_with_time {
+        let time = world_time.map(|time| time.time_of_day).unwrap_or(0);
+        let angle = vanilla_celestial_angle(time, 0.0) * std::f32::consts::TAU;
+        Vec3::new(0.0, angle.cos(), angle.sin()).normalize_or_zero()
+    } else {
+        let az = settings.sun_azimuth_deg.to_radians();
+        let el = settings.sun_elevation_deg.to_radians();
+        Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero()
+    }
+}
+
 pub fn lighting_uniform_for_mode(
     settings: &RenderDebugSettings,
+    world_time: Option<&WorldTime>,
     pass_mode: f32, // 0 opaque, 1 transparent(water), 2 cutout
 ) -> AtlasLightingUniform {
     let fixed_debug = false;
-    let az = settings.sun_azimuth_deg.to_radians();
-    let el = settings.sun_elevation_deg.to_radians();
-    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero();
+    let sun_dir = effective_sun_direction(settings, world_time);
     let quality_mode = if fixed_debug {
         0.0
     } else {
@@ -290,6 +316,7 @@ pub fn lighting_uniform_for_mode(
 
 pub fn apply_lighting_quality(
     settings: Res<RenderDebugSettings>,
+    world_time: Res<WorldTime>,
     mut assets: ResMut<ChunkRenderAssets>,
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
     mut chunk_materials: Query<&mut MeshMaterial3d<ChunkAtlasMaterial>>,
@@ -306,7 +333,7 @@ pub fn apply_lighting_quality(
     let cutout_alpha_mode = cutout_alpha_mode(&settings);
     let grass_overlay_info = assets.grass_overlay_info;
     let make_lighting = |pass_mode: f32| {
-        let mut u = lighting_uniform_for_mode(&settings, pass_mode);
+        let mut u = lighting_uniform_for_mode(&settings, Some(&world_time), pass_mode);
         u.grass_overlay_info = grass_overlay_info;
         u
     };
@@ -473,9 +500,7 @@ pub fn apply_lighting_quality(
     let shadow_opacity = settings.shadow_opacity.clamp(0.0, 1.0);
     let sun_color = sun_color_from_warmth(settings.sun_warmth);
     let fill_boost = 1.0 + (1.0 - shadow_opacity) * 1.2;
-    let az = settings.sun_azimuth_deg.to_radians();
-    let el = settings.sun_elevation_deg.to_radians();
-    let sun_dir = Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin()).normalize_or_zero();
+    let sun_dir = effective_sun_direction(&settings, Some(&world_time));
     let sun_travel_dir = -sun_dir;
     ambient.brightness =
         (settings.ambient_brightness + (1.0 - shadow_opacity) * 0.45).clamp(0.0, 3.0);
@@ -517,6 +542,7 @@ pub fn apply_lighting_quality(
 pub fn update_water_animation(
     time: Res<Time>,
     settings: Res<RenderDebugSettings>,
+    world_time: Res<WorldTime>,
     assets: Res<ChunkRenderAssets>,
     mut materials: ResMut<Assets<ChunkAtlasMaterial>>,
 ) {
@@ -550,7 +576,7 @@ pub fn update_water_animation(
         if let Some(mat) = materials.get_mut(handle) {
             // Rebuild the full uniform every frame to prevent stale pass specialization
             // when quality presets are switched at runtime.
-            mat.extension.lighting = lighting_uniform_for_mode(&settings, pass_mode);
+            mat.extension.lighting = lighting_uniform_for_mode(&settings, Some(&world_time), pass_mode);
             mat.base.unlit = force_unlit;
             mat.base.alpha_mode = alpha_mode;
             mat.base.opaque_render_method = OpaqueRendererMethod::Forward;

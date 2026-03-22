@@ -437,7 +437,7 @@ impl FromWorld for ChunkRenderAssets {
         );
 
         let make_lighting = |pass_mode: f32| {
-            let mut u = lighting_uniform_for_mode(&settings, pass_mode);
+            let mut u = lighting_uniform_for_mode(&settings, None, pass_mode);
             u.grass_overlay_info = grass_overlay_info;
             u
         };

@@ -85,6 +85,7 @@ impl Plugin for RenderPlugin {
             (
                 input::apply_cursor_lock,
                 debug::apply_render_debug_settings,
+                world::update_sun_sprite,
                 lighting::apply_lighting_quality.after(debug::apply_render_debug_settings),
                 lighting::update_water_animation.after(lighting::apply_lighting_quality),
                 lighting::update_material_debug_stats.after(lighting::update_water_animation),

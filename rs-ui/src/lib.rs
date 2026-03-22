@@ -1089,6 +1089,15 @@ fn connect_ui(
                             )
                             .changed();
                         options_changed |= ui
+                            .checkbox(
+                                &mut render_debug.sync_sun_with_time,
+                                "Sync sun with world time",
+                            )
+                            .changed();
+                        options_changed |= ui
+                            .checkbox(&mut render_debug.render_sun_sprite, "Render sun sprite")
+                            .changed();
+                        options_changed |= ui
                             .checkbox(&mut render_debug.shadows_enabled, "Shadows")
                             .changed();
                         options_changed |= ui
@@ -1128,24 +1137,26 @@ fn connect_ui(
                                 .text("Shadow max distance"),
                             )
                             .changed();
-                        options_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut render_debug.sun_azimuth_deg,
-                                    -180.0..=180.0,
+                        ui.add_enabled_ui(!render_debug.sync_sun_with_time, |ui| {
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.sun_azimuth_deg,
+                                        -180.0..=180.0,
+                                    )
+                                    .text("Sun azimuth"),
                                 )
-                                .text("Sun azimuth"),
-                            )
-                            .changed();
-                        options_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut render_debug.sun_elevation_deg,
-                                    -20.0..=89.0,
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.sun_elevation_deg,
+                                        -20.0..=89.0,
+                                    )
+                                    .text("Sun elevation"),
                                 )
-                                .text("Sun elevation"),
-                            )
-                            .changed();
+                                .changed();
+                        });
                         options_changed |= ui
                             .add(
                                 egui::Slider::new(&mut render_debug.sun_strength, 0.0..=2.0)
@@ -1933,6 +1944,8 @@ struct ClientOptionsFile {
     pub show_chunk_borders: bool,
     pub shader_quality_mode: u8,
     pub enable_pbr_terrain_lighting: bool,
+    pub sync_sun_with_time: bool,
+    pub render_sun_sprite: bool,
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
     pub sun_strength: f32,
@@ -2025,6 +2038,8 @@ impl Default for ClientOptionsFile {
             show_chunk_borders: render.show_chunk_borders,
             shader_quality_mode: render.shader_quality_mode,
             enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+            sync_sun_with_time: render.sync_sun_with_time,
+            render_sun_sprite: render.render_sun_sprite,
             sun_azimuth_deg: render.sun_azimuth_deg,
             sun_elevation_deg: render.sun_elevation_deg,
             sun_strength: render.sun_strength,
@@ -2121,6 +2136,8 @@ fn options_to_file(
         show_chunk_borders: render.show_chunk_borders,
         shader_quality_mode: render.shader_quality_mode,
         enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+        sync_sun_with_time: render.sync_sun_with_time,
+        render_sun_sprite: render.render_sun_sprite,
         sun_azimuth_deg: render.sun_azimuth_deg,
         sun_elevation_deg: render.sun_elevation_deg,
         sun_strength: render.sun_strength,
@@ -2219,6 +2236,8 @@ fn apply_options(
     render.render_self_model = options.render_self_model;
     render.show_chunk_borders = options.show_chunk_borders;
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
+    render.sync_sun_with_time = options.sync_sun_with_time;
+    render.render_sun_sprite = options.render_sun_sprite;
     render.sun_azimuth_deg = options.sun_azimuth_deg.clamp(-360.0, 360.0);
     render.sun_elevation_deg = options.sun_elevation_deg.clamp(-89.0, 89.0);
     render.sun_strength = options.sun_strength.clamp(0.0, 2.0);
