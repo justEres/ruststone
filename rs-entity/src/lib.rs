@@ -1735,7 +1735,8 @@ pub fn apply_local_player_model_visibility_system(
         return;
     };
 
-    let should_show = render_debug.render_self_model;
+    let should_show = render_debug.render_self_model
+        && (freecam.active || !matches!(perspective.mode, CameraPerspectiveMode::FirstPerson));
     let target = if should_show {
         Visibility::Inherited
     } else {

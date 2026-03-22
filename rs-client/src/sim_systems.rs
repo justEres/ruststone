@@ -94,6 +94,7 @@ const CREATIVE_BLOCK_REACH: f32 = 5.0;
 const SURVIVAL_ENTITY_REACH: f32 = 3.0;
 const CREATIVE_ENTITY_REACH: f32 = 5.0;
 const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
+const VANILLA_STEP_TRIGGER_DISTANCE: f32 = 1.0 / 0.6;
 
 fn gameplay_input_allowed(
     app_state: &AppState,
@@ -905,7 +906,7 @@ pub fn local_movement_sound_system(
     if in_water {
         movement_sound.accumulated_ground_distance = 0.0;
         movement_sound.accumulated_swim_distance += horizontal_distance;
-        if movement_sound.accumulated_swim_distance >= 0.9 {
+        if movement_sound.accumulated_swim_distance >= VANILLA_STEP_TRIGGER_DISTANCE {
             emit_world_sound(
                 &mut sound_queue,
                 "minecraft:game.player.swim",
@@ -926,7 +927,7 @@ pub fn local_movement_sound_system(
     }
 
     movement_sound.accumulated_ground_distance += horizontal_distance;
-    if movement_sound.accumulated_ground_distance < 0.55 {
+    if movement_sound.accumulated_ground_distance < VANILLA_STEP_TRIGGER_DISTANCE {
         return;
     }
 
