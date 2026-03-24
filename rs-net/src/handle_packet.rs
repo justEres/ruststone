@@ -10,7 +10,7 @@ use rs_utils::{
     NetEntityMessage, ObjectKind, PlayerPosition, PlayerSkinModel, ScoreboardMessage,
     SoundCategory, SoundEvent, TitleMessage, item_name,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::chunk_decode;
 
@@ -39,6 +39,33 @@ fn send_join_game(
         entity_id,
     }));
     let _ = to_main.send(FromNetMessage::GameMode { gamemode });
+}
+
+fn log_join_game(
+    entity_id: i32,
+    gamemode: u8,
+    dimension: Option<i32>,
+    difficulty: Option<u8>,
+    max_players: u8,
+    level_type: Option<&str>,
+    server_view_distance: Option<i32>,
+    reduced_debug_info: Option<bool>,
+    enable_respawn_screen: Option<bool>,
+    requested_view_distance: u8,
+) {
+    info!(
+        entity_id,
+        gamemode,
+        dimension,
+        difficulty,
+        max_players,
+        level_type,
+        server_view_distance,
+        reduced_debug_info,
+        enable_respawn_screen,
+        requested_view_distance,
+        "JoinGame"
+    );
 }
 
 fn send_player_position(
@@ -85,35 +112,89 @@ pub fn handle_packet(
 ) {
     use rs_protocol::protocol::packet::Packet;
     match pkt {
-        Packet::JoinGame_i8(jg) => send_join_game(
-            to_main,
-            conn,
-            jg.entity_id,
-            jg.gamemode,
-            requested_view_distance,
-        ),
-        Packet::JoinGame_i8_NoDebug(jg) => send_join_game(
-            to_main,
-            conn,
-            jg.entity_id,
-            jg.gamemode,
-            requested_view_distance,
-        ),
-        Packet::JoinGame_i32(jg) => send_join_game(
-            to_main,
-            conn,
-            jg.entity_id,
-            jg.gamemode,
-            requested_view_distance,
-        ),
-        Packet::JoinGame_i32_ViewDistance(jg) => {
+        Packet::JoinGame_i8(jg) => {
+            log_join_game(
+                jg.entity_id,
+                jg.gamemode,
+                Some(i32::from(jg.dimension)),
+                Some(jg.difficulty),
+                jg.max_players,
+                Some(&jg.level_type),
+                None,
+                Some(jg.reduced_debug_info),
+                None,
+                requested_view_distance,
+            );
             send_join_game(
                 to_main,
                 conn,
                 jg.entity_id,
                 jg.gamemode,
                 requested_view_distance,
-            )
+            );
+        }
+        Packet::JoinGame_i8_NoDebug(jg) => {
+            log_join_game(
+                jg.entity_id,
+                jg.gamemode,
+                Some(i32::from(jg.dimension)),
+                Some(jg.difficulty),
+                jg.max_players,
+                Some(&jg.level_type),
+                None,
+                None,
+                None,
+                requested_view_distance,
+            );
+            send_join_game(
+                to_main,
+                conn,
+                jg.entity_id,
+                jg.gamemode,
+                requested_view_distance,
+            );
+        }
+        Packet::JoinGame_i32(jg) => {
+            log_join_game(
+                jg.entity_id,
+                jg.gamemode,
+                Some(jg.dimension),
+                Some(jg.difficulty),
+                jg.max_players,
+                Some(&jg.level_type),
+                None,
+                Some(jg.reduced_debug_info),
+                None,
+                requested_view_distance,
+            );
+            send_join_game(
+                to_main,
+                conn,
+                jg.entity_id,
+                jg.gamemode,
+                requested_view_distance,
+            );
+        }
+        Packet::JoinGame_i32_ViewDistance(jg) => {
+            log_join_game(
+                jg.entity_id,
+                jg.gamemode,
+                Some(jg.dimension),
+                None,
+                jg.max_players,
+                Some(&jg.level_type),
+                Some(jg.view_distance.0),
+                Some(jg.reduced_debug_info),
+                None,
+                requested_view_distance,
+            );
+            send_join_game(
+                to_main,
+                conn,
+                jg.entity_id,
+                jg.gamemode,
+                requested_view_distance,
+            );
         }
         Packet::ChunkData(cd) => {
             let bitmask = cd.bitmask.0 as u16;
@@ -746,6 +827,14 @@ pub fn handle_packet(
                             skin_url,
                             skin_model
                         );
+                        info!(
+                            name,
+                            uuid = ?uuid,
+                            properties = properties.len(),
+                            skin_url,
+                            skin_model = ?skin_model,
+                            "PlayerInfo::Add"
+                        );
                         let _ = to_main.send(FromNetMessage::NetEntity(
                             NetEntityMessage::PlayerInfoAdd {
                                 uuid,
@@ -756,6 +845,7 @@ pub fn handle_packet(
                         ));
                     }
                     rs_protocol::protocol::packet::PlayerDetail::Remove { uuid } => {
+                        info!(uuid = ?uuid, "PlayerInfo::Remove");
                         let _ = to_main.send(FromNetMessage::NetEntity(
                             NetEntityMessage::PlayerInfoRemove { uuid },
                         ));
@@ -775,14 +865,17 @@ pub fn handle_packet(
         }
         Packet::ServerMessage_NoPosition(sm) => {
             let text = component_to_legacy(&sm.message);
+            info!(message = %text, "Incoming chat");
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::ServerMessage_Position(sm) => {
             let text = component_to_legacy(&sm.message);
+            info!(message = %text, "Incoming chat");
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::ServerMessage_Sender(sm) => {
             let text = component_to_legacy(&sm.message);
+            info!(message = %text, "Incoming chat");
             to_main.send(FromNetMessage::ChatMessage(text)).unwrap();
         }
         Packet::Disconnect(disconnect) => {
@@ -838,28 +931,55 @@ pub fn handle_packet(
             });
         }
         Packet::Respawn_Gamemode(respawn) => {
+            info!(gamemode = respawn.gamemode, "Respawn");
             let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_HashedSeed(respawn) => {
+            info!(
+                gamemode = respawn.gamemode,
+                dimension = respawn.dimension,
+                hashed_seed = respawn.hashed_seed,
+                level_type = %respawn.level_type,
+                "Respawn"
+            );
             let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_NBT(respawn) => {
+            info!(
+                gamemode = respawn.gamemode,
+                world_name = %respawn.world_name,
+                previous_gamemode = respawn.previous_gamemode,
+                "Respawn"
+            );
             let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
         }
         Packet::Respawn_WorldName(respawn) => {
+            info!(
+                gamemode = respawn.gamemode,
+                dimension = respawn.dimension,
+                world_name = %respawn.world_name,
+                hashed_seed = respawn.hashed_seed,
+                "Respawn"
+            );
             let _ = to_main.send(FromNetMessage::Respawn);
             let _ = to_main.send(FromNetMessage::GameMode {
                 gamemode: respawn.gamemode,
             });
+        }
+        Packet::UpdateViewDistance(update) => {
+            info!(
+                server_view_distance = update.view_distance.0,
+                "UpdateViewDistance"
+            );
         }
         Packet::PlayerAbilities(abilities) => {
             let _ = to_main.send(FromNetMessage::PlayerAbilities {

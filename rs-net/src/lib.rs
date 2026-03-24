@@ -232,6 +232,7 @@ fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                     "Sanitized outgoing chat (removed unsupported chars and/or clamped to 100 chars)"
                 );
             }
+            info!(message = %sanitized, "Outgoing chat");
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::ChatMessage {
                     message: sanitized,
