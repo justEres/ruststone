@@ -23,11 +23,11 @@ use crate::{MAX_PITCH, MIN_PITCH};
 
 #[derive(Resource, Default)]
 pub(crate) struct SoundRegistry {
-    pub(crate) events: HashMap<String, SoundEventDefinition>,
+    events: HashMap<String, SoundEventDefinition>,
 }
 
 #[derive(Clone, Debug)]
-struct SoundEventDefinition {
+pub(crate) struct SoundEventDefinition {
     category: SoundCategory,
     sounds: Vec<SoundEntry>,
 }
@@ -48,12 +48,12 @@ struct SoundFile {
 }
 
 #[derive(Resource, Default)]
-struct RuntimeAudioAssets {
+pub(crate) struct RuntimeAudioAssets {
     loaded: HashMap<String, Handle<AudioSource>>,
 }
 
 #[derive(Resource)]
-struct SoundAssetResolver {
+pub(crate) struct SoundAssetResolver {
     sources: Vec<AssetSource>,
     cache_root: PathBuf,
     warned_missing_events: HashSet<String>,
