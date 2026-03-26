@@ -783,7 +783,13 @@ fn missing_chunk_does_not_hard_stop_player_motion() {
     };
 
     let next = simulate_tick(&prev, &input, &world);
-    assert!(next.pos.x > prev.pos.x, "expected motion through missing chunk");
-    assert!(!next.on_ground, "missing chunk fallback should not pin player");
+    assert!(
+        next.pos.x > prev.pos.x,
+        "expected motion through missing chunk"
+    );
+    assert!(
+        !next.on_ground,
+        "missing chunk fallback should not pin player"
+    );
     assert!(!next.collided_horizontally);
 }

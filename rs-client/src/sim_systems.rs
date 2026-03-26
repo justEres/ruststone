@@ -942,7 +942,10 @@ pub fn fixed_sim_tick_system(
                 on_ground,
             });
         } else {
-            let _ = params.to_net.0.send(ToNetMessage::PlayerMoveGround { on_ground });
+            let _ = params
+                .to_net
+                .0
+                .send(ToNetMessage::PlayerMoveGround { on_ground });
         }
 
         if moved {
