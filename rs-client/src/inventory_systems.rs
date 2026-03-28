@@ -38,6 +38,7 @@ pub fn hotbar_input_system(
 
     if keys.just_pressed(KeyCode::KeyQ) {
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let _ = inventory.predict_drop_selected_hotbar(ctrl);
         let _ = to_net
             .0
             .send(ToNetMessage::DropHeldItem { full_stack: ctrl });
@@ -78,7 +79,7 @@ pub fn hotbar_input_system(
         let slot = slot as u8;
 
         if inventory.selected_hotbar_slot != slot {
-            inventory.selected_hotbar_slot = slot;
+            inventory.set_selected_hotbar_slot(slot);
             let _ = to_net
                 .0
                 .send(ToNetMessage::HeldItemChange { slot: slot as i16 });
@@ -92,7 +93,7 @@ pub fn hotbar_input_system(
         return;
     };
     if inventory.selected_hotbar_slot != slot {
-        inventory.selected_hotbar_slot = slot;
+        inventory.set_selected_hotbar_slot(slot);
         let _ = to_net
             .0
             .send(ToNetMessage::HeldItemChange { slot: slot as i16 });

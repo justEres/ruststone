@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::ecs::resource::Resource;
+use crate::block_registry_key;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryEnchantment {
@@ -134,7 +135,52 @@ impl InventoryState {
         self.player_slots.get(idx).cloned().flatten()
     }
 
+    pub fn selected_hotbar_slot_index(&self) -> Option<usize> {
+        self.hotbar_slot_index(self.selected_hotbar_slot)
+    }
+
+    pub fn set_selected_hotbar_slot(&mut self, slot: u8) {
+        self.selected_hotbar_slot = slot.min(8);
+    }
+
+    pub fn selected_hotbar_item(&self) -> Option<InventoryItemStack> {
+        self.hotbar_item(self.selected_hotbar_slot)
+    }
+
     pub fn consume_selected_hotbar_one(&mut self) -> bool {
+        self.consume_selected_hotbar(1)
+    }
+
+    pub fn predict_place_selected_hotbar(&mut self) -> bool {
+        let Some(stack) = self.selected_hotbar_item() else {
+            return false;
+        };
+        if !is_placeable_block_item(stack.item_id) {
+            return false;
+        }
+        self.consume_selected_hotbar(1)
+    }
+
+    pub fn predict_drop_selected_hotbar(&mut self, full_stack: bool) -> bool {
+        let Some(idx) = self.selected_hotbar_slot_index() else {
+            return false;
+        };
+        let Some(Some(mut stack)) = self.player_slots.get(idx).cloned() else {
+            return false;
+        };
+        if stack.count == 0 {
+            return false;
+        }
+        if full_stack || stack.count <= 1 {
+            self.player_slots[idx] = None;
+        } else {
+            stack.count = stack.count.saturating_sub(1);
+            self.player_slots[idx] = Some(stack);
+        }
+        true
+    }
+
+    fn consume_selected_hotbar(&mut self, amount: u8) -> bool {
         let Some(idx) = self.hotbar_slot_index(self.selected_hotbar_slot) else {
             return false;
         };
@@ -144,7 +190,7 @@ impl InventoryState {
         if stack.count == 0 {
             return false;
         }
-        stack.count = stack.count.saturating_sub(1);
+        stack.count = stack.count.saturating_sub(amount);
         self.player_slots[idx] = if stack.count == 0 { None } else { Some(stack) };
         true
     }
@@ -488,6 +534,13 @@ fn max_stack_for_item(item_id: i32) -> u8 {
     if is_single_stack_item(item_id) { 1 } else { 64 }
 }
 
+fn is_placeable_block_item(item_id: i32) -> bool {
+    if item_id <= 0 || item_id > u16::MAX as i32 {
+        return false;
+    }
+    block_registry_key(item_id as u16).is_some()
+}
+
 #[derive(Clone, Copy)]
 struct ItemProperties {
     durability: Option<i16>,
@@ -621,4 +674,59 @@ pub fn item_max_durability(item_id: i32) -> Option<i16> {
 
 fn is_single_stack_item(item_id: i32) -> bool {
     item_properties(item_id).single_stack
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stack(item_id: i32, count: u8) -> InventoryItemStack {
+        InventoryItemStack {
+            item_id,
+            count,
+            damage: 0,
+            meta: InventoryItemMeta::default(),
+        }
+    }
+
+    #[test]
+    fn predict_place_selected_hotbar_consumes_placeable_blocks() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            ..Default::default()
+        };
+        inventory.player_slots[36] = Some(stack(1, 3));
+        inventory.set_selected_hotbar_slot(0);
+
+        assert!(inventory.predict_place_selected_hotbar());
+        assert_eq!(inventory.player_slots[36], Some(stack(1, 2)));
+    }
+
+    #[test]
+    fn predict_place_selected_hotbar_does_not_consume_non_block_items() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            ..Default::default()
+        };
+        inventory.player_slots[36] = Some(stack(276, 1));
+        inventory.set_selected_hotbar_slot(0);
+
+        assert!(!inventory.predict_place_selected_hotbar());
+        assert_eq!(inventory.player_slots[36], Some(stack(276, 1)));
+    }
+
+    #[test]
+    fn predict_drop_selected_hotbar_updates_stack_count() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            ..Default::default()
+        };
+        inventory.player_slots[36] = Some(stack(4, 3));
+        inventory.set_selected_hotbar_slot(0);
+
+        assert!(inventory.predict_drop_selected_hotbar(false));
+        assert_eq!(inventory.player_slots[36], Some(stack(4, 2)));
+        assert!(inventory.predict_drop_selected_hotbar(true));
+        assert_eq!(inventory.player_slots[36], None);
+    }
 }

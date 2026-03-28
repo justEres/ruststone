@@ -250,10 +250,10 @@ pub fn world_interaction_system(
                 Some(SoundCategory::Block),
             );
             if player_status.gamemode != 1 {
-                let _ = inventory_state.consume_selected_hotbar_one();
+                let _ = inventory_state.predict_place_selected_hotbar();
             }
         } else {
-            let held_item = inventory_state.hotbar_item(inventory_state.selected_hotbar_slot);
+            let held_item = inventory_state.selected_hotbar_item();
             let _ = to_net.0.send(ToNetMessage::UseItem { held_item });
         }
     }

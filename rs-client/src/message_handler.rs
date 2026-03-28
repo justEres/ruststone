@@ -512,7 +512,7 @@ fn apply_inventory_message(
             inventory_state.next_action_number = next.max(0) as u16;
         }
         InventoryMessage::SetCurrentHotbarSlot { slot } => {
-            inventory_state.selected_hotbar_slot = slot.min(8);
+            inventory_state.set_selected_hotbar_slot(slot);
         }
     }
 }
