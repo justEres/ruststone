@@ -15,6 +15,14 @@ pub struct SpawnedModel {
 }
 
 pub fn part_mesh(model: &ModelDef, part: &PartDef) -> Mesh {
+    part_mesh_with_front_back_swap(model, part, false)
+}
+
+pub fn part_mesh_with_front_back_swap(
+    model: &ModelDef,
+    part: &PartDef,
+    swap_front_back: bool,
+) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
@@ -24,6 +32,7 @@ pub fn part_mesh(model: &ModelDef, part: &PartDef) -> Mesh {
         add_cube(
             model,
             cube,
+            swap_front_back,
             &mut positions,
             &mut normals,
             &mut uvs,
@@ -120,6 +129,7 @@ pub fn spawn_model(
 fn add_cube(
     model: &ModelDef,
     cube: &CubeDef,
+    swap_front_back: bool,
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     uvs: &mut Vec<[f32; 2]>,
@@ -184,6 +194,11 @@ fn add_cube(
         u + d_i + w_i + d_i + w_i,
         v + d_i + h_i,
     );
+    let (north, south) = if swap_front_back {
+        (south, north)
+    } else {
+        (north, south)
+    };
 
     // Base normals in vanilla model space (+Y is down).
     // We'll transform them into our bevy space (Y flipped) and apply mirroring.

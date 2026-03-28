@@ -7,11 +7,11 @@ use rs_utils::{InventoryItemStack, InventoryState};
 
 use crate::model::{
     BIPED_ARMOR_INNER_MODEL, BIPED_ARMOR_OUTER_MODEL, BIPED_BODY, BIPED_HEAD, BIPED_HEADWEAR,
-    BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, part_mesh,
+    BIPED_LEFT_ARM, BIPED_LEFT_LEG, BIPED_RIGHT_ARM, BIPED_RIGHT_LEG, EntityTextureCache,
+    part_mesh_with_front_back_swap,
 };
 
-const GLINT_TEXTURE_PATH: &str =
-    "texturepack/assets/minecraft/textures/misc/enchanted_item_glint.png";
+const GLINT_TEXTURE_PATH: &str = "misc/enchanted_item_glint.png";
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HumanoidRigKind {
@@ -126,8 +126,8 @@ pub fn sync_local_player_armor_state_system(
 
 pub fn reconcile_humanoid_armor_layers_system(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut entity_textures: ResMut<EntityTextureCache>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cache: ResMut<ArmorTextureCache>,
     mut query: Query<(&HumanoidRigParts, &HumanoidArmorState, &mut HumanoidArmorLayerEntities)>,
@@ -135,8 +135,8 @@ pub fn reconcile_humanoid_armor_layers_system(
     for (rig, state, mut layers) in &mut query {
         reconcile_slot(
             &mut commands,
-            &asset_server,
             &mut meshes,
+            &mut entity_textures,
             &mut materials,
             &mut cache,
             rig,
@@ -146,8 +146,8 @@ pub fn reconcile_humanoid_armor_layers_system(
         );
         reconcile_slot(
             &mut commands,
-            &asset_server,
             &mut meshes,
+            &mut entity_textures,
             &mut materials,
             &mut cache,
             rig,
@@ -157,8 +157,8 @@ pub fn reconcile_humanoid_armor_layers_system(
         );
         reconcile_slot(
             &mut commands,
-            &asset_server,
             &mut meshes,
+            &mut entity_textures,
             &mut materials,
             &mut cache,
             rig,
@@ -168,8 +168,8 @@ pub fn reconcile_humanoid_armor_layers_system(
         );
         reconcile_slot(
             &mut commands,
-            &asset_server,
             &mut meshes,
+            &mut entity_textures,
             &mut materials,
             &mut cache,
             rig,
@@ -182,8 +182,8 @@ pub fn reconcile_humanoid_armor_layers_system(
 
 fn reconcile_slot(
     commands: &mut Commands,
-    asset_server: &AssetServer,
     meshes: &mut Assets<Mesh>,
+    entity_textures: &mut EntityTextureCache,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut ArmorTextureCache,
     rig: &HumanoidRigParts,
@@ -213,33 +213,36 @@ fn reconcile_slot(
         return;
     };
 
-    let spawned = spawn_armor_piece(
+    let Some(spawned) = spawn_armor_piece(
         commands,
-        asset_server,
         meshes,
+        entity_textures,
         materials,
         cache,
         rig,
         piece,
-    );
+    ) else {
+        return;
+    };
     *existing = Some(spawned);
 }
 
 fn spawn_armor_piece(
     commands: &mut Commands,
-    asset_server: &AssetServer,
     meshes: &mut Assets<Mesh>,
+    entity_textures: &mut EntityTextureCache,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut ArmorTextureCache,
     rig: &HumanoidRigParts,
     piece: ArmorPiece,
-) -> ArmorPieceSpawn {
+) -> Option<ArmorPieceSpawn> {
     let model = match piece.slot {
         ArmorSlot::Leggings => &BIPED_ARMOR_INNER_MODEL,
         ArmorSlot::Boots | ArmorSlot::Chestplate | ArmorSlot::Helmet => &BIPED_ARMOR_OUTER_MODEL,
     };
-    let material_set = cache.materials_for(asset_server, materials, piece);
+    let material_set = cache.materials_for(entity_textures, materials, piece)?;
     let mut entities = Vec::new();
+    let swap_front_back = rig.kind == HumanoidRigKind::Player;
 
     for &part_index in visible_parts(piece.slot) {
         let parent = match part_index {
@@ -267,7 +270,11 @@ fn spawn_armor_piece(
         commands.entity(parent).add_child(anchor);
         entities.push(anchor);
 
-        let mesh = meshes.add(part_mesh(model, &model.parts[part_index]));
+        let mesh = meshes.add(part_mesh_with_front_back_swap(
+            model,
+            &model.parts[part_index],
+            swap_front_back,
+        ));
         spawn_armor_mesh(commands, rig.render_layer, anchor, mesh.clone(), material_set.base.clone());
         if let Some(overlay) = &material_set.overlay {
             spawn_armor_mesh(commands, rig.render_layer, anchor, mesh.clone(), overlay.clone());
@@ -277,7 +284,7 @@ fn spawn_armor_piece(
         }
     }
 
-    ArmorPieceSpawn {
+    Some(ArmorPieceSpawn {
         key: ArmorPieceRenderKey {
             slot: piece.slot,
             material: piece.material,
@@ -285,7 +292,7 @@ fn spawn_armor_piece(
             enchanted: piece.enchanted,
         },
         entities,
-    }
+    })
 }
 
 fn spawn_armor_mesh(
@@ -314,10 +321,10 @@ fn spawn_armor_mesh(
 impl ArmorTextureCache {
     fn materials_for(
         &mut self,
-        asset_server: &AssetServer,
+        entity_textures: &mut EntityTextureCache,
         materials: &mut Assets<StandardMaterial>,
         piece: ArmorPiece,
-    ) -> ArmorMaterialSet {
+    ) -> Option<ArmorMaterialSet> {
         let path = armor_texture_path(piece.material, piece.slot, false);
         let key = ArmorMaterialKey {
             path,
@@ -325,15 +332,27 @@ impl ArmorTextureCache {
             glint: piece.enchanted,
         };
         if let Some(existing) = self.materials.get(&key) {
-            return existing.clone();
+            return Some(existing.clone());
         }
+
+        entity_textures.request(path);
+        if piece.material == ArmorMaterialKind::Leather {
+            entity_textures.request(armor_texture_path(piece.material, piece.slot, true));
+        }
+        if piece.enchanted {
+            entity_textures.request(GLINT_TEXTURE_PATH);
+        }
+
+        let Some(base_texture) = entity_textures.texture(path) else {
+            return None;
+        };
 
         let base = materials.add(StandardMaterial {
             base_color: piece
                 .leather_color
                 .map(leather_color_to_bevy)
                 .unwrap_or(Color::WHITE),
-            base_color_texture: Some(asset_server.load(path)),
+            base_color_texture: Some(base_texture),
             alpha_mode: AlphaMode::Mask(0.5),
             unlit: true,
             perceptual_roughness: 1.0,
@@ -342,13 +361,13 @@ impl ArmorTextureCache {
         });
 
         let overlay = if piece.material == ArmorMaterialKind::Leather {
+            let overlay_path = armor_texture_path(piece.material, piece.slot, true);
+            let Some(overlay_texture) = entity_textures.texture(overlay_path) else {
+                return None;
+            };
             Some(materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                base_color_texture: Some(asset_server.load(armor_texture_path(
-                    piece.material,
-                    piece.slot,
-                    true,
-                ))),
+                base_color_texture: Some(overlay_texture),
                 alpha_mode: AlphaMode::Mask(0.5),
                 unlit: true,
                 perceptual_roughness: 1.0,
@@ -360,10 +379,13 @@ impl ArmorTextureCache {
         };
 
         let glint = if piece.enchanted {
+            let Some(glint_texture) = entity_textures.texture(GLINT_TEXTURE_PATH) else {
+                return None;
+            };
             Some(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.38, 0.19, 0.70, 0.45),
                 emissive: LinearRgba::rgb(0.38, 0.19, 0.70),
-                base_color_texture: Some(asset_server.load(GLINT_TEXTURE_PATH)),
+                base_color_texture: Some(glint_texture),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 cull_mode: None,
@@ -381,7 +403,7 @@ impl ArmorTextureCache {
             glint,
         };
         self.materials.insert(key, set.clone());
-        set
+        Some(set)
     }
 }
 
@@ -401,41 +423,27 @@ fn armor_texture_path(
 ) -> &'static str {
     match (material, slot, overlay) {
         (ArmorMaterialKind::Leather, ArmorSlot::Leggings, false) => {
-            "texturepack/assets/minecraft/textures/models/armor/leather_layer_2.png"
+            "models/armor/leather_layer_2.png"
         }
         (ArmorMaterialKind::Leather, ArmorSlot::Leggings, true) => {
-            "texturepack/assets/minecraft/textures/models/armor/leather_layer_2_overlay.png"
+            "models/armor/leather_layer_2_overlay.png"
         }
-        (ArmorMaterialKind::Leather, _, false) => {
-            "texturepack/assets/minecraft/textures/models/armor/leather_layer_1.png"
-        }
-        (ArmorMaterialKind::Leather, _, true) => {
-            "texturepack/assets/minecraft/textures/models/armor/leather_layer_1_overlay.png"
-        }
+        (ArmorMaterialKind::Leather, _, false) => "models/armor/leather_layer_1.png",
+        (ArmorMaterialKind::Leather, _, true) => "models/armor/leather_layer_1_overlay.png",
         (ArmorMaterialKind::Chainmail, ArmorSlot::Leggings, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/chainmail_layer_2.png"
+            "models/armor/chainmail_layer_2.png"
         }
-        (ArmorMaterialKind::Chainmail, _, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/chainmail_layer_1.png"
-        }
+        (ArmorMaterialKind::Chainmail, _, _) => "models/armor/chainmail_layer_1.png",
         (ArmorMaterialKind::Iron, ArmorSlot::Leggings, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/iron_layer_2.png"
+            "models/armor/iron_layer_2.png"
         }
-        (ArmorMaterialKind::Iron, _, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/iron_layer_1.png"
-        }
-        (ArmorMaterialKind::Gold, ArmorSlot::Leggings, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/gold_layer_2.png"
-        }
-        (ArmorMaterialKind::Gold, _, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/gold_layer_1.png"
-        }
+        (ArmorMaterialKind::Iron, _, _) => "models/armor/iron_layer_1.png",
+        (ArmorMaterialKind::Gold, ArmorSlot::Leggings, _) => "models/armor/gold_layer_2.png",
+        (ArmorMaterialKind::Gold, _, _) => "models/armor/gold_layer_1.png",
         (ArmorMaterialKind::Diamond, ArmorSlot::Leggings, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/diamond_layer_2.png"
+            "models/armor/diamond_layer_2.png"
         }
-        (ArmorMaterialKind::Diamond, _, _) => {
-            "texturepack/assets/minecraft/textures/models/armor/diamond_layer_1.png"
-        }
+        (ArmorMaterialKind::Diamond, _, _) => "models/armor/diamond_layer_1.png",
     }
 }
 
@@ -507,7 +515,7 @@ mod tests {
     fn maps_leggings_to_layer_two_texture() {
         assert_eq!(
             armor_texture_path(ArmorMaterialKind::Diamond, ArmorSlot::Leggings, false),
-            "texturepack/assets/minecraft/textures/models/armor/diamond_layer_2.png"
+            "models/armor/diamond_layer_2.png"
         );
     }
 
@@ -515,7 +523,7 @@ mod tests {
     fn maps_leather_overlay_texture() {
         assert_eq!(
             armor_texture_path(ArmorMaterialKind::Leather, ArmorSlot::Helmet, true),
-            "texturepack/assets/minecraft/textures/models/armor/leather_layer_1_overlay.png"
+            "models/armor/leather_layer_1_overlay.png"
         );
     }
 
