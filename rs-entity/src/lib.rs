@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::thread;
 
+mod armor;
 mod entity_anim_spawn;
 pub mod item_textures;
 pub mod model;
@@ -37,6 +38,11 @@ use crate::model::{
     SHEEP_MODEL_TEX32, SHEEP_WOOL_MODEL_TEX32, part_mesh, spawn_model,
 };
 
+use crate::armor::{
+    HumanoidArmorLayerEntities, HumanoidArmorState, HumanoidRigKind, HumanoidRigParts,
+};
+pub use crate::armor::{reconcile_humanoid_armor_layers_system, sync_local_player_armor_state_system};
+pub use crate::armor::ArmorTextureCache;
 use crate::entity_anim_spawn::*;
 pub use crate::entity_anim_spawn::{
     animate_remote_biped_models, animate_remote_player_models, animate_remote_quadruped_models,
@@ -125,6 +131,7 @@ pub struct RemoteEntityApplyParams<'w, 's> {
     visual_query: Query<'w, 's, &'static RemoteVisual>,
     player_parts_query: Query<'w, 's, &'static RemotePlayerModelParts, With<RemotePlayer>>,
     held_item_query: Query<'w, 's, &'static RemoteHeldItem>,
+    armor_state_query: Query<'w, 's, &'static mut HumanoidArmorState>,
 }
 
 #[derive(Debug)]
@@ -223,7 +230,7 @@ pub struct RemoteEntityName(pub String);
 #[derive(Component)]
 pub struct RemotePlayer;
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy)]
 pub struct RemotePlayerModelParts {
     pub head: Entity,
     pub body: Entity,
@@ -264,7 +271,7 @@ pub struct RemotePoseState {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LocalPlayerModel;
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy)]
 pub struct LocalPlayerModelParts {
     pub head: Entity,
     pub body: Entity,
@@ -297,7 +304,7 @@ pub struct FirstPersonViewModelParts {
     pub skin_model: PlayerSkinModel,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy)]
 pub struct RemoteBipedModelParts {
     pub model_root: Entity,
     pub head: Entity,
@@ -585,6 +592,19 @@ pub fn apply_remote_entity_events(
                     commands.entity(root).insert((
                         RemotePlayer,
                         parts,
+                        HumanoidRigParts {
+                            kind: HumanoidRigKind::Player,
+                            model_root: root,
+                            head: parts.head,
+                            body: parts.body,
+                            arm_right: parts.arm_right,
+                            arm_left: parts.arm_left,
+                            leg_right: parts.leg_right,
+                            leg_left: parts.leg_left,
+                            render_layer: None,
+                        },
+                        HumanoidArmorState::default(),
+                        HumanoidArmorLayerEntities::default(),
                         RemotePlayerSkinMaterials(material_handles),
                         RemotePlayerAnimation {
                             previous_pos: pos,
@@ -654,6 +674,19 @@ pub fn apply_remote_entity_events(
                                 leg_right: spawned.parts[BIPED_RIGHT_LEG],
                                 leg_left: spawned.parts[BIPED_LEFT_LEG],
                             },
+                            HumanoidRigParts {
+                                kind: HumanoidRigKind::BipedMob,
+                                model_root: spawned.root,
+                                head: spawned.parts[BIPED_HEAD],
+                                body: spawned.parts[BIPED_BODY],
+                                arm_right: spawned.parts[BIPED_RIGHT_ARM],
+                                arm_left: spawned.parts[BIPED_LEFT_ARM],
+                                leg_right: spawned.parts[BIPED_RIGHT_LEG],
+                                leg_left: spawned.parts[BIPED_LEFT_LEG],
+                                render_layer: None,
+                            },
+                            HumanoidArmorState::default(),
+                            HumanoidArmorLayerEntities::default(),
                             RemoteBipedAnimation {
                                 previous_pos: pos,
                                 limb_swing: 0.0,
@@ -973,14 +1006,25 @@ pub fn apply_remote_entity_events(
                 slot,
                 item,
             } => {
-                // For now, only visualize the held item (slot 0) on remote players.
-                if slot != 0 {
-                    continue;
-                }
                 let Some(root) = registry.by_server_id.get(&entity_id).copied() else {
                     continue;
                 };
-                if registry.local_entity_id == Some(entity_id) {
+                if (1..=4).contains(&slot) {
+                    if registry.local_entity_id == Some(entity_id) {
+                        continue;
+                    }
+                    if let Ok(mut slot_ref) = params.armor_state_query.get_mut(root) {
+                        match slot {
+                            1 => slot_ref.boots = item.clone(),
+                            2 => slot_ref.leggings = item.clone(),
+                            3 => slot_ref.chestplate = item.clone(),
+                            4 => slot_ref.helmet = item.clone(),
+                            _ => {}
+                        }
+                    }
+                    continue;
+                }
+                if slot != 0 || registry.local_entity_id == Some(entity_id) {
                     continue;
                 }
                 let Ok((remote, _look)) = params.entity_query.get_mut(root) else {
@@ -1712,6 +1756,19 @@ pub fn spawn_local_player_model_system(
 
     commands.entity(model_root).insert((
         parts,
+        HumanoidRigParts {
+            kind: HumanoidRigKind::Player,
+            model_root,
+            head: parts.head,
+            body: parts.body,
+            arm_right: parts.arm_right,
+            arm_left: parts.arm_left,
+            leg_right: parts.leg_right,
+            leg_left: parts.leg_left,
+            render_layer: Some(LOCAL_PLAYER_RENDER_LAYER),
+        },
+        HumanoidArmorState::default(),
+        HumanoidArmorLayerEntities::default(),
         LocalPlayerAnimation {
             walk_phase: 0.0,
             swing_progress: 1.0,

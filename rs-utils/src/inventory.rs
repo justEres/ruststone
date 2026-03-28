@@ -13,6 +13,7 @@ pub struct InventoryEnchantment {
 pub struct InventoryItemMeta {
     pub display_name: Option<String>,
     pub lore: Vec<String>,
+    pub display_color: Option<u32>,
     pub enchantments: Vec<InventoryEnchantment>,
     pub repair_cost: Option<i32>,
     pub unbreakable: bool,

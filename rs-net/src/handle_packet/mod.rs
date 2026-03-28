@@ -382,6 +382,7 @@ fn protocol_stack_meta_to_inventory_meta(stack: &rs_protocol::item::Stack) -> In
     InventoryItemMeta {
         display_name,
         lore,
+        display_color: stack.meta.display_color().map(|color| color as u32),
         enchantments,
         repair_cost: stack.meta.repair_cost(),
         unbreakable: stack.meta.unbreakable(),

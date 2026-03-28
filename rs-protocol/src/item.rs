@@ -158,6 +158,12 @@ impl ItemMeta {
             .unwrap_or_default()
     }
 
+    pub fn display_color(&self) -> Option<i32> {
+        self.display()
+            .and_then(|val| val.get("color"))
+            .and_then(|color| color.as_int())
+    }
+
     pub fn repair_cost(&self) -> Option<i32> {
         match self.0.as_ref() {
             Some(tag) => tag

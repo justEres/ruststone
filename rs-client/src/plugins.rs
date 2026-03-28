@@ -145,7 +145,8 @@ pub struct ClientEntityPlugin;
 
 impl Plugin for ClientEntityPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<entities::ArmorTextureCache>()
+        .add_systems(
             Update,
             (
                 entities::remote_entity_connection_sync.after(message_handler::handle_messages),
@@ -177,6 +178,7 @@ impl Plugin for ClientEntityPlugin {
                     .after(entity_model::entity_texture_cache_tick),
                 entities::update_remote_sheep_wool_system
                     .after(entity_model::entity_texture_cache_tick),
+                entities::reconcile_humanoid_armor_layers_system,
                 entities::apply_player_shadow_opacity_material_system,
             ),
         )
@@ -185,6 +187,8 @@ impl Plugin for ClientEntityPlugin {
             (
                 entities::spawn_local_player_model_system
                     .after(sim_systems::apply_visual_transform_system),
+                entities::sync_local_player_armor_state_system
+                    .after(entities::spawn_local_player_model_system),
                 entities::apply_local_player_model_visibility_system
                     .after(entities::spawn_local_player_model_system),
                 entities::update_local_player_skin_system

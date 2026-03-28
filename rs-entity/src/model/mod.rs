@@ -5,6 +5,7 @@
 //! - Models are hardcoded as Rust static data (parts + cuboids).
 //! - Only textures are loaded at runtime (from the texture pack / skin URLs).
 
+mod armor;
 mod biped;
 mod creeper;
 mod mesh;
@@ -12,6 +13,7 @@ mod quadruped;
 mod textures;
 mod types;
 
+pub use armor::*;
 pub use biped::*;
 pub use creeper::*;
 pub use mesh::*;
