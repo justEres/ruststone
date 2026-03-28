@@ -68,6 +68,7 @@ pub struct InventoryState {
     pub selected_hotbar_slot: u8,
     pub next_action_number: u16,
     pub pending_confirm_acks: Vec<(u8, i16)>,
+    pending_clicks: HashMap<(u8, u16), InventorySnapshot>,
 }
 
 impl InventoryState {
@@ -86,8 +87,12 @@ impl InventoryState {
     pub fn set_window_items(&mut self, id: u8, items: Vec<Option<InventoryItemStack>>) {
         if id == 0 {
             self.player_slots = items;
+            if let Some(window_id) = self.active_window_id() {
+                self.sync_window_from_player_slots(window_id);
+            }
         } else {
             self.window_slots.insert(id, items);
+            self.sync_player_from_window_slots(id);
         }
     }
 
@@ -105,6 +110,9 @@ impl InventoryState {
                 self.player_slots.resize(slot + 1, None);
             }
             self.player_slots[slot] = item;
+            if let Some(window_id) = self.active_window_id() {
+                self.sync_window_from_player_slots(window_id);
+            }
             return;
         }
         if id > 0 {
@@ -114,6 +122,7 @@ impl InventoryState {
                 slots.resize(slot + 1, None);
             }
             slots[slot] = item;
+            self.sync_player_from_window_slot(window_id, slot);
         }
     }
 
@@ -203,6 +212,10 @@ impl InventoryState {
         button: u8,
         mode: u8,
     ) -> Option<InventoryItemStack> {
+        let snapshot = self.snapshot();
+        let action_number = self.next_action_number;
+        self.pending_clicks.insert((window_id, action_number), snapshot);
+
         let mut slots = if window_id == 0 {
             self.player_slots.clone()
         } else {
@@ -221,14 +234,136 @@ impl InventoryState {
             6 => apply_mode_double_click(&mut slots, &mut cursor, slot, button),
             _ => {}
         }
+        let clicked_item = slot_item_after_click(&slots, slot);
 
         self.cursor_item = cursor;
         if window_id == 0 {
             self.player_slots = slots;
+            if let Some(active_window_id) = self.active_window_id() {
+                self.sync_window_from_player_slots(active_window_id);
+            }
         } else {
             self.window_slots.insert(window_id, slots);
+            self.sync_player_from_window_slots(window_id);
         }
-        self.cursor_item.clone()
+        clicked_item
+    }
+
+    pub fn apply_transaction_result(&mut self, id: u8, action_number: i16, accepted: bool) {
+        let Ok(action_number) = u16::try_from(action_number.max(0)) else {
+            return;
+        };
+        if !accepted {
+            if let Some(snapshot) = self.pending_clicks.get(&(id, action_number)).cloned() {
+                self.restore_snapshot(snapshot);
+            }
+            self.pending_clicks
+                .retain(|(window_id, tx), _| *window_id != id || *tx < action_number);
+            return;
+        }
+        self.pending_clicks
+            .retain(|(window_id, tx), _| *window_id != id || *tx > action_number);
+    }
+
+    fn snapshot(&self) -> InventorySnapshot {
+        InventorySnapshot {
+            player_slots: self.player_slots.clone(),
+            window_slots: self.window_slots.clone(),
+            cursor_item: self.cursor_item.clone(),
+            open_window: self.open_window.clone(),
+            selected_hotbar_slot: self.selected_hotbar_slot,
+        }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: InventorySnapshot) {
+        self.player_slots = snapshot.player_slots;
+        self.window_slots = snapshot.window_slots;
+        self.cursor_item = snapshot.cursor_item;
+        self.open_window = snapshot.open_window;
+        self.selected_hotbar_slot = snapshot.selected_hotbar_slot;
+    }
+
+    fn active_window_id(&self) -> Option<u8> {
+        self.open_window
+            .as_ref()
+            .filter(|window| window.id != 0)
+            .map(|window| window.id)
+    }
+
+    fn active_window_unique_slots(&self, window_id: u8) -> Option<usize> {
+        self.open_window
+            .as_ref()
+            .filter(|window| window.id == window_id)
+            .map(|window| window.slot_count as usize)
+    }
+
+    fn sync_player_from_window_slots(&mut self, window_id: u8) {
+        let Some(unique_slots) = self.active_window_unique_slots(window_id) else {
+            return;
+        };
+        let Some(slots) = self.window_slots.get(&window_id) else {
+            return;
+        };
+        if slots.len() < unique_slots + 36 {
+            return;
+        }
+        if self.player_slots.len() < 45 {
+            self.player_slots.resize(45, None);
+        }
+        for player_offset in 0..36usize {
+            let player_slot = if player_offset < 27 {
+                9 + player_offset
+            } else {
+                36 + (player_offset - 27)
+            };
+            self.player_slots[player_slot] = slots[unique_slots + player_offset].clone();
+        }
+    }
+
+    fn sync_player_from_window_slot(&mut self, window_id: u8, slot_index: usize) {
+        let Some(unique_slots) = self.active_window_unique_slots(window_id) else {
+            return;
+        };
+        if slot_index < unique_slots {
+            return;
+        }
+        let player_offset = slot_index - unique_slots;
+        if player_offset >= 36 {
+            return;
+        }
+        let Some(slots) = self.window_slots.get(&window_id) else {
+            return;
+        };
+        let item = slots.get(slot_index).cloned().flatten();
+        if self.player_slots.len() < 45 {
+            self.player_slots.resize(45, None);
+        }
+        let player_slot = if player_offset < 27 {
+            9 + player_offset
+        } else {
+            36 + (player_offset - 27)
+        };
+        self.player_slots[player_slot] = item;
+    }
+
+    fn sync_window_from_player_slots(&mut self, window_id: u8) {
+        let Some(unique_slots) = self.active_window_unique_slots(window_id) else {
+            return;
+        };
+        let Some(slots) = self.window_slots.get_mut(&window_id) else {
+            return;
+        };
+        if slots.len() < unique_slots + 36 || self.player_slots.len() < 45 {
+            return;
+        }
+        for player_offset in 0..36usize {
+            let player_slot = if player_offset < 27 {
+                9 + player_offset
+            } else {
+                36 + (player_offset - 27)
+            };
+            slots[unique_slots + player_offset] = self.player_slots[player_slot].clone();
+        }
     }
 
     pub fn apply_local_click_player_window(
@@ -239,6 +374,15 @@ impl InventoryState {
     ) -> Option<InventoryItemStack> {
         self.apply_local_click_window(0, 0, slot, button, mode)
     }
+}
+
+#[derive(Debug, Clone)]
+struct InventorySnapshot {
+    player_slots: Vec<Option<InventoryItemStack>>,
+    window_slots: HashMap<u8, Vec<Option<InventoryItemStack>>>,
+    cursor_item: Option<InventoryItemStack>,
+    open_window: Option<InventoryWindowInfo>,
+    selected_hotbar_slot: u8,
 }
 
 fn apply_outside_click(cursor_item: &mut Option<InventoryItemStack>, button: u8) {
@@ -530,6 +674,16 @@ fn can_stack(a: &InventoryItemStack, b: &InventoryItemStack) -> bool {
     a.item_id == b.item_id && a.damage == b.damage && a.meta == b.meta
 }
 
+fn slot_item_after_click(
+    slots: &[Option<InventoryItemStack>],
+    slot: i16,
+) -> Option<InventoryItemStack> {
+    if slot < 0 {
+        return None;
+    }
+    slots.get(slot as usize).cloned().flatten()
+}
+
 fn max_stack_for_item(item_id: i32) -> u8 {
     if is_single_stack_item(item_id) { 1 } else { 64 }
 }
@@ -728,5 +882,40 @@ mod tests {
         assert_eq!(inventory.player_slots[36], Some(stack(4, 2)));
         assert!(inventory.predict_drop_selected_hotbar(true));
         assert_eq!(inventory.player_slots[36], None);
+    }
+
+    #[test]
+    fn click_window_returns_post_click_slot_item() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            ..Default::default()
+        };
+        inventory.player_slots[0] = Some(stack(1, 8));
+
+        let clicked_item = inventory.apply_local_click_player_window(0, 0, 0);
+
+        assert_eq!(inventory.cursor_item, Some(stack(1, 8)));
+        assert_eq!(clicked_item, None);
+    }
+
+    #[test]
+    fn rejected_transaction_restores_snapshot() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            ..Default::default()
+        };
+        inventory.player_slots[0] = Some(stack(1, 8));
+
+        let action_number = inventory.next_action_number;
+        let _ = inventory.apply_local_click_player_window(0, 0, 0);
+        inventory.next_action_number = inventory.next_action_number.wrapping_add(1);
+
+        assert_eq!(inventory.cursor_item, Some(stack(1, 8)));
+        assert_eq!(inventory.player_slots[0], None);
+
+        inventory.apply_transaction_result(0, action_number as i16, false);
+
+        assert_eq!(inventory.cursor_item, None);
+        assert_eq!(inventory.player_slots[0], Some(stack(1, 8)));
     }
 }

@@ -505,6 +505,7 @@ fn apply_inventory_message(
             action_number,
             accepted,
         } => {
+            inventory_state.apply_transaction_result(id, action_number, accepted);
             if !accepted {
                 inventory_state.queue_confirm_ack(id, action_number);
             }
