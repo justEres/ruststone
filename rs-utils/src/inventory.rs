@@ -69,6 +69,7 @@ pub struct InventoryState {
     pub next_action_number: u16,
     pub pending_confirm_acks: Vec<(u8, i16)>,
     pending_clicks: HashMap<(u8, u16), InventorySnapshot>,
+    drag_state: Option<InventoryDragState>,
 }
 
 impl InventoryState {
@@ -231,6 +232,14 @@ impl InventoryState {
             1 => apply_mode_shift_click(&mut slots, &cursor, window_unique_slots, slot),
             2 => apply_mode_number_key(&mut slots, &cursor, slot, button),
             4 => apply_mode_drop(&mut slots, &cursor, slot, button),
+            5 => apply_mode_drag_paint(
+                &mut slots,
+                &mut cursor,
+                &mut self.drag_state,
+                window_id,
+                slot,
+                button,
+            ),
             6 => apply_mode_double_click(&mut slots, &mut cursor, slot, button),
             _ => {}
         }
@@ -272,6 +281,7 @@ impl InventoryState {
             cursor_item: self.cursor_item.clone(),
             open_window: self.open_window.clone(),
             selected_hotbar_slot: self.selected_hotbar_slot,
+            drag_state: self.drag_state.clone(),
         }
     }
 
@@ -281,6 +291,7 @@ impl InventoryState {
         self.cursor_item = snapshot.cursor_item;
         self.open_window = snapshot.open_window;
         self.selected_hotbar_slot = snapshot.selected_hotbar_slot;
+        self.drag_state = snapshot.drag_state;
     }
 
     fn active_window_id(&self) -> Option<u8> {
@@ -383,6 +394,16 @@ struct InventorySnapshot {
     cursor_item: Option<InventoryItemStack>,
     open_window: Option<InventoryWindowInfo>,
     selected_hotbar_slot: u8,
+    drag_state: Option<InventoryDragState>,
+}
+
+#[derive(Debug, Clone)]
+struct InventoryDragState {
+    window_id: u8,
+    button: u8,
+    original_cursor: InventoryItemStack,
+    visited_slots: Vec<usize>,
+    original_slots: HashMap<usize, Option<InventoryItemStack>>,
 }
 
 fn apply_outside_click(cursor_item: &mut Option<InventoryItemStack>, button: u8) {
@@ -670,6 +691,161 @@ fn apply_mode_double_click(
     *cursor_item = Some(cursor);
 }
 
+fn apply_mode_drag_paint(
+    slots: &mut Vec<Option<InventoryItemStack>>,
+    cursor_item: &mut Option<InventoryItemStack>,
+    drag_state: &mut Option<InventoryDragState>,
+    window_id: u8,
+    slot: i16,
+    button: u8,
+) {
+    match drag_button_phase(button) {
+        Some((drag_button, DragPhase::Start)) => {
+            let Some(cursor) = cursor_item.clone() else {
+                return;
+            };
+            *drag_state = Some(InventoryDragState {
+                window_id,
+                button: drag_button,
+                original_cursor: cursor,
+                visited_slots: Vec::new(),
+                original_slots: HashMap::new(),
+            });
+        }
+        Some((drag_button, DragPhase::Add)) => {
+            let Some(drag) = drag_state.as_mut() else {
+                return;
+            };
+            if drag.window_id != window_id || drag.button != drag_button || slot < 0 {
+                return;
+            }
+            let slot_index = slot as usize;
+            if !drag.original_slots.contains_key(&slot_index) {
+                if slots.len() <= slot_index {
+                    slots.resize(slot_index + 1, None);
+                }
+                drag.original_slots.insert(slot_index, slots[slot_index].clone());
+                drag.visited_slots.push(slot_index);
+            }
+            recompute_drag_distribution(slots, cursor_item, drag);
+        }
+        Some((drag_button, DragPhase::End)) => {
+            let Some(drag) = drag_state.as_ref() else {
+                return;
+            };
+            if drag.window_id == window_id && drag.button == drag_button {
+                *drag_state = None;
+            }
+        }
+        None => {}
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DragPhase {
+    Start,
+    Add,
+    End,
+}
+
+fn drag_button_phase(button: u8) -> Option<(u8, DragPhase)> {
+    match button {
+        0 => Some((0, DragPhase::Start)),
+        1 => Some((0, DragPhase::Add)),
+        2 => Some((0, DragPhase::End)),
+        4 => Some((1, DragPhase::Start)),
+        5 => Some((1, DragPhase::Add)),
+        6 => Some((1, DragPhase::End)),
+        _ => None,
+    }
+}
+
+fn recompute_drag_distribution(
+    slots: &mut [Option<InventoryItemStack>],
+    cursor_item: &mut Option<InventoryItemStack>,
+    drag: &InventoryDragState,
+) {
+    for (slot_index, original) in &drag.original_slots {
+        if *slot_index < slots.len() {
+            slots[*slot_index] = original.clone();
+        }
+    }
+
+    let mut remaining = drag.original_cursor.count;
+    let mut placements = Vec::new();
+    for slot_index in &drag.visited_slots {
+        let capacity = match slots.get(*slot_index).cloned().flatten() {
+            None => max_stack_for_item(drag.original_cursor.item_id),
+            Some(slot_item) => {
+                if !can_stack(&slot_item, &drag.original_cursor)
+                    || slot_item.count >= max_stack_for_item(slot_item.item_id)
+                {
+                    0
+                } else {
+                    max_stack_for_item(slot_item.item_id).saturating_sub(slot_item.count)
+                }
+            }
+        };
+        placements.push((*slot_index, capacity));
+    }
+
+    if placements.is_empty() {
+        *cursor_item = Some(drag.original_cursor.clone());
+        return;
+    }
+
+    let target_count = placements
+        .iter()
+        .filter(|(_, capacity)| *capacity > 0)
+        .count();
+    if target_count == 0 {
+        *cursor_item = Some(drag.original_cursor.clone());
+        return;
+    }
+
+    let mut moved_total = 0u8;
+    for (index, (slot_index, capacity)) in placements.iter().enumerate() {
+        if *capacity == 0 || remaining == 0 {
+            continue;
+        }
+        let wanted = if drag.button == 0 {
+            let total = target_count as u8;
+            let base = drag.original_cursor.count / total;
+            let extra = drag.original_cursor.count % total;
+            base.saturating_add(u8::from(index < extra as usize))
+        } else {
+            1
+        };
+        let moved = wanted.min(*capacity).min(remaining);
+        if moved == 0 {
+            continue;
+        }
+
+        let slot_item = slots[*slot_index].take();
+        slots[*slot_index] = Some(match slot_item {
+            Some(mut existing) => {
+                existing.count = existing.count.saturating_add(moved);
+                existing
+            }
+            None => InventoryItemStack {
+                count: moved,
+                ..drag.original_cursor.clone()
+            },
+        });
+        remaining = remaining.saturating_sub(moved);
+        moved_total = moved_total.saturating_add(moved);
+    }
+
+    if moved_total == 0 {
+        *cursor_item = Some(drag.original_cursor.clone());
+        return;
+    }
+
+    let mut cursor = drag.original_cursor.clone();
+    cursor.count = drag.original_cursor.count.saturating_sub(moved_total);
+    *cursor_item = if cursor.count == 0 { None } else { Some(cursor) };
+}
+
 fn can_stack(a: &InventoryItemStack, b: &InventoryItemStack) -> bool {
     a.item_id == b.item_id && a.damage == b.damage && a.meta == b.meta
 }
@@ -917,5 +1093,41 @@ mod tests {
 
         assert_eq!(inventory.cursor_item, None);
         assert_eq!(inventory.player_slots[0], Some(stack(1, 8)));
+    }
+
+    #[test]
+    fn left_drag_splits_evenly_across_empty_slots() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            cursor_item: Some(stack(1, 8)),
+            ..Default::default()
+        };
+
+        let _ = inventory.apply_local_click_player_window(-999, 0, 5);
+        let _ = inventory.apply_local_click_player_window(0, 1, 5);
+        let _ = inventory.apply_local_click_player_window(1, 1, 5);
+        let _ = inventory.apply_local_click_player_window(-999, 2, 5);
+
+        assert_eq!(inventory.player_slots[0], Some(stack(1, 4)));
+        assert_eq!(inventory.player_slots[1], Some(stack(1, 4)));
+        assert_eq!(inventory.cursor_item, None);
+    }
+
+    #[test]
+    fn right_drag_places_one_item_per_slot() {
+        let mut inventory = InventoryState {
+            player_slots: vec![None; 45],
+            cursor_item: Some(stack(1, 5)),
+            ..Default::default()
+        };
+
+        let _ = inventory.apply_local_click_player_window(-999, 4, 5);
+        let _ = inventory.apply_local_click_player_window(0, 5, 5);
+        let _ = inventory.apply_local_click_player_window(1, 5, 5);
+        let _ = inventory.apply_local_click_player_window(-999, 6, 5);
+
+        assert_eq!(inventory.player_slots[0], Some(stack(1, 1)));
+        assert_eq!(inventory.player_slots[1], Some(stack(1, 1)));
+        assert_eq!(inventory.cursor_item, Some(stack(1, 3)));
     }
 }

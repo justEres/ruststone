@@ -1824,6 +1824,7 @@ fn connect_ui(
                 ui,
                 &to_net,
                 &keys,
+                &mut state,
                 &mut inventory_state,
                 &mut item_icons,
             );
@@ -1941,6 +1942,7 @@ pub struct ConnectUiState {
     pub debug_items_open: bool,
     pub debug_items_filter: String,
     pub debug_items: Vec<InventoryItemStack>,
+    pub inventory_drag: Option<InventoryDragUiState>,
 }
 impl Default for ConnectUiState {
     fn default() -> Self {
@@ -1977,8 +1979,17 @@ impl Default for ConnectUiState {
             debug_items_open: false,
             debug_items_filter: String::new(),
             debug_items: Vec::new(),
+            inventory_drag: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct InventoryDragUiState {
+    pub window_id: u8,
+    pub window_unique_slots: usize,
+    pub button: u8,
+    pub visited_slots: Vec<i16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2842,6 +2853,7 @@ fn draw_inventory_grid(
     ui: &mut egui::Ui,
     to_net: &ToNet,
     keys: &ButtonInput<KeyCode>,
+    state: &mut ConnectUiState,
     inventory_state: &mut InventoryState,
     item_icons: &mut ItemIconCache,
 ) {
@@ -2850,11 +2862,22 @@ fn draw_inventory_grid(
         .clone()
         .filter(|window| window.id != 0)
     {
-        draw_container_inventory_grid(ctx, ui, to_net, keys, inventory_state, item_icons, &window);
+        draw_container_inventory_grid(
+            ctx,
+            ui,
+            to_net,
+            keys,
+            state,
+            inventory_state,
+            item_icons,
+            &window,
+        );
+        finish_inventory_drag_if_released(ctx, to_net, state, inventory_state);
         return;
     }
 
-    draw_player_inventory_grid(ctx, ui, to_net, keys, inventory_state, item_icons);
+    draw_player_inventory_grid(ctx, ui, to_net, keys, state, inventory_state, item_icons);
+    finish_inventory_drag_if_released(ctx, to_net, state, inventory_state);
 }
 
 fn draw_player_inventory_grid(
@@ -2862,6 +2885,7 @@ fn draw_player_inventory_grid(
     ui: &mut egui::Ui,
     to_net: &ToNet,
     keys: &ButtonInput<KeyCode>,
+    state: &mut ConnectUiState,
     inventory_state: &mut InventoryState,
     item_icons: &mut ItemIconCache,
 ) {
@@ -2894,12 +2918,14 @@ fn draw_player_inventory_grid(
                     hovered_item = item;
                 }
                 handle_inventory_slot_interaction(
+                    ctx,
                     response,
                     0,
                     0,
                     slot as i16,
                     keys,
                     to_net,
+                    state,
                     inventory_state,
                 );
             }
@@ -2931,12 +2957,14 @@ fn draw_player_inventory_grid(
                         hovered_item = item;
                     }
                     handle_inventory_slot_interaction(
+                        ctx,
                         response,
                         0,
                         0,
                         slot as i16,
                         keys,
                         to_net,
+                        state,
                         inventory_state,
                     );
                 }
@@ -2971,12 +2999,14 @@ fn draw_player_inventory_grid(
                     hovered_item = item;
                 }
                 handle_inventory_slot_interaction(
+                    ctx,
                     response,
                     0,
                     0,
                     slot,
                     keys,
                     to_net,
+                    state,
                     inventory_state,
                 );
             }
@@ -3003,6 +3033,7 @@ fn draw_container_inventory_grid(
     ui: &mut egui::Ui,
     to_net: &ToNet,
     keys: &ButtonInput<KeyCode>,
+    state: &mut ConnectUiState,
     inventory_state: &mut InventoryState,
     item_icons: &mut ItemIconCache,
     window: &InventoryWindowInfo,
@@ -3057,12 +3088,14 @@ fn draw_container_inventory_grid(
                             hovered_item = item;
                         }
                         handle_inventory_slot_interaction(
+                            ctx,
                             response,
                             window.id,
                             unique_slots,
                             slot as i16,
                             keys,
                             to_net,
+                            state,
                             inventory_state,
                         );
                     }
@@ -3104,12 +3137,14 @@ fn draw_container_inventory_grid(
                         hovered_item = item;
                     }
                     handle_inventory_slot_interaction(
+                        ctx,
                         response,
                         window.id,
                         unique_slots,
                         slot as i16,
                         keys,
                         to_net,
+                        state,
                         inventory_state,
                     );
                 }
@@ -3150,12 +3185,14 @@ fn draw_container_inventory_grid(
                     hovered_item = item;
                 }
                 handle_inventory_slot_interaction(
+                    ctx,
                     response,
                     window.id,
                     unique_slots,
                     slot as i16,
                     keys,
                     to_net,
+                    state,
                     inventory_state,
                 );
             }
@@ -4014,12 +4051,14 @@ fn draw_inventory_cursor_item(
 }
 
 fn handle_inventory_slot_interaction(
+    ctx: &egui::Context,
     response: egui::Response,
     window_id: u8,
     window_unique_slots: usize,
     slot: i16,
     keys: &ButtonInput<KeyCode>,
     to_net: &ToNet,
+    state: &mut ConnectUiState,
     inventory_state: &mut InventoryState,
 ) {
     let shift_pressed = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -4149,6 +4188,25 @@ fn handle_inventory_slot_interaction(
         }
     }
 
+    if inventory_state.cursor_item.is_some()
+        && handle_inventory_drag_interaction(
+            ctx,
+            &response,
+            window_id,
+            window_unique_slots,
+            slot,
+            to_net,
+            state,
+            inventory_state,
+        )
+    {
+        return;
+    }
+
+    if state.inventory_drag.is_some() {
+        return;
+    }
+
     if response.double_clicked_by(egui::PointerButton::Primary) {
         send_inventory_click(
             window_id,
@@ -4182,6 +4240,118 @@ fn handle_inventory_slot_interaction(
         to_net,
         inventory_state,
     );
+}
+
+fn handle_inventory_drag_interaction(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    window_id: u8,
+    window_unique_slots: usize,
+    slot: i16,
+    to_net: &ToNet,
+    state: &mut ConnectUiState,
+    inventory_state: &mut InventoryState,
+) -> bool {
+    let primary_drag =
+        response.drag_started_by(egui::PointerButton::Primary) || response.dragged_by(egui::PointerButton::Primary);
+    let secondary_drag = response.drag_started_by(egui::PointerButton::Secondary)
+        || response.dragged_by(egui::PointerButton::Secondary);
+
+    let Some((button, pointer_button)) = (if primary_drag {
+        Some((0u8, egui::PointerButton::Primary))
+    } else if secondary_drag {
+        Some((1u8, egui::PointerButton::Secondary))
+    } else {
+        None
+    }) else {
+        return false;
+    };
+
+    if state.inventory_drag.is_none() {
+        send_inventory_click(
+            window_id,
+            window_unique_slots,
+            -999,
+            drag_start_button(button),
+            5,
+            to_net,
+            inventory_state,
+        );
+        state.inventory_drag = Some(InventoryDragUiState {
+            window_id,
+            window_unique_slots,
+            button,
+            visited_slots: Vec::new(),
+        });
+    }
+
+    let Some(drag) = state.inventory_drag.as_mut() else {
+        return false;
+    };
+    if drag.window_id != window_id
+        || drag.window_unique_slots != window_unique_slots
+        || drag.button != button
+        || !ctx.input(|i| i.pointer.button_down(pointer_button))
+    {
+        return false;
+    }
+
+    if response.hovered() && !drag.visited_slots.contains(&slot) {
+        send_inventory_click(
+            window_id,
+            window_unique_slots,
+            slot,
+            drag_add_button(button),
+            5,
+            to_net,
+            inventory_state,
+        );
+        drag.visited_slots.push(slot);
+    }
+    true
+}
+
+fn finish_inventory_drag_if_released(
+    ctx: &egui::Context,
+    to_net: &ToNet,
+    state: &mut ConnectUiState,
+    inventory_state: &mut InventoryState,
+) {
+    let Some(drag) = state.inventory_drag.as_ref() else {
+        return;
+    };
+    let pointer_down = ctx.input(|i| {
+        i.pointer.button_down(match drag.button {
+            0 => egui::PointerButton::Primary,
+            _ => egui::PointerButton::Secondary,
+        })
+    });
+    if pointer_down {
+        return;
+    }
+
+    let drag = state.inventory_drag.take().unwrap();
+    send_inventory_click(
+        drag.window_id,
+        drag.window_unique_slots,
+        -999,
+        drag_end_button(drag.button),
+        5,
+        to_net,
+        inventory_state,
+    );
+}
+
+fn drag_start_button(button: u8) -> u8 {
+    if button == 0 { 0 } else { 4 }
+}
+
+fn drag_add_button(button: u8) -> u8 {
+    if button == 0 { 1 } else { 5 }
+}
+
+fn drag_end_button(button: u8) -> u8 {
+    if button == 0 { 2 } else { 6 }
 }
 
 fn send_inventory_click(
