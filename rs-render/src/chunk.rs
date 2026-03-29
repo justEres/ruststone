@@ -2825,7 +2825,7 @@ fn add_box(
             data.push_pos([vert[0] + x as f32, vert[1] + y as f32, vert[2] + z as f32]);
             data.normals.push(normal);
         }
-        let uvs = uv_for_texture();
+        let uvs = box_face_uvs(face, min, max);
         data.uvs.extend_from_slice(&uvs);
         let tile_origin = atlas_tile_origin(texture_index);
         data.uvs_b.extend_from_slice(&[tile_origin; 4]);
@@ -2863,6 +2863,47 @@ fn add_box(
             base_index + 3,
             base_index + 2,
         ]);
+    }
+}
+
+fn box_face_uvs(face: Face, min: [f32; 3], max: [f32; 3]) -> [[f32; 2]; 4] {
+    match face {
+        Face::PosX => [
+            [min[2], min[1]],
+            [max[2], min[1]],
+            [max[2], max[1]],
+            [min[2], max[1]],
+        ],
+        Face::NegX => [
+            [1.0 - max[2], min[1]],
+            [1.0 - min[2], min[1]],
+            [1.0 - min[2], max[1]],
+            [1.0 - max[2], max[1]],
+        ],
+        Face::PosY => [
+            [min[0], min[2]],
+            [max[0], min[2]],
+            [max[0], max[2]],
+            [min[0], max[2]],
+        ],
+        Face::NegY => [
+            [min[0], 1.0 - max[2]],
+            [max[0], 1.0 - max[2]],
+            [max[0], 1.0 - min[2]],
+            [min[0], 1.0 - min[2]],
+        ],
+        Face::PosZ => [
+            [1.0 - max[0], min[1]],
+            [1.0 - min[0], min[1]],
+            [1.0 - min[0], max[1]],
+            [1.0 - max[0], max[1]],
+        ],
+        Face::NegZ => [
+            [min[0], min[1]],
+            [max[0], min[1]],
+            [max[0], max[1]],
+            [min[0], max[1]],
+        ],
     }
 }
 
@@ -3581,5 +3622,21 @@ mod tests {
     fn snow_layers_do_not_occlude_ao_neighbors() {
         assert!(!is_ao_occluder(78 << 4));
         assert!(is_ao_occluder(80 << 4));
+    }
+
+    #[test]
+    fn box_face_uvs_scale_and_offset_for_partial_boxes() {
+        assert_eq!(
+            box_face_uvs(Face::PosX, [0.0, 0.0, 0.0], [1.0, 0.5, 1.0]),
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]]
+        );
+        assert_eq!(
+            box_face_uvs(Face::PosX, [0.0, 0.5, 0.0], [1.0, 1.0, 1.0]),
+            [[0.0, 0.5], [1.0, 0.5], [1.0, 1.0], [0.0, 1.0]]
+        );
+        assert_eq!(
+            box_face_uvs(Face::PosZ, [0.375, 0.0, 0.0], [0.625, 1.0, 1.0]),
+            [[0.375, 0.0], [0.625, 0.0], [0.625, 1.0], [0.375, 1.0]]
+        );
     }
 }
