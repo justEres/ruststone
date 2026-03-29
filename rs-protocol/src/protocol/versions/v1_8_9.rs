@@ -98,14 +98,14 @@ protocol_packet_ids!(
             0x3b => ScoreboardObjective
             0x3c => UpdateScore
             0x3d => ScoreboardDisplay
-            0x3e => Teams_u8
+            0x3e => Teams_u8_NameTagVisibility
             0x3f => PluginMessageClientbound
             0x40 => Disconnect
             0x41 => ServerDifficulty
             0x42 => CombatEvent
             0x43 => Camera
             0x44 => WorldBorder
-            0x45 => Title_notext_component
+            0x45 => Title_notext
             0x46 => SetCompression
             0x47 => PlayerListHeaderFooter
             0x48 => ResourcePackSend

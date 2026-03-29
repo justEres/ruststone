@@ -237,6 +237,7 @@ pub fn handle_packet(
         | Packet::ScoreboardObjective_NoMode(_)
         | Packet::UpdateScore(_)
         | Packet::UpdateScore_i32(_)
+        | Packet::Teams_u8_NameTagVisibility(_)
         | Packet::Teams_u8(_)
         | Packet::Teams_NoVisColor(_)
         | Packet::Teams_VarInt(_) => scoreboard::handle_packet(pkt, to_main),

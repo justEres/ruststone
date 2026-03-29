@@ -51,6 +51,17 @@ pub(super) fn handle_packet(pkt: Packet, to_main: &crossbeam::channel::Sender<Fr
                 teams.players.map(|players| players.data),
             );
         }
+        Packet::Teams_u8_NameTagVisibility(teams) => {
+            send_team_packet(
+                to_main,
+                teams.name,
+                teams.mode,
+                teams.display_name,
+                teams.prefix,
+                teams.suffix,
+                teams.players.map(|players| players.data),
+            );
+        }
         Packet::Teams_NoVisColor(teams) => {
             send_team_packet(
                 to_main,

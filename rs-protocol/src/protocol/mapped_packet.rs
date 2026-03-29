@@ -3710,6 +3710,22 @@ impl MappablePacket for packet::Packet {
                 color: teams.color,
                 data: Some(teams.data),
             }),
+            packet::Packet::Teams_u8_NameTagVisibility(teams) => {
+                mapped_packet::MappedPacket::Teams(Teams {
+                    name: teams.name,
+                    mode: teams.mode,
+                    display_name: teams.display_name,
+                    flags: teams.flags,
+                    name_tag_visibility: teams.name_tag_visibility,
+                    collision_rule: None,
+                    formatting: None,
+                    prefix: teams.prefix,
+                    suffix: teams.suffix,
+                    players: teams.players.map(|x| x.data),
+                    color: None,
+                    data: None,
+                })
+            }
             packet::Packet::Teams_NoVisColor(teams) => mapped_packet::MappedPacket::Teams(Teams {
                 name: teams.name,
                 mode: teams.mode,
