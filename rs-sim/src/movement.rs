@@ -325,14 +325,9 @@ impl<'a> WorldCollision<'a> {
         }
 
         pos = aabb_feet_position(bb);
-        let supported = self.is_supported(pos);
-        // Vanilla/anticheat parity: staying grounded on flat movement requires
-        // actual support under the resolved box, not just last tick's state.
-        let on_ground = supported
-            && ((original.y != y && original.y < 0.0)
-                || (was_on_ground
-                    && original.y.abs() <= COLLISION_EPS
-                    && y.abs() <= COLLISION_EPS));
+        // Match vanilla Entity::moveEntity exactly here:
+        // onGround is set from vertical collision during downward motion only.
+        let on_ground = original.y != y && original.y < 0.0;
 
         let collided_horizontally = original.x != x || original.z != z;
         (pos, vel, on_ground, collided_horizontally)
