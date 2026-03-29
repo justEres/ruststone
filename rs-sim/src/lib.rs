@@ -99,6 +99,7 @@ pub struct CorrectionLoopGuard {
     pub skip_send_ticks: u32,
     pub force_full_pos_ticks: u32,
     pub skip_physics_ticks: u32,
+    pub forced_pos_look: Option<((f64, f64, f64), f32, f32, bool)>,
     pub pending_acks: VecDeque<((f64, f64, f64), f32, f32, bool)>,
 }
 
@@ -111,6 +112,7 @@ impl Default for CorrectionLoopGuard {
             skip_send_ticks: 0,
             force_full_pos_ticks: 0,
             skip_physics_ticks: 0,
+            forced_pos_look: None,
             pending_acks: VecDeque::new(),
         }
     }

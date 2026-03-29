@@ -246,9 +246,9 @@ pub fn handle_messages(
                     }
                 }
 
-                // S08 in 1.8 commonly omits on_ground; default false to avoid
-                // ground-spoof loops when server is correcting an airborne state.
-                let on_ground = pos.on_ground.unwrap_or(false);
+                // 1.8 player position packets commonly omit on_ground.
+                // Preserve the current state when absent instead of forcing false.
+                let on_ground = pos.on_ground.unwrap_or(sim_state.current.on_ground);
                 debug!(
                     "[net/correction] tick={} raw_pos={:?} raw_yaw={:?} raw_pitch={:?} flags={:?} raw_on_ground={:?} -> resolved_pos=({:.4},{:.4},{:.4}) resolved_yaw={:.4}rad resolved_pitch={:.4}rad resolved_on_ground={}",
                     game.sim_clock.tick,

@@ -314,6 +314,9 @@ pub fn fixed_sim_tick_system(
         let force_full_pos = correction_guard.force_full_pos_ticks > 0;
         if correction_guard.force_full_pos_ticks > 0 {
             correction_guard.force_full_pos_ticks -= 1;
+            if correction_guard.force_full_pos_ticks == 0 {
+                correction_guard.forced_pos_look = None;
+            }
         }
 
         let moved = if move_pkt_state.initialized {
@@ -330,22 +333,35 @@ pub fn fixed_sim_tick_system(
         };
 
         if force_full_pos || (moved && rotated) {
+            let ((send_x, send_y, send_z), send_yaw, send_pitch, send_on_ground) =
+                correction_guard
+                    .forced_pos_look
+                    .unwrap_or(((pos.x as f64, pos.y as f64, pos.z as f64), yaw, pitch, on_ground));
+            let send_pos = Vec3::new(send_x as f32, send_y as f32, send_z as f32);
             let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
-                x: pos.x as f64,
-                y: pos.y as f64,
-                z: pos.z as f64,
-                yaw,
-                pitch,
-                on_ground,
+                x: send_x,
+                y: send_y,
+                z: send_z,
+                yaw: send_yaw,
+                pitch: send_pitch,
+                on_ground: send_on_ground,
             });
-            log_outgoing_movement_packet(tick, "normal", MOVE_PKT_POS_LOOK, pos, yaw, pitch, on_ground);
+            log_outgoing_movement_packet(
+                tick,
+                "normal",
+                MOVE_PKT_POS_LOOK,
+                send_pos,
+                send_yaw,
+                send_pitch,
+                send_on_ground,
+            );
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_POS_LOOK,
-                pos,
-                yaw,
-                pitch,
-                on_ground,
+                send_pos,
+                send_yaw,
+                send_pitch,
+                send_on_ground,
             );
         } else if moved {
             let _ = params.to_net.0.send(ToNetMessage::PlayerMovePos {
@@ -626,6 +642,7 @@ pub fn net_event_apply_system(
         correction_guard
             .pending_acks
             .push_back((ack_pos, ack_yaw_deg, ack_pitch_deg, on_ground));
+        correction_guard.forced_pos_look = Some((ack_pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
         // Clientbound player position packets are authoritative teleports/setbacks.
         // Replaying buffered movement on top of them causes immediate divergence and
@@ -646,7 +663,7 @@ pub fn net_event_apply_system(
         move_pkt_state.last_pitch_deg = ack_pitch_deg;
         move_pkt_state.ticks_since_pos = 0;
         correction_guard.force_full_pos_ticks = 5;
-        correction_guard.skip_physics_ticks = 1;
+        correction_guard.skip_physics_ticks = 5;
         correction_guard.skip_send_ticks = 0;
     }
     timings.net_apply_ms = timer.ms();
