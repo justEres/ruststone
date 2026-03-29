@@ -82,6 +82,9 @@ pub struct DebugStats {
     pub last_reconciled_server_tick: Option<u32>,
     pub smoothing_offset_len: f32,
     pub one_way_ticks: u32,
+    pub last_rtt_ms: f32,
+    pub last_one_way_ms: f32,
+    pub last_tick_alignment_delta: i32,
 }
 
 #[derive(Debug, Default, Resource)]

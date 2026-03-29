@@ -1,5 +1,51 @@
 use super::*;
 
+fn estimate_server_tick(
+    history: &PredictionHistory,
+    latest_tick: u32,
+    estimated_tick: u32,
+    server_state: &crate::sim::PlayerSimState,
+) -> (u32, i32) {
+    let search_radius = 8u32;
+    let start = estimated_tick.saturating_sub(search_radius);
+    let end = latest_tick.min(estimated_tick.saturating_add(search_radius));
+
+    let mut best_tick = estimated_tick;
+    let mut best_score = f32::INFINITY;
+    let mut found = false;
+
+    for tick in start..=end {
+        let Some(frame) = history.0.get_by_tick(tick) else {
+            continue;
+        };
+        let predicted = frame.state;
+        let pos_err = server_state.pos.distance_squared(predicted.pos);
+        let vel_err = server_state.vel.distance_squared(predicted.vel);
+        let yaw_err = (server_state.yaw - predicted.yaw).abs();
+        let pitch_err = (server_state.pitch - predicted.pitch).abs();
+        let ground_err = if server_state.on_ground == predicted.on_ground {
+            0.0
+        } else {
+            0.25
+        };
+        let score = pos_err + vel_err * 0.35 + yaw_err * 0.02 + pitch_err * 0.02 + ground_err;
+        if score < best_score {
+            best_score = score;
+            best_tick = tick;
+            found = true;
+        }
+    }
+
+    if !found {
+        return (estimated_tick, 0);
+    }
+
+    (
+        best_tick,
+        best_tick as i32 - estimated_tick as i32,
+    )
+}
+
 pub fn fixed_sim_tick_system(
     mut sim_clock: ResMut<SimClock>,
     mut sim_render: ResMut<SimRenderState>,
@@ -378,17 +424,26 @@ pub fn net_event_apply_system(
                     let one_way = rtt.as_secs_f32() * 0.5;
                     latency.one_way_ticks = (one_way / 0.05).round() as u32;
                     debug.one_way_ticks = latency.one_way_ticks;
+                    debug.last_rtt_ms = rtt.as_secs_f32() * 1000.0;
+                    debug.last_one_way_ms = one_way * 1000.0;
                 }
 
                 let latest_tick = sim_clock.tick.saturating_sub(1);
-                let server_tick = latest_tick.saturating_sub(latency.one_way_ticks);
+                let estimated_tick = latest_tick.saturating_sub(latency.one_way_ticks);
                 let mut authoritative_state = history
                     .0
-                    .get_by_tick(server_tick)
+                    .get_by_tick(estimated_tick)
                     .map(|frame| frame.state)
                     .or_else(|| history.0.latest_frame().map(|frame| frame.state))
                     .unwrap_or(sim_state.current);
                 authoritative_state.vel = velocity;
+                let (server_tick, alignment_delta) = estimate_server_tick(
+                    &history,
+                    latest_tick,
+                    estimated_tick,
+                    &authoritative_state,
+                );
+                debug.last_tick_alignment_delta = alignment_delta;
 
                 let previous_state = sim_state.current;
                 if let Some(result) = reconcile(
@@ -421,6 +476,8 @@ pub fn net_event_apply_system(
             let one_way = rtt.as_secs_f32() * 0.5;
             latency.one_way_ticks = (one_way / 0.05).round() as u32;
             debug.one_way_ticks = latency.one_way_ticks;
+            debug.last_rtt_ms = rtt.as_secs_f32() * 1000.0;
+            debug.last_one_way_ms = one_way * 1000.0;
         }
 
         let server_state = crate::sim::PlayerSimState {
@@ -453,7 +510,10 @@ pub fn net_event_apply_system(
         correction_guard.pending_ack = Some((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
         let latest_tick = sim_clock.tick.saturating_sub(1);
-        let server_tick = latest_tick.saturating_sub(latency.one_way_ticks);
+        let estimated_tick = latest_tick.saturating_sub(latency.one_way_ticks);
+        let (server_tick, alignment_delta) =
+            estimate_server_tick(&history, latest_tick, estimated_tick, &server_state);
+        debug.last_tick_alignment_delta = alignment_delta;
         let previous_state = sim_state.current;
         let reconcile_result = reconcile(
             &mut history.0,

@@ -482,6 +482,15 @@ pub fn debug_overlay_system(
                         params.debug.smoothing_offset_len
                     ));
                     ui.label(format!("one-way ticks: {}", params.debug.one_way_ticks));
+                    ui.label(format!("last RTT ms: {:.2}", params.debug.last_rtt_ms));
+                    ui.label(format!(
+                        "last one-way ms: {:.2}",
+                        params.debug.last_one_way_ms
+                    ));
+                    ui.label(format!(
+                        "tick alignment delta: {}",
+                        params.debug.last_tick_alignment_delta
+                    ));
                 });
             params.debug_ui.show_prediction = prediction_section.fully_open();
 
