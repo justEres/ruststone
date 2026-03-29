@@ -115,7 +115,7 @@ pub struct ClientNetPlugin;
 impl Plugin for ClientNetPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            Update,
+            PreUpdate,
             (
                 message_handler::handle_messages,
                 movement_session::movement_session_receive_system,
