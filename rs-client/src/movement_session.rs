@@ -299,7 +299,6 @@ impl MovementSession {
     }
 
     fn make_ack_packet(&self, correction: ServerCorrection) -> PlannedMovementPacket {
-        let on_ground = Self::correction_effective_on_ground(correction);
         PlannedMovementPacket {
             source: MovementPacketSource::Ack,
             kind: MovementPacketKind::PosLook,
@@ -311,7 +310,9 @@ impl MovementSession {
             ),
             yaw: correction.packet_yaw_deg,
             pitch: correction.packet_pitch_deg,
-            on_ground,
+            // Vanilla 1.8.9 handlePlayerPosLook always acks server corrections
+            // with onGround=false on the immediate C06 reply.
+            on_ground: false,
         }
     }
 
@@ -1144,12 +1145,12 @@ mod tests {
     }
 
     #[test]
-    fn correction_ack_uses_inferred_ground_when_server_omits_it() {
+    fn correction_ack_matches_vanilla_on_ground_false() {
         let mut session = MovementSession::default();
         let correction = sample_unknown_ground_correction();
         session.begin_correction(correction);
         let packet = session.make_ack_packet(correction);
-        assert!(packet.on_ground);
+        assert!(!packet.on_ground);
         assert!(session.last_authoritative_state.on_ground);
     }
 }
