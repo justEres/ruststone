@@ -155,6 +155,8 @@ pub fn handle_packet(
             join_game::handle_packet(pkt, to_main, conn, requested_view_distance)
         }
         Packet::ChunkData(_)
+        | Packet::ChunkData_NoEntities(_)
+        | Packet::ChunkData_NoEntities_u16(_)
         | Packet::ChunkDataBulk(_)
         | Packet::ChunkUnload(_)
         | Packet::BlockChange_VarInt(_)

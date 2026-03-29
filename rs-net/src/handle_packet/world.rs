@@ -20,6 +20,41 @@ pub(super) fn handle_packet(pkt: Packet, to_main: &crossbeam::channel::Sender<Fr
                 }
             }
         }
+        Packet::ChunkData_NoEntities(cd) => {
+            let bitmask = cd.bitmask.0 as u16;
+            match chunk_decode::decode_chunk(
+                cd.chunk_x,
+                cd.chunk_z,
+                cd.new,
+                bitmask,
+                &cd.data.data,
+                true,
+            ) {
+                Ok((chunk, _)) => {
+                    let _ = to_main.send(FromNetMessage::ChunkData(chunk));
+                }
+                Err(err) => {
+                    warn!("Failed to decode ChunkData_NoEntities: {}", err);
+                }
+            }
+        }
+        Packet::ChunkData_NoEntities_u16(cd) => {
+            match chunk_decode::decode_chunk(
+                cd.chunk_x,
+                cd.chunk_z,
+                cd.new,
+                cd.bitmask,
+                &cd.data.data,
+                true,
+            ) {
+                Ok((chunk, _)) => {
+                    let _ = to_main.send(FromNetMessage::ChunkData(chunk));
+                }
+                Err(err) => {
+                    warn!("Failed to decode ChunkData_NoEntities_u16: {}", err);
+                }
+            }
+        }
         Packet::ChunkDataBulk(cdb) => {
             let mut offset = 0usize;
             for meta in cdb.chunk_meta.data.iter() {
