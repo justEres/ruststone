@@ -122,13 +122,12 @@ pub struct ClientInventoryPlugin;
 
 impl Plugin for ClientInventoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                inventory_systems::hotbar_input_system,
-                inventory_systems::inventory_transaction_ack_system,
-            ),
-        );
+        app.add_systems(Update, inventory_systems::hotbar_input_system)
+            .add_systems(
+                FixedUpdate,
+                inventory_systems::inventory_transaction_ack_system
+                    .after(sim_systems::fixed_sim_tick_system),
+            );
     }
 }
 
