@@ -122,6 +122,12 @@ pub struct MovementPacketState {
     pub last_yaw_deg: f32,
     pub last_pitch_deg: f32,
     pub ticks_since_pos: u32,
+    pub last_sent_initialized: bool,
+    pub last_sent_pos: Vec3,
+    pub last_sent_yaw_deg: f32,
+    pub last_sent_pitch_deg: f32,
+    pub last_sent_on_ground: bool,
+    pub last_sent_kind: u8,
 }
 
 impl Default for MovementPacketState {
@@ -132,6 +138,12 @@ impl Default for MovementPacketState {
             last_yaw_deg: 0.0,
             last_pitch_deg: 0.0,
             ticks_since_pos: 0,
+            last_sent_initialized: false,
+            last_sent_pos: Vec3::ZERO,
+            last_sent_yaw_deg: 0.0,
+            last_sent_pitch_deg: 0.0,
+            last_sent_on_ground: false,
+            last_sent_kind: 0,
         }
     }
 }

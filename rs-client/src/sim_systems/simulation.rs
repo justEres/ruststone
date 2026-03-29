@@ -1,9 +1,45 @@
 use super::*;
 
+const MOVE_PKT_GROUND: u8 = 0;
+const MOVE_PKT_LOOK: u8 = 1;
+const MOVE_PKT_POS: u8 = 2;
+const MOVE_PKT_POS_LOOK: u8 = 3;
+
 fn has_loaded_player_chunk(collision_map: &WorldCollisionMap, pos: Vec3) -> bool {
     let chunk_x = (pos.x.floor() as i32).div_euclid(16);
     let chunk_z = (pos.z.floor() as i32).div_euclid(16);
     collision_map.has_chunk(chunk_x, chunk_z)
+}
+
+fn record_sent_movement_packet(
+    move_pkt_state: &mut MovementPacketState,
+    kind: u8,
+    pos: Vec3,
+    yaw: f32,
+    pitch: f32,
+    on_ground: bool,
+) {
+    move_pkt_state.last_sent_initialized = true;
+    move_pkt_state.last_sent_kind = kind;
+    move_pkt_state.last_sent_pos = pos;
+    move_pkt_state.last_sent_yaw_deg = yaw;
+    move_pkt_state.last_sent_pitch_deg = pitch;
+    move_pkt_state.last_sent_on_ground = on_ground;
+}
+
+fn is_duplicate_sent_pos_look(
+    move_pkt_state: &MovementPacketState,
+    pos: Vec3,
+    yaw: f32,
+    pitch: f32,
+    on_ground: bool,
+) -> bool {
+    move_pkt_state.last_sent_initialized
+        && move_pkt_state.last_sent_kind == MOVE_PKT_POS_LOOK
+        && move_pkt_state.last_sent_on_ground == on_ground
+        && move_pkt_state.last_sent_pos.distance_squared(pos) <= 1.0e-12
+        && (move_pkt_state.last_sent_yaw_deg - yaw).abs() <= 1.0e-6
+        && (move_pkt_state.last_sent_pitch_deg - pitch).abs() <= 1.0e-6
 }
 
 fn estimate_server_tick(
@@ -71,6 +107,7 @@ pub fn fixed_sim_tick_system(
     if !matches!(app_state.0, ApplicationState::Connected) || !params.sim_ready.0 {
         move_pkt_state.initialized = false;
         move_pkt_state.ticks_since_pos = 0;
+        move_pkt_state.last_sent_initialized = false;
         action_state.jump_was_pressed = false;
         action_state.fly_toggle_timer = 0;
         params.timings.fixed_tick_ms = timer.ms();
@@ -183,17 +220,43 @@ pub fn fixed_sim_tick_system(
         if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) =
             correction_guard.pending_ack.take()
         {
-            let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
-                x: ack_pos.x as f64,
-                y: ack_pos.y as f64,
-                z: ack_pos.z as f64,
-                yaw: ack_yaw,
-                pitch: ack_pitch,
-                on_ground: ack_on_ground,
-            });
-            latency.last_sent = Some(Instant::now());
-            params.timings.fixed_tick_ms = timer.ms();
-            return;
+            if is_duplicate_sent_pos_look(
+                &move_pkt_state,
+                ack_pos,
+                ack_yaw,
+                ack_pitch,
+                ack_on_ground,
+            ) {
+                tracing::debug!(
+                    x = ack_pos.x,
+                    y = ack_pos.y,
+                    z = ack_pos.z,
+                    yaw = ack_yaw,
+                    pitch = ack_pitch,
+                    on_ground = ack_on_ground,
+                    "Suppressing duplicate correction ack movement packet"
+                );
+            } else {
+                let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                    x: ack_pos.x as f64,
+                    y: ack_pos.y as f64,
+                    z: ack_pos.z as f64,
+                    yaw: ack_yaw,
+                    pitch: ack_pitch,
+                    on_ground: ack_on_ground,
+                });
+                record_sent_movement_packet(
+                    &mut move_pkt_state,
+                    MOVE_PKT_POS_LOOK,
+                    ack_pos,
+                    ack_yaw,
+                    ack_pitch,
+                    ack_on_ground,
+                );
+                latency.last_sent = Some(Instant::now());
+                params.timings.fixed_tick_ms = timer.ms();
+                return;
+            }
         }
         if correction_guard.skip_send_ticks > 0 {
             correction_guard.skip_send_ticks = correction_guard.skip_send_ticks.saturating_sub(1);
@@ -266,6 +329,14 @@ pub fn fixed_sim_tick_system(
                 pitch,
                 on_ground,
             });
+            record_sent_movement_packet(
+                &mut move_pkt_state,
+                MOVE_PKT_POS_LOOK,
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            );
         } else if moved {
             let _ = params.to_net.0.send(ToNetMessage::PlayerMovePos {
                 x: pos.x as f64,
@@ -273,17 +344,41 @@ pub fn fixed_sim_tick_system(
                 z: pos.z as f64,
                 on_ground,
             });
+            record_sent_movement_packet(
+                &mut move_pkt_state,
+                MOVE_PKT_POS,
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            );
         } else if rotated {
             let _ = params.to_net.0.send(ToNetMessage::PlayerMoveLook {
                 yaw,
                 pitch,
                 on_ground,
             });
+            record_sent_movement_packet(
+                &mut move_pkt_state,
+                MOVE_PKT_LOOK,
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            );
         } else {
             let _ = params
                 .to_net
                 .0
                 .send(ToNetMessage::PlayerMoveGround { on_ground });
+            record_sent_movement_packet(
+                &mut move_pkt_state,
+                MOVE_PKT_GROUND,
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            );
         }
 
         if moved {
