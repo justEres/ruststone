@@ -151,11 +151,7 @@ impl Default for MovementSession {
 
 impl MovementSession {
     fn correction_effective_on_ground(correction: ServerCorrection) -> bool {
-        if correction.on_ground_known {
-            correction.on_ground
-        } else {
-            false
-        }
+        correction.on_ground
     }
 
     pub fn reset_all(&mut self) {
@@ -1049,12 +1045,12 @@ mod tests {
     }
 
     #[test]
-    fn correction_ack_uses_conservative_ground_when_server_omits_it() {
+    fn correction_ack_uses_inferred_ground_when_server_omits_it() {
         let mut session = MovementSession::default();
         let correction = sample_unknown_ground_correction();
         session.begin_correction(correction);
         let packet = session.make_ack_packet(correction);
-        assert!(!packet.on_ground);
-        assert!(!session.last_authoritative_state.on_ground);
+        assert!(packet.on_ground);
+        assert!(session.last_authoritative_state.on_ground);
     }
 }
