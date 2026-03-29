@@ -21,8 +21,8 @@ const MOVE_PKT_LOOK: u8 = 1;
 const MOVE_PKT_POS: u8 = 2;
 const MOVE_PKT_POS_LOOK: u8 = 3;
 
-const TELEPORT_COMMIT_HOLD_TICKS: u8 = 2;
-const TELEPORT_RESYNC_HOLD_TICKS: u8 = 1;
+const TELEPORT_COMMIT_HOLD_TICKS: u8 = 4;
+const TELEPORT_RESYNC_HOLD_TICKS: u8 = 2;
 const JOURNAL_LIMIT: usize = 32;
 const POS_DELTA_SQ_EPS: f32 = 0.0009;
 
@@ -456,25 +456,18 @@ impl MovementSession {
 
     pub fn pop_next_tx_ack_for_send(
         &mut self,
-        grim_sent_during_correction: bool,
+        _grim_sent_during_correction: bool,
     ) -> Option<TransactionAck> {
         let next = *self.pending_tx_acks.front()?;
         let is_grim_transaction = next.window_id == 0 && next.action_number < 0;
 
-        if matches!(self.phase, MovementPhase::AwaitingTeleportAck) && is_grim_transaction {
+        if !matches!(self.phase, MovementPhase::Normal | MovementPhase::Replay)
+            && is_grim_transaction
+        {
             debug!(
                 phase = ?self.phase,
                 action_number = next.action_number,
-                "movement-session: deferring grim transaction until teleport ack is sent"
-            );
-            return None;
-        }
-
-        if self.correction_active() && is_grim_transaction && grim_sent_during_correction {
-            debug!(
-                phase = ?self.phase,
-                action_number = next.action_number,
-                "movement-session: throttling grim transaction during correction window"
+                "movement-session: deferring grim transaction during correction window"
             );
             return None;
         }
@@ -787,18 +780,13 @@ pub fn movement_session_send_system(
     latency.last_sent = Some(Instant::now());
 }
 
-pub fn transaction_pacing_system(
-    app_state: Res<AppState>,
-    to_net: Res<ToNet>,
-    mut session: ResMut<MovementSession>,
-) {
+pub fn transaction_pacing_system(app_state: Res<AppState>, to_net: Res<ToNet>, mut session: ResMut<MovementSession>) {
     if !matches!(app_state.0, ApplicationState::Connected) {
         session.pending_tx_acks.clear();
         return;
     }
 
-    let grim_sent_during_correction = false;
-    while let Some(ack) = session.pop_next_tx_ack_for_send(grim_sent_during_correction) {
+    while let Some(ack) = session.pop_next_tx_ack_for_send(false) {
         let is_grim_transaction = ack.window_id == 0 && ack.action_number < 0;
         let _ = to_net.0.send(ToNetMessage::ConfirmTransaction {
             id: ack.window_id,
@@ -904,8 +892,38 @@ mod tests {
             },
             true
         ).is_none());
-        let packet = session.plan_movement_packet(
+        assert!(session.plan_movement_packet(
             5,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        ).is_none());
+        assert!(session.plan_movement_packet(
+            6,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        ).is_none());
+        assert!(session.plan_movement_packet(
+            7,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        ).is_none());
+        let packet = session.plan_movement_packet(
+            8,
             MovementObservation {
                 pos: Vec3::new(2.0, 64.0, 2.0),
                 yaw: 10.0,
@@ -935,8 +953,69 @@ mod tests {
         session.queue_transaction_ack(0, -1, true);
         session.queue_transaction_ack(0, -2, true);
         let first = session.pop_next_tx_ack_for_send(false);
-        let second = session.pop_next_tx_ack_for_send(true);
+        assert!(first.is_none());
+
+        let _ = session.plan_movement_packet(
+            2,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let _ = session.plan_movement_packet(
+            3,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let _ = session.plan_movement_packet(
+            4,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let _ = session.plan_movement_packet(
+            5,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let _ = session.plan_movement_packet(
+            6,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let _ = session.plan_movement_packet(
+            7,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        let first = session.pop_next_tx_ack_for_send(false);
         assert_eq!(first.map(|ack| ack.action_number), Some(-1));
-        assert!(second.is_none());
     }
 }
