@@ -113,11 +113,19 @@ pub fn inventory_transaction_ack_system(
     correction_guard: Res<CorrectionLoopGuard>,
     mut inventory: ResMut<InventoryState>,
 ) {
-    let has_pending_teleport_ack = !correction_guard.pending_acks.is_empty();
-    for (id, action_number) in inventory.drain_confirm_acks() {
-        if has_pending_teleport_ack && id == 0 && action_number < 0 {
-            inventory.queue_confirm_ack(id, action_number);
-            continue;
+    let correction_active = !correction_guard.pending_acks.is_empty()
+        || correction_guard.force_full_pos_ticks > 0
+        || correction_guard.forced_pos_look.is_some();
+    let queued = inventory.drain_confirm_acks();
+    let mut sent_during_correction = false;
+    for (id, action_number) in queued {
+        let is_grim_transaction = id == 0 && action_number < 0;
+        if correction_active && is_grim_transaction {
+            if sent_during_correction {
+                inventory.queue_confirm_ack(id, action_number);
+                continue;
+            }
+            sent_during_correction = true;
         }
         let _ = to_net.0.send(ToNetMessage::ConfirmTransaction {
             id,
