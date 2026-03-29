@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::thread;
 
 use rs_protocol::protocol::packet::Packet;
@@ -118,9 +119,15 @@ fn run_connected_session(
 
     let mut current_movement_epoch: u64 = 0;
     let mut send_seq: u64 = 0;
+    let mut correction_hold_active = false;
+    let mut deferred_outbound = VecDeque::<ToNetMessage>::new();
     loop {
         match pkt_rx.try_recv() {
             Ok(Ok(pkt)) => {
+                if is_clientbound_position_correction(&pkt) {
+                    correction_hold_active = true;
+                    info!("Entering outbound hold for clientbound correction packet");
+                }
                 handle_packet::handle_packet(pkt, to_main, conn, requested_view_distance);
                 continue;
             }
@@ -145,13 +152,39 @@ fn run_connected_session(
                     batch.push(next);
                 }
 
+                if correction_hold_active {
+                    let saw_barrier = batch
+                        .iter()
+                        .any(|msg| matches!(msg, ToNetMessage::MovementEpochBarrier { .. }));
+                    if !saw_barrier {
+                        deferred_outbound.extend(batch);
+                        continue;
+                    }
+                }
+
+                if !deferred_outbound.is_empty() {
+                    let mut combined = deferred_outbound.drain(..).collect::<Vec<_>>();
+                    combined.extend(batch);
+                    batch = combined;
+                }
+
                 let mut batch_epoch = current_movement_epoch;
                 for msg in &batch {
                     if let ToNetMessage::MovementEpochBarrier { epoch } = msg {
                         batch_epoch = batch_epoch.max(*epoch);
                     }
                 }
+                let saw_barrier = batch
+                    .iter()
+                    .any(|msg| matches!(msg, ToNetMessage::MovementEpochBarrier { .. }));
                 current_movement_epoch = batch_epoch;
+                if saw_barrier {
+                    correction_hold_active = false;
+                    info!(
+                        current_movement_epoch,
+                        "Leaving outbound hold after correction epoch barrier"
+                    );
+                }
 
                 for msg in batch {
                     match msg {
@@ -255,6 +288,10 @@ fn run_connected_session(
             recv(pkt_rx) -> incoming => {
                 match incoming {
                     Ok(Ok(pkt)) => {
+                        if is_clientbound_position_correction(&pkt) {
+                            correction_hold_active = true;
+                            info!("Entering outbound hold for clientbound correction packet");
+                        }
                         handle_packet::handle_packet(pkt, to_main, conn, requested_view_distance)
                     }
                     Ok(Err(err)) => {
@@ -268,6 +305,19 @@ fn run_connected_session(
             }
         }
     }
+}
+
+fn is_clientbound_position_correction(pkt: &Packet) -> bool {
+    matches!(
+        pkt,
+        Packet::TeleportPlayer_WithConfirm(_)
+            | Packet::TeleportPlayer_NoConfirm(_)
+            | Packet::TeleportPlayer_OnGround(_)
+            | Packet::PlayerPosition(_)
+            | Packet::PlayerPosition_HeadY(_)
+            | Packet::PlayerPositionLook(_)
+            | Packet::PlayerPositionLook_HeadY(_)
+    )
 }
 
 fn read_packet_allow_visual_tolerance(conn: &mut Conn) -> Result<Option<Packet>, String> {
