@@ -18,6 +18,9 @@ pub fn fixed_sim_tick_system(
         movement_session.reset_runtime();
         action_state.jump_was_pressed = false;
         action_state.fly_toggle_timer = 0;
+        action_state.sent_sneaking = false;
+        action_state.sent_sprinting = false;
+        action_state.sim_sprinting = false;
         params.timings.fixed_tick_ms = timer.ms();
         return;
     }
@@ -76,7 +79,7 @@ pub fn fixed_sim_tick_system(
     let sprint_key_down = input_snapshot.sprint;
     let forward_strong = input_snapshot.forward >= SPRINT_FORWARD_THRESHOLD;
     let sprint_eligible = player_status.food > 6 || player_status.can_fly;
-    let mut sprinting_state = action_state.sprinting;
+    let mut sprinting_state = action_state.sim_sprinting;
     if !sprinting_state
         && sprint_key_down
         && forward_strong
@@ -91,6 +94,7 @@ pub fn fixed_sim_tick_system(
         sprinting_state = false;
     }
     input_snapshot.sprint = sprinting_state;
+    action_state.sim_sprinting = sprinting_state;
 
     sim_render.previous = sim_state.current;
     let next_state = if movement_session.consume_physics_hold() {
@@ -125,7 +129,12 @@ pub fn fixed_sim_tick_system(
         let current_sneak = input_snapshot.sneak;
         let current_sprint = effective_sprint(&input_snapshot);
 
-        if current_sneak != action_state.sneaking {
+        if movement_session.correction_active() {
+            params.timings.fixed_tick_ms = timer.ms();
+            return;
+        }
+
+        if current_sneak != action_state.sent_sneaking {
             let action_id = if current_sneak { 0 } else { 1 };
             if let Some(entity_id) = params.remote_entities.local_entity_id {
                 let _ = params.to_net.0.send(ToNetMessage::PlayerAction {
@@ -133,9 +142,9 @@ pub fn fixed_sim_tick_system(
                     action_id,
                 });
             }
-            action_state.sneaking = current_sneak;
+            action_state.sent_sneaking = current_sneak;
         }
-        if current_sprint != action_state.sprinting {
+        if current_sprint != action_state.sent_sprinting {
             let action_id = if current_sprint { 3 } else { 4 };
             if let Some(entity_id) = params.remote_entities.local_entity_id {
                 let _ = params.to_net.0.send(ToNetMessage::PlayerAction {
@@ -143,7 +152,7 @@ pub fn fixed_sim_tick_system(
                     action_id,
                 });
             }
-            action_state.sprinting = current_sprint;
+            action_state.sent_sprinting = current_sprint;
         }
     }
     params.timings.fixed_tick_ms = timer.ms();

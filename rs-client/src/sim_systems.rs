@@ -67,8 +67,9 @@ pub struct LatencyEstimate {
 
 #[derive(Default, Resource)]
 pub struct ActionState {
-    pub sneaking: bool,
-    pub sprinting: bool,
+    pub sent_sneaking: bool,
+    pub sent_sprinting: bool,
+    pub sim_sprinting: bool,
     pub jump_was_pressed: bool,
     pub fly_toggle_timer: u8,
 }

@@ -759,11 +759,7 @@ pub fn movement_session_send_system(
         pos: sim_state.current.pos,
         yaw,
         pitch,
-        on_ground: if session.force_poslook_ticks > 0 {
-            false
-        } else {
-            sim_state.current.on_ground
-        },
+        on_ground: sim_state.current.on_ground,
     };
     let chunk_loaded = has_loaded_player_chunk(&collision_map, sim_state.current.pos);
     let Some(packet) = session.plan_movement_packet(tick, obs, chunk_loaded) else {
