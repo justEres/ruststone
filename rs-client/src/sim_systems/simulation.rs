@@ -27,19 +27,34 @@ fn record_sent_movement_packet(
     move_pkt_state.last_sent_on_ground = on_ground;
 }
 
-fn is_duplicate_sent_pos_look(
-    move_pkt_state: &MovementPacketState,
+fn log_outgoing_movement_packet(
+    tick: u32,
+    source: &'static str,
+    kind: u8,
     pos: Vec3,
     yaw: f32,
     pitch: f32,
     on_ground: bool,
-) -> bool {
-    move_pkt_state.last_sent_initialized
-        && move_pkt_state.last_sent_kind == MOVE_PKT_POS_LOOK
-        && move_pkt_state.last_sent_on_ground == on_ground
-        && move_pkt_state.last_sent_pos.distance_squared(pos) <= 1.0e-12
-        && (move_pkt_state.last_sent_yaw_deg - yaw).abs() <= 1.0e-6
-        && (move_pkt_state.last_sent_pitch_deg - pitch).abs() <= 1.0e-6
+) {
+    let kind_name = match kind {
+        MOVE_PKT_GROUND => "ground",
+        MOVE_PKT_LOOK => "look",
+        MOVE_PKT_POS => "pos",
+        MOVE_PKT_POS_LOOK => "poslook",
+        _ => "unknown",
+    };
+    tracing::info!(
+        tick,
+        source,
+        kind = kind_name,
+        x = pos.x,
+        y = pos.y,
+        z = pos.z,
+        yaw,
+        pitch,
+        on_ground,
+        "Outgoing movement packet"
+    );
 }
 
 fn estimate_server_tick(
@@ -218,45 +233,36 @@ pub fn fixed_sim_tick_system(
 
     if matches!(app_state.0, ApplicationState::Connected) {
         if let Some((ack_pos, ack_yaw, ack_pitch, ack_on_ground)) =
-            correction_guard.pending_ack.take()
+            correction_guard.pending_acks.pop_front()
         {
-            if is_duplicate_sent_pos_look(
-                &move_pkt_state,
+            let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                x: ack_pos.x as f64,
+                y: ack_pos.y as f64,
+                z: ack_pos.z as f64,
+                yaw: ack_yaw,
+                pitch: ack_pitch,
+                on_ground: ack_on_ground,
+            });
+            log_outgoing_movement_packet(
+                tick,
+                "ack",
+                MOVE_PKT_POS_LOOK,
                 ack_pos,
                 ack_yaw,
                 ack_pitch,
                 ack_on_ground,
-            ) {
-                tracing::debug!(
-                    x = ack_pos.x,
-                    y = ack_pos.y,
-                    z = ack_pos.z,
-                    yaw = ack_yaw,
-                    pitch = ack_pitch,
-                    on_ground = ack_on_ground,
-                    "Suppressing duplicate correction ack movement packet"
-                );
-            } else {
-                let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
-                    x: ack_pos.x as f64,
-                    y: ack_pos.y as f64,
-                    z: ack_pos.z as f64,
-                    yaw: ack_yaw,
-                    pitch: ack_pitch,
-                    on_ground: ack_on_ground,
-                });
-                record_sent_movement_packet(
-                    &mut move_pkt_state,
-                    MOVE_PKT_POS_LOOK,
-                    ack_pos,
-                    ack_yaw,
-                    ack_pitch,
-                    ack_on_ground,
-                );
-                latency.last_sent = Some(Instant::now());
-                params.timings.fixed_tick_ms = timer.ms();
-                return;
-            }
+            );
+            record_sent_movement_packet(
+                &mut move_pkt_state,
+                MOVE_PKT_POS_LOOK,
+                ack_pos,
+                ack_yaw,
+                ack_pitch,
+                ack_on_ground,
+            );
+            latency.last_sent = Some(Instant::now());
+            params.timings.fixed_tick_ms = timer.ms();
+            return;
         }
         if correction_guard.skip_send_ticks > 0 {
             correction_guard.skip_send_ticks = correction_guard.skip_send_ticks.saturating_sub(1);
@@ -329,6 +335,7 @@ pub fn fixed_sim_tick_system(
                 pitch,
                 on_ground,
             });
+            log_outgoing_movement_packet(tick, "normal", MOVE_PKT_POS_LOOK, pos, yaw, pitch, on_ground);
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_POS_LOOK,
@@ -344,6 +351,7 @@ pub fn fixed_sim_tick_system(
                 z: pos.z as f64,
                 on_ground,
             });
+            log_outgoing_movement_packet(tick, "normal", MOVE_PKT_POS, pos, yaw, pitch, on_ground);
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_POS,
@@ -358,6 +366,7 @@ pub fn fixed_sim_tick_system(
                 pitch,
                 on_ground,
             });
+            log_outgoing_movement_packet(tick, "normal", MOVE_PKT_LOOK, pos, yaw, pitch, on_ground);
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_LOOK,
@@ -371,6 +380,7 @@ pub fn fixed_sim_tick_system(
                 .to_net
                 .0
                 .send(ToNetMessage::PlayerMoveGround { on_ground });
+            log_outgoing_movement_packet(tick, "normal", MOVE_PKT_GROUND, pos, yaw, pitch, on_ground);
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_GROUND,
@@ -609,7 +619,9 @@ pub fn net_event_apply_system(
         let resolved_pitch_deg = (-pitch.to_degrees()).clamp(-90.0, 90.0);
         let ack_yaw_deg = resolved_yaw_deg;
         let ack_pitch_deg = resolved_pitch_deg;
-        correction_guard.pending_ack = Some((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
+        correction_guard
+            .pending_acks
+            .push_back((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
         let latest_tick = sim_clock.tick.saturating_sub(1);
         let estimated_tick = latest_tick.saturating_sub(latency.one_way_ticks);

@@ -1,4 +1,5 @@
 use bevy::prelude::{Resource, Vec3};
+use std::collections::VecDeque;
 
 pub mod collision;
 pub mod movement;
@@ -90,7 +91,7 @@ pub struct DebugStats {
 #[derive(Debug, Default, Resource)]
 pub struct SimReady(pub bool);
 
-#[derive(Debug, Resource, Clone, Copy)]
+#[derive(Debug, Resource, Clone)]
 pub struct CorrectionLoopGuard {
     pub last_server_pos: Vec3,
     pub last_server_on_ground: bool,
@@ -98,7 +99,7 @@ pub struct CorrectionLoopGuard {
     pub skip_send_ticks: u32,
     pub force_full_pos_ticks: u32,
     pub skip_physics_ticks: u32,
-    pub pending_ack: Option<(Vec3, f32, f32, bool)>,
+    pub pending_acks: VecDeque<(Vec3, f32, f32, bool)>,
 }
 
 impl Default for CorrectionLoopGuard {
@@ -110,7 +111,7 @@ impl Default for CorrectionLoopGuard {
             skip_send_ticks: 0,
             force_full_pos_ticks: 0,
             skip_physics_ticks: 0,
-            pending_ack: None,
+            pending_acks: VecDeque::new(),
         }
     }
 }
