@@ -114,8 +114,7 @@ pub fn inventory_transaction_ack_system(
     mut inventory: ResMut<InventoryState>,
 ) {
     let correction_active = !correction_guard.pending_acks.is_empty()
-        || correction_guard.force_full_pos_ticks > 0
-        || correction_guard.forced_pos_look.is_some();
+        || correction_guard.skip_physics_ticks > 0;
     let queued = inventory.drain_confirm_acks();
     let mut sent_during_correction = false;
     for (id, action_number) in queued {
