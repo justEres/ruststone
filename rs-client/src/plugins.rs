@@ -114,7 +114,14 @@ pub struct ClientNetPlugin;
 
 impl Plugin for ClientNetPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, message_handler::handle_messages);
+        app.add_systems(
+            Update,
+            (
+                message_handler::handle_messages,
+                movement_session::movement_session_receive_system,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -243,7 +250,6 @@ impl Plugin for ClientSimPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    movement_session::movement_session_receive_system,
                     sim_systems::fixed_sim_tick_system,
                     movement_session::movement_session_send_system,
                     movement_session::transaction_pacing_system,
@@ -283,7 +289,7 @@ impl Plugin for ClientTimingPlugin {
             .add_systems(
                 FixedUpdate,
                 sim_systems::fixed_update_timing_start
-                    .before(movement_session::movement_session_receive_system),
+                    .before(sim_systems::fixed_sim_tick_system),
             )
             .add_systems(
                 FixedUpdate,
