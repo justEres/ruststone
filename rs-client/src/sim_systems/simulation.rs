@@ -1,5 +1,11 @@
 use super::*;
 
+fn has_loaded_player_chunk(collision_map: &WorldCollisionMap, pos: Vec3) -> bool {
+    let chunk_x = (pos.x.floor() as i32).div_euclid(16);
+    let chunk_z = (pos.z.floor() as i32).div_euclid(16);
+    collision_map.has_chunk(chunk_x, chunk_z)
+}
+
 fn estimate_server_tick(
     history: &PredictionHistory,
     latest_tick: u32,
@@ -194,6 +200,10 @@ pub fn fixed_sim_tick_system(
         }
         if correction_guard.skip_send_ticks > 0 {
             correction_guard.skip_send_ticks = correction_guard.skip_send_ticks.saturating_sub(1);
+            params.timings.fixed_tick_ms = timer.ms();
+            return;
+        }
+        if !has_loaded_player_chunk(&collision_map, sim_state.current.pos) {
             params.timings.fixed_tick_ms = timer.ms();
             return;
         }

@@ -30,6 +30,7 @@ const FLY_VERTICAL_DAMPING: f32 = 0.6;
 const FLY_SPRINT_MULT: f32 = 2.0;
 const SOUL_SAND_SLOWDOWN: f32 = 0.4;
 const SPRINT_FORWARD_THRESHOLD: f32 = 0.8;
+const MOVE_INPUT_DAMPING: f32 = 0.98;
 
 pub struct WorldCollision<'a> {
     map: Option<&'a WorldCollisionMap>,
@@ -1299,10 +1300,7 @@ pub fn simulate_tick(
         let fly_speed = input.flying_speed.max(0.0);
         let fly_move_speed = fly_speed * if sprinting { FLY_SPRINT_MULT } else { 1.0 };
 
-        let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
-        if wish.length_squared() > 1.0 {
-            wish = wish.normalize();
-        }
+        let wish = damped_move_input(input.strafe, input.forward, false);
 
         move_flying(&mut state.vel, wish.x, wish.z, fly_move_speed, state.yaw);
 
@@ -1342,14 +1340,7 @@ pub fn simulate_tick(
         }
     }
 
-    let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
-    if wish.length_squared() > 1.0 {
-        wish = wish.normalize();
-    }
-    if input.sneak {
-        wish.x *= SNEAK_INPUT_SCALE;
-        wish.z *= SNEAK_INPUT_SCALE;
-    }
+    let wish = damped_move_input(input.strafe, input.forward, input.sneak);
 
     let move_speed =
         BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
@@ -1435,10 +1426,7 @@ fn simulate_tick_unloaded_chunk(mut state: PlayerSimState, input: &InputState) -
         let fly_speed = input.flying_speed.max(0.0);
         let fly_move_speed = fly_speed * if sprinting { FLY_SPRINT_MULT } else { 1.0 };
 
-        let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
-        if wish.length_squared() > 1.0 {
-            wish = wish.normalize();
-        }
+        let wish = damped_move_input(input.strafe, input.forward, false);
 
         move_flying(&mut state.vel, wish.x, wish.z, fly_move_speed, state.yaw);
 
@@ -1474,14 +1462,7 @@ fn simulate_tick_unloaded_chunk(mut state: PlayerSimState, input: &InputState) -
         }
     }
 
-    let mut wish = Vec3::new(input.strafe, 0.0, input.forward);
-    if wish.length_squared() > 1.0 {
-        wish = wish.normalize();
-    }
-    if input.sneak {
-        wish.x *= SNEAK_INPUT_SCALE;
-        wish.z *= SNEAK_INPUT_SCALE;
-    }
+    let wish = damped_move_input(input.strafe, input.forward, input.sneak);
 
     let move_speed =
         BASE_MOVE_SPEED * input.speed_multiplier.max(0.0) * if sprinting { 1.3 } else { 1.0 };
@@ -1526,6 +1507,20 @@ fn move_flying(vel: &mut Vec3, strafe: f32, forward: f32, friction: f32, yaw: f3
     let dir = right_dir * strafe + forward_dir * forward;
     vel.x += dir.x;
     vel.z += dir.z;
+}
+
+fn damped_move_input(strafe: f32, forward: f32, sneak: bool) -> Vec3 {
+    let mut wish = Vec3::new(strafe, 0.0, forward);
+    if wish.length_squared() > 1.0 {
+        wish = wish.normalize();
+    }
+    if sneak {
+        wish.x *= SNEAK_INPUT_SCALE;
+        wish.z *= SNEAK_INPUT_SCALE;
+    }
+    wish.x *= MOVE_INPUT_DAMPING;
+    wish.z *= MOVE_INPUT_DAMPING;
+    wish
 }
 
 pub fn effective_sprint(input: &InputState) -> bool {
