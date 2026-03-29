@@ -619,52 +619,30 @@ pub fn net_event_apply_system(
         let resolved_pitch_deg = (-pitch.to_degrees()).clamp(-90.0, 90.0);
         let ack_yaw_deg = resolved_yaw_deg;
         let ack_pitch_deg = resolved_pitch_deg;
+        correction_guard.pending_acks.clear();
         correction_guard
             .pending_acks
             .push_back((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
-        let latest_tick = sim_clock.tick.saturating_sub(1);
-        let estimated_tick = latest_tick.saturating_sub(latency.one_way_ticks);
-        let (server_tick, alignment_delta) =
-            estimate_server_tick(&history, latest_tick, estimated_tick, &server_state);
-        debug.last_tick_alignment_delta = alignment_delta;
-        let previous_state = sim_state.current;
-        let reconcile_result = reconcile(
-            &mut history.0,
-            &world,
-            server_tick,
-            server_state,
-            latest_tick,
-            &mut sim_state.current,
-        );
-
-        if let Some(result) = reconcile_result {
-            if result.hard_teleport {
-                sim_render.previous = server_state;
-                sim_state.current = server_state;
-                history.0 = PredictionHistory::default().0;
-                visual_offset.0 = Vec3::ZERO;
-            } else {
-                sim_render.previous = previous_state;
-                visual_offset.0 += previous_state.pos - sim_state.current.pos;
-            }
-            debug.last_correction = result.correction.length();
-            debug.last_replay = result.replayed_ticks;
-            debug.last_velocity_correction = result.velocity_correction;
-            debug.last_reconciled_server_tick = Some(server_tick);
-        } else {
-            sim_render.previous = sim_state.current;
-            debug.last_correction = 0.0;
-            debug.last_replay = 0;
-            debug.last_velocity_correction = 0.0;
-            debug.last_reconciled_server_tick = Some(server_tick);
-        }
+        // Clientbound player position packets are authoritative teleports/setbacks.
+        // Replaying buffered movement on top of them causes immediate divergence and
+        // repeated anticheat setbacks, especially with Grim.
+        let correction = pos - sim_state.current.pos;
+        sim_render.previous = server_state;
+        sim_state.current = server_state;
+        history.0 = PredictionHistory::default().0;
+        visual_offset.0 = Vec3::ZERO;
+        debug.last_correction = correction.length();
+        debug.last_replay = 0;
+        debug.last_velocity_correction = 0.0;
+        debug.last_reconciled_server_tick = None;
         sim_ready.0 = true;
         move_pkt_state.initialized = true;
         move_pkt_state.last_pos = sim_state.current.pos;
         move_pkt_state.last_yaw_deg = ack_yaw_deg;
         move_pkt_state.last_pitch_deg = ack_pitch_deg;
         move_pkt_state.ticks_since_pos = 0;
+        correction_guard.skip_physics_ticks = 1;
         correction_guard.skip_send_ticks = 0;
     }
     timings.net_apply_ms = timer.ms();
