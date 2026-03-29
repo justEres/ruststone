@@ -28,6 +28,7 @@ pub(super) fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
             );
         }
         ToNetMessage::PlayerMovePosLook {
+            epoch: _,
             x,
             y,
             z,
@@ -46,7 +47,13 @@ pub(super) fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 },
             );
         }
-        ToNetMessage::PlayerMovePos { x, y, z, on_ground } => {
+        ToNetMessage::PlayerMovePos {
+            epoch: _,
+            x,
+            y,
+            z,
+            on_ground,
+        } => {
             let _ = conn.write_packet(
                 rs_protocol::protocol::packet::play::serverbound::PlayerPosition {
                     x,
@@ -57,6 +64,7 @@ pub(super) fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
             );
         }
         ToNetMessage::PlayerMoveLook {
+            epoch: _,
             yaw,
             pitch,
             on_ground,
@@ -69,11 +77,15 @@ pub(super) fn send_session_message(conn: &mut Conn, msg: ToNetMessage) {
                 },
             );
         }
-        ToNetMessage::PlayerMoveGround { on_ground } => {
+        ToNetMessage::PlayerMoveGround {
+            epoch: _,
+            on_ground,
+        } => {
             let _ = conn.write_packet(rs_protocol::protocol::packet::play::serverbound::Player {
                 on_ground,
             });
         }
+        ToNetMessage::MovementEpochBarrier { epoch: _ } => {}
         ToNetMessage::Respawn => {
             let _ = rs_protocol::protocol::packet::send_client_status(
                 conn,

@@ -125,6 +125,7 @@ pub struct MovementSession {
     pub repeated_correction_count: u32,
     pub force_poslook_ticks: u8,
     pub blocked_normal_send_tick: Option<u32>,
+    pub movement_epoch: u64,
 }
 
 impl Default for MovementSession {
@@ -147,6 +148,7 @@ impl Default for MovementSession {
             repeated_correction_count: 0,
             force_poslook_ticks: 0,
             blocked_normal_send_tick: None,
+            movement_epoch: 0,
         }
     }
 }
@@ -180,6 +182,7 @@ impl MovementSession {
         self.repeated_correction_count = 0;
         self.force_poslook_ticks = 0;
         self.blocked_normal_send_tick = None;
+        self.movement_epoch = 0;
     }
 
     pub fn queue_transaction_ack(&mut self, window_id: u8, action_number: i16, accepted: bool) {
@@ -253,6 +256,7 @@ impl MovementSession {
         self.pending_server_corrections.clear();
         self.physics_hold_ticks = 1;
         self.phase_ticks_remaining = 0;
+        self.movement_epoch = self.movement_epoch.wrapping_add(1);
         self.sync_baseline(
             correction.sim_pos,
             correction.packet_yaw_deg,
@@ -667,9 +671,13 @@ pub fn movement_session_receive_system(
                 };
                 let correction_delta = pos - sim_state.current.pos;
                 session.begin_correction(correction);
+                let _ = to_net.0.send(ToNetMessage::MovementEpochBarrier {
+                    epoch: session.movement_epoch,
+                });
                 let ack_packet = session.make_ack_packet(correction);
                 let tick = sim_clock.tick;
                 let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                    epoch: session.movement_epoch,
                     x: ack_packet.pos_f64.0,
                     y: ack_packet.pos_f64.1,
                     z: ack_packet.pos_f64.2,
@@ -817,10 +825,14 @@ pub fn movement_session_send_system(
         MovementPacketKind::Ground => {
             let _ = to_net
                 .0
-                .send(ToNetMessage::PlayerMoveGround { on_ground: packet.on_ground });
+                .send(ToNetMessage::PlayerMoveGround {
+                    epoch: session.movement_epoch,
+                    on_ground: packet.on_ground,
+                });
         }
         MovementPacketKind::Look => {
             let _ = to_net.0.send(ToNetMessage::PlayerMoveLook {
+                epoch: session.movement_epoch,
                 yaw: packet.yaw,
                 pitch: packet.pitch,
                 on_ground: packet.on_ground,
@@ -828,6 +840,7 @@ pub fn movement_session_send_system(
         }
         MovementPacketKind::Pos => {
             let _ = to_net.0.send(ToNetMessage::PlayerMovePos {
+                epoch: session.movement_epoch,
                 x: packet.pos_f64.0,
                 y: packet.pos_f64.1,
                 z: packet.pos_f64.2,
@@ -836,6 +849,7 @@ pub fn movement_session_send_system(
         }
         MovementPacketKind::PosLook => {
             let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                epoch: session.movement_epoch,
                 x: packet.pos_f64.0,
                 y: packet.pos_f64.1,
                 z: packet.pos_f64.2,

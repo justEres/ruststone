@@ -38,7 +38,11 @@ pub enum ToNetMessage {
         text: String,
     },
     Respawn,
+    MovementEpochBarrier {
+        epoch: u64,
+    },
     PlayerMovePosLook {
+        epoch: u64,
         x: f64,
         y: f64,
         z: f64,
@@ -47,17 +51,20 @@ pub enum ToNetMessage {
         on_ground: bool,
     },
     PlayerMovePos {
+        epoch: u64,
         x: f64,
         y: f64,
         z: f64,
         on_ground: bool,
     },
     PlayerMoveLook {
+        epoch: u64,
         yaw: f32,
         pitch: f32,
         on_ground: bool,
     },
     PlayerMoveGround {
+        epoch: u64,
         on_ground: bool,
     },
     PlayerAction {

@@ -116,6 +116,7 @@ fn run_connected_session(
         }
     });
 
+    let mut current_movement_epoch: u64 = 0;
     loop {
         match pkt_rx.try_recv() {
             Ok(Ok(pkt)) => {
@@ -138,18 +139,46 @@ fn run_connected_session(
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
                     return true;
                 };
-                match msg {
-                    ToNetMessage::Disconnect => {
-                        info!("Received disconnect message");
-                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
-                        return false;
+                let mut batch = vec![msg];
+                while let Ok(next) = from_main.try_recv() {
+                    batch.push(next);
+                }
+
+                let mut batch_epoch = current_movement_epoch;
+                for msg in &batch {
+                    if let ToNetMessage::MovementEpochBarrier { epoch } = msg {
+                        batch_epoch = batch_epoch.max(*epoch);
                     }
-                    ToNetMessage::Shutdown => {
-                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
-                        return true;
+                }
+                current_movement_epoch = batch_epoch;
+
+                for msg in batch {
+                    match msg {
+                        ToNetMessage::Disconnect => {
+                            info!("Received disconnect message");
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
+                            return false;
+                        }
+                        ToNetMessage::Shutdown => {
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| conn.close()));
+                            return true;
+                        }
+                        ToNetMessage::Connect { .. } => {}
+                        ToNetMessage::MovementEpochBarrier { .. } => {}
+                        ToNetMessage::PlayerMovePosLook { epoch, .. }
+                        | ToNetMessage::PlayerMovePos { epoch, .. }
+                        | ToNetMessage::PlayerMoveLook { epoch, .. }
+                        | ToNetMessage::PlayerMoveGround { epoch, .. }
+                            if epoch < current_movement_epoch =>
+                        {
+                            warn!(
+                                movement_epoch = epoch,
+                                current_movement_epoch,
+                                "Dropping stale outbound movement packet"
+                            );
+                        }
+                        other => outbound::send_session_message(conn, other),
                     }
-                    ToNetMessage::Connect { .. } => {}
-                    other => outbound::send_session_message(conn, other),
                 }
             }
             recv(pkt_rx) -> incoming => {
