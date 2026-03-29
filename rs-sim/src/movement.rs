@@ -1494,13 +1494,15 @@ fn simulate_tick_unloaded_chunk(mut state: PlayerSimState, input: &InputState) -
     };
     move_flying(&mut state.vel, wish.x, wish.z, accel, state.yaw);
 
-    state.pos += state.vel;
+    state.pos.x += state.vel.x;
+    state.pos.z += state.vel.z;
+    // Keep the player suspended until the current chunk exists locally.
+    // This avoids client-side free-fall during login / chunk-stream startup.
+    state.vel.y = 0.0;
     state.on_ground = false;
     state.collided_horizontally = false;
-    state.vel.y += GRAVITY;
     state.vel.x *= AIR_DRAG;
     state.vel.z *= AIR_DRAG;
-    state.vel.y *= AIR_DRAG;
     state
 }
 

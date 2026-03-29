@@ -787,6 +787,14 @@ fn missing_chunk_does_not_hard_stop_player_motion() {
         next.pos.x > prev.pos.x,
         "expected motion through missing chunk"
     );
+    assert_eq!(
+        next.pos.y, prev.pos.y,
+        "missing chunk fallback should not advance fall position"
+    );
+    assert_eq!(
+        next.vel.y, 0.0,
+        "missing chunk fallback should suppress gravity until chunk load"
+    );
     assert!(
         !next.on_ground,
         "missing chunk fallback should not pin player"
