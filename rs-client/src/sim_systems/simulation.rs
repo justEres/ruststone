@@ -311,7 +311,10 @@ pub fn fixed_sim_tick_system(
 
         const POS_DELTA_SQ_EPS: f32 = 0.0009;
 
-        correction_guard.force_full_pos_ticks = 0;
+        let force_full_pos = correction_guard.force_full_pos_ticks > 0;
+        if correction_guard.force_full_pos_ticks > 0 {
+            correction_guard.force_full_pos_ticks -= 1;
+        }
 
         let moved = if move_pkt_state.initialized {
             pos.distance_squared(move_pkt_state.last_pos) > POS_DELTA_SQ_EPS
@@ -326,7 +329,7 @@ pub fn fixed_sim_tick_system(
             true
         };
 
-        if moved && rotated {
+        if force_full_pos || (moved && rotated) {
             let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
                 x: pos.x as f64,
                 y: pos.y as f64,
@@ -613,7 +616,6 @@ pub fn net_event_apply_system(
         };
         correction_guard.last_server_pos = pos;
         correction_guard.last_server_on_ground = on_ground;
-        correction_guard.force_full_pos_ticks = 0;
         correction_guard.skip_physics_ticks = 0;
 
         let resolved_yaw_deg = wrap_degrees((std::f32::consts::PI - yaw).to_degrees());
@@ -643,6 +645,7 @@ pub fn net_event_apply_system(
         move_pkt_state.last_yaw_deg = ack_yaw_deg;
         move_pkt_state.last_pitch_deg = ack_pitch_deg;
         move_pkt_state.ticks_since_pos = 0;
+        correction_guard.force_full_pos_ticks = 5;
         correction_guard.skip_physics_ticks = 1;
         correction_guard.skip_send_ticks = 0;
     }
