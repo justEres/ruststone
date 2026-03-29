@@ -168,11 +168,6 @@ impl MovementSession {
         self.force_poslook_after_correction = false;
     }
 
-    pub fn queue_server_correction(&mut self, correction: ServerCorrection) {
-        self.pending_server_corrections.clear();
-        self.pending_server_corrections.push_back(correction);
-    }
-
     pub fn queue_transaction_ack(&mut self, window_id: u8, action_number: i16, accepted: bool) {
         self.pending_tx_acks.push_back(TransactionAck {
             window_id,
@@ -572,6 +567,7 @@ pub fn movement_session_receive_system(
     mut sim_ready: ResMut<SimReady>,
     collision_map: Res<WorldCollisionMap>,
     sim_clock: Res<SimClock>,
+    to_net: Res<ToNet>,
     mut timings: ResMut<PerfTimings>,
 ) {
     let timer = Timing::start();
@@ -618,7 +614,38 @@ pub fn movement_session_receive_system(
                     pitch,
                 };
                 let correction_delta = pos - sim_state.current.pos;
-                session.queue_server_correction(correction);
+                session.begin_correction(correction);
+                let ack_packet = session.make_ack_packet(correction);
+                let tick = sim_clock.tick;
+                let _ = to_net.0.send(ToNetMessage::PlayerMovePosLook {
+                    x: ack_packet.pos_f64.0,
+                    y: ack_packet.pos_f64.1,
+                    z: ack_packet.pos_f64.2,
+                    yaw: ack_packet.yaw,
+                    pitch: ack_packet.pitch,
+                    on_ground: ack_packet.on_ground,
+                });
+                session.phase_ticks_remaining = TELEPORT_COMMIT_HOLD_TICKS;
+                session.transition_to(
+                    MovementPhase::AwaitingTeleportCommit,
+                    "teleport ack sent immediately",
+                );
+                session.record_packet(tick, ack_packet);
+                tracing::info!(
+                    tick,
+                    source = source_name(ack_packet.source),
+                    kind = kind_name(ack_packet.kind),
+                    wire_kind = kind_to_wire(ack_packet.kind),
+                    x = ack_packet.pos_f64.0,
+                    y = ack_packet.pos_f64.1,
+                    z = ack_packet.pos_f64.2,
+                    yaw = ack_packet.yaw,
+                    pitch = ack_packet.pitch,
+                    on_ground = ack_packet.on_ground,
+                    phase = ?session.phase,
+                    "Outgoing movement packet"
+                );
+                latency.last_sent = Some(Instant::now());
                 sim_render.previous = server_state;
                 sim_state.current = server_state;
                 history.0 = PredictionHistory::default().0;
@@ -684,10 +711,6 @@ pub fn movement_session_receive_system(
                 }
             }
         }
-    }
-
-    if let Some(correction) = session.pending_server_corrections.back().copied() {
-        session.begin_correction(correction);
     }
 
     timings.net_apply_ms = timer.ms();
