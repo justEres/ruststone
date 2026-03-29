@@ -117,6 +117,21 @@ fn run_connected_session(
     });
 
     loop {
+        match pkt_rx.try_recv() {
+            Ok(Ok(pkt)) => {
+                handle_packet::handle_packet(pkt, to_main, conn, requested_view_distance);
+                continue;
+            }
+            Ok(Err(err)) => {
+                warn!("Error reading packet: {}", err);
+                return false;
+            }
+            Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                return false;
+            }
+            Err(crossbeam::channel::TryRecvError::Empty) => {}
+        }
+
         crossbeam::select! {
             recv(from_main) -> msg => {
                 let Ok(msg) = msg else {
