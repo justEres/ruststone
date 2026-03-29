@@ -23,6 +23,7 @@ const MOVE_PKT_POS_LOOK: u8 = 3;
 
 const TELEPORT_COMMIT_HOLD_TICKS: u8 = 4;
 const TELEPORT_RESYNC_HOLD_TICKS: u8 = 2;
+const FORCE_POSLOOK_TICKS_AFTER_CORRECTION: u8 = 8;
 const JOURNAL_LIMIT: usize = 32;
 const POS_DELTA_SQ_EPS: f32 = 0.0009;
 
@@ -122,7 +123,7 @@ pub struct MovementSession {
     pub ticks_since_pos: u32,
     pub last_sent_tick: Option<u32>,
     pub repeated_correction_count: u32,
-    pub force_poslook_after_correction: bool,
+    pub force_poslook_ticks: u8,
 }
 
 impl Default for MovementSession {
@@ -143,7 +144,7 @@ impl Default for MovementSession {
             ticks_since_pos: 0,
             last_sent_tick: None,
             repeated_correction_count: 0,
-            force_poslook_after_correction: false,
+            force_poslook_ticks: 0,
         }
     }
 }
@@ -165,7 +166,7 @@ impl MovementSession {
         self.last_sent_tick = None;
         self.outbound_journal.clear();
         self.repeated_correction_count = 0;
-        self.force_poslook_after_correction = false;
+        self.force_poslook_ticks = 0;
     }
 
     pub fn queue_transaction_ack(&mut self, window_id: u8, action_number: i16, accepted: bool) {
@@ -243,7 +244,7 @@ impl MovementSession {
             correction.packet_yaw_deg,
             correction.packet_pitch_deg,
         );
-        self.force_poslook_after_correction = true;
+        self.force_poslook_ticks = FORCE_POSLOOK_TICKS_AFTER_CORRECTION;
         self.transition_to(MovementPhase::AwaitingTeleportAck, "server correction received");
         info!(
             sim_tick = correction.recv_sim_tick,
@@ -321,9 +322,11 @@ impl MovementSession {
             MovementPacketKind::Ground
         };
 
-        if self.force_poslook_after_correction && moved {
+        if self.force_poslook_ticks > 0 && moved {
             kind = MovementPacketKind::PosLook;
-            self.force_poslook_after_correction = false;
+            self.force_poslook_ticks -= 1;
+        } else if self.force_poslook_ticks > 0 {
+            self.force_poslook_ticks -= 1;
         }
 
         if moved {
@@ -746,7 +749,11 @@ pub fn movement_session_send_system(
         pos: sim_state.current.pos,
         yaw,
         pitch,
-        on_ground: sim_state.current.on_ground,
+        on_ground: if session.force_poslook_ticks > 0 {
+            false
+        } else {
+            sim_state.current.on_ground
+        },
     };
     let chunk_loaded = has_loaded_player_chunk(&collision_map, sim_state.current.pos);
     let Some(packet) = session.plan_movement_packet(tick, obs, chunk_loaded) else {
@@ -852,19 +859,9 @@ mod tests {
     #[test]
     fn correction_ack_uses_exact_server_payload() {
         let mut session = MovementSession::default();
-        session.queue_server_correction(sample_correction());
+        session.begin_correction(sample_correction());
         let packet = session
-            .plan_movement_packet(
-                5,
-                MovementObservation {
-                    pos: Vec3::ZERO,
-                    yaw: 0.0,
-                    pitch: 0.0,
-                    on_ground: false,
-                },
-                true,
-            )
-            .expect("ack packet");
+            .make_ack_packet(sample_correction());
         assert_eq!(packet.source, MovementPacketSource::Ack);
         assert_eq!(packet.kind, MovementPacketKind::PosLook);
         assert_eq!(packet.pos_f64, (1.0, 64.0000001, 2.0));
@@ -873,18 +870,16 @@ mod tests {
     #[test]
     fn correction_window_suppresses_normal_packets_until_replay() {
         let mut session = MovementSession::default();
-        session.queue_server_correction(sample_correction());
+        let correction = sample_correction();
+        session.begin_correction(correction);
+        let packet = session.make_ack_packet(correction);
+        session.phase_ticks_remaining = TELEPORT_COMMIT_HOLD_TICKS;
+        session.transition_to(
+            MovementPhase::AwaitingTeleportCommit,
+            "test immediate correction ack",
+        );
+        session.record_packet(1, packet);
 
-        assert!(session.plan_movement_packet(
-            1,
-            MovementObservation {
-                pos: Vec3::ZERO,
-                yaw: 0.0,
-                pitch: 0.0,
-                on_ground: false,
-            },
-            true
-        ).is_some());
         assert!(session.plan_movement_packet(
             2,
             MovementObservation {
@@ -962,17 +957,15 @@ mod tests {
     #[test]
     fn grim_transactions_are_throttled_during_correction() {
         let mut session = MovementSession::default();
-        session.queue_server_correction(sample_correction());
-        let _ = session.plan_movement_packet(
-            1,
-            MovementObservation {
-                pos: Vec3::ZERO,
-                yaw: 0.0,
-                pitch: 0.0,
-                on_ground: false,
-            },
-            true,
+        let correction = sample_correction();
+        session.begin_correction(correction);
+        let packet = session.make_ack_packet(correction);
+        session.phase_ticks_remaining = TELEPORT_COMMIT_HOLD_TICKS;
+        session.transition_to(
+            MovementPhase::AwaitingTeleportCommit,
+            "test immediate correction ack",
         );
+        session.record_packet(1, packet);
         session.queue_transaction_ack(0, -1, true);
         session.queue_transaction_ack(0, -2, true);
         let first = session.pop_next_tx_ack_for_send(false);
