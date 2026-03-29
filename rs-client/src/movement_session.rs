@@ -124,6 +124,7 @@ pub struct MovementSession {
     pub last_sent_tick: Option<u32>,
     pub repeated_correction_count: u32,
     pub force_poslook_ticks: u8,
+    pub blocked_normal_send_tick: Option<u32>,
 }
 
 impl Default for MovementSession {
@@ -145,6 +146,7 @@ impl Default for MovementSession {
             last_sent_tick: None,
             repeated_correction_count: 0,
             force_poslook_ticks: 0,
+            blocked_normal_send_tick: None,
         }
     }
 }
@@ -177,6 +179,7 @@ impl MovementSession {
         self.outbound_journal.clear();
         self.repeated_correction_count = 0;
         self.force_poslook_ticks = 0;
+        self.blocked_normal_send_tick = None;
     }
 
     pub fn queue_transaction_ack(&mut self, window_id: u8, action_number: i16, accepted: bool) {
@@ -256,6 +259,7 @@ impl MovementSession {
             correction.packet_pitch_deg,
         );
         self.force_poslook_ticks = FORCE_POSLOOK_TICKS_AFTER_CORRECTION;
+        self.blocked_normal_send_tick = Some(correction.recv_sim_tick);
         self.transition_to(MovementPhase::AwaitingTeleportAck, "server correction received");
         info!(
             sim_tick = correction.recv_sim_tick,
@@ -456,6 +460,15 @@ impl MovementSession {
             return None;
         }
 
+        if self.blocked_normal_send_tick == Some(tick) {
+            warn!(
+                tick,
+                phase = ?self.phase,
+                "movement-session: suppressing normal movement for correction tick"
+            );
+            return None;
+        }
+
         if !chunk_loaded {
             debug!(
                 tick,
@@ -469,6 +482,7 @@ impl MovementSession {
         self.record_packet(tick, packet);
         if matches!(self.phase, MovementPhase::Replay) {
             self.active_correction = None;
+            self.blocked_normal_send_tick = None;
             self.transition_to(MovementPhase::Normal, "replay send resumed normal flow");
         }
         Some(packet)
@@ -1096,6 +1110,37 @@ mod tests {
         );
         assert!(packet.is_some());
         assert_eq!(session.phase, MovementPhase::Normal);
+    }
+
+    #[test]
+    fn correction_blocks_normal_send_for_same_tick() {
+        let mut session = MovementSession::default();
+        let correction = sample_correction();
+        session.begin_correction(correction);
+        let packet = session.plan_movement_packet(
+            correction.recv_sim_tick,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        assert!(packet.is_some());
+        assert_eq!(packet.unwrap().source, MovementPacketSource::Ack);
+
+        let packet = session.plan_movement_packet(
+            correction.recv_sim_tick,
+            MovementObservation {
+                pos: Vec3::new(2.5, 64.0, 2.5),
+                yaw: 12.0,
+                pitch: 1.0,
+                on_ground: true,
+            },
+            true,
+        );
+        assert!(packet.is_none());
     }
 
     #[test]
