@@ -330,7 +330,9 @@ impl<'a> WorldCollision<'a> {
         // actual support under the resolved box, not just last tick's state.
         let on_ground = supported
             && ((original.y != y && original.y < 0.0)
-                || (was_on_ground && original.y.abs() <= COLLISION_EPS));
+                || (was_on_ground
+                    && original.y.abs() <= COLLISION_EPS
+                    && y.abs() <= COLLISION_EPS));
 
         let collided_horizontally = original.x != x || original.z != z;
         (pos, vel, on_ground, collided_horizontally)
