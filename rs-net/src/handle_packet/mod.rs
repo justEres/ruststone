@@ -207,6 +207,7 @@ pub fn handle_packet(
         | Packet::CollectItem_nocount_i32(_)
         | Packet::PlayerInfo(_)
         | Packet::EntityEffect(_)
+        | Packet::EntityProperties_i32(_)
         | Packet::EntityEffect_i32(_)
         | Packet::EntityRemoveEffect(_)
         | Packet::EntityRemoveEffect_i32(_) => entities::handle_packet(pkt, to_main),

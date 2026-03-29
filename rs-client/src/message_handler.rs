@@ -338,6 +338,16 @@ pub fn handle_messages(
                 game.player_status.flying_speed = flying_speed;
                 game.player_status.walking_speed = walking_speed;
             }
+            FromNetMessage::EntityAttributes {
+                entity_id,
+                movement_speed,
+            } => {
+                if remote_entity_registry.local_entity_id == Some(entity_id)
+                    && let Some(movement_speed) = movement_speed
+                {
+                    game.player_status.walking_speed = movement_speed.max(0.0);
+                }
+            }
             FromNetMessage::PotionEffect {
                 entity_id,
                 effect_id,

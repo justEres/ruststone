@@ -165,6 +165,10 @@ pub enum FromNetMessage {
         flying_speed: f32,
         walking_speed: f32,
     },
+    EntityAttributes {
+        entity_id: i32,
+        movement_speed: Option<f32>,
+    },
     PotionEffect {
         entity_id: i32,
         effect_id: i8,

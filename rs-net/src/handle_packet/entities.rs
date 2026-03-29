@@ -1,5 +1,53 @@
 use super::*;
 
+fn apply_attribute_modifiers(base: f64, modifiers: &[rs_protocol::protocol::packet::PropertyModifier]) -> f64 {
+    let mut value = base;
+    for modifier in modifiers.iter().filter(|modifier| modifier.operation == 0) {
+        value += modifier.amount;
+    }
+
+    let mut scaled = value;
+    for modifier in modifiers.iter().filter(|modifier| modifier.operation == 1) {
+        scaled += value * modifier.amount;
+    }
+
+    for modifier in modifiers.iter().filter(|modifier| modifier.operation == 2) {
+        scaled *= 1.0 + modifier.amount;
+    }
+
+    scaled
+}
+
+fn send_entity_attributes(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    entity_id: i32,
+    properties: &[rs_protocol::protocol::packet::EntityProperty],
+) {
+    let movement_speed = properties
+        .iter()
+        .find(|property| property.key == "generic.movementSpeed")
+        .map(|property| apply_attribute_modifiers(property.value, &property.modifiers.data) as f32);
+    let _ = to_main.send(FromNetMessage::EntityAttributes {
+        entity_id,
+        movement_speed,
+    });
+}
+
+fn send_entity_attributes_i32(
+    to_main: &crossbeam::channel::Sender<FromNetMessage>,
+    entity_id: i32,
+    properties: &[rs_protocol::protocol::packet::EntityProperty_i16],
+) {
+    let movement_speed = properties
+        .iter()
+        .find(|property| property.key == "generic.movementSpeed")
+        .map(|property| apply_attribute_modifiers(property.value, &property.modifiers.data) as f32);
+    let _ = to_main.send(FromNetMessage::EntityAttributes {
+        entity_id,
+        movement_speed,
+    });
+}
+
 pub(super) fn handle_packet(pkt: Packet, to_main: &crossbeam::channel::Sender<FromNetMessage>) {
     match pkt {
         Packet::TeleportPlayer_NoConfirm(tp) => send_player_position(
@@ -150,7 +198,12 @@ pub(super) fn handle_packet(pkt: Packet, to_main: &crossbeam::channel::Sender<Fr
                 animation,
             }));
         }
-        Packet::EntityProperties(_ep) => {}
+        Packet::EntityProperties(ep) => {
+            send_entity_attributes(to_main, ep.entity_id.0, &ep.properties.data);
+        }
+        Packet::EntityProperties_i32(ep) => {
+            send_entity_attributes_i32(to_main, ep.entity_id, &ep.properties.data);
+        }
         Packet::SpawnObject_i32_NoUUID(so) => {
             if object_type_to_kind(so.ty) == NetEntityKind::Item {
                 debug!(entity_id = so.entity_id.0, data = so.data, pos = ?(so.x, so.y, so.z), "spawned dropped item object before metadata");

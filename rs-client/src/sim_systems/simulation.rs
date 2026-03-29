@@ -125,10 +125,7 @@ pub fn fixed_sim_tick_system(
     input_snapshot.can_fly = player_status.can_fly;
     input_snapshot.flying = player_status.flying;
     input_snapshot.flying_speed = boosted_flying_speed;
-    input_snapshot.speed_multiplier = match player_status.speed_effect_amplifier {
-        Some(amplifier) => 1.0 + 0.2 * (f32::from(amplifier) + 1.0),
-        None => 1.0,
-    };
+    input_snapshot.speed_multiplier = (player_status.walking_speed / 0.1).max(0.0);
     input_snapshot.jump_boost_amplifier = player_status.jump_boost_amplifier;
 
     let sprint_key_down = input_snapshot.sprint;
