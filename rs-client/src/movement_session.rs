@@ -150,6 +150,14 @@ impl Default for MovementSession {
 }
 
 impl MovementSession {
+    fn correction_effective_on_ground(correction: ServerCorrection) -> bool {
+        if correction.on_ground_known {
+            correction.on_ground
+        } else {
+            false
+        }
+    }
+
     pub fn reset_all(&mut self) {
         *self = Self::default();
     }
@@ -226,10 +234,11 @@ impl MovementSession {
         } else {
             0
         };
+        let effective_on_ground = Self::correction_effective_on_ground(correction);
         self.last_authoritative_state = PlayerSimState {
             pos: correction.sim_pos,
             vel: Vec3::ZERO,
-            on_ground: correction.on_ground,
+            on_ground: effective_on_ground,
             collided_horizontally: false,
             jump_ticks: 0,
             yaw: correction.sim_yaw,
@@ -253,7 +262,7 @@ impl MovementSession {
             z = correction.ack_pos.2,
             yaw = correction.packet_yaw_deg,
             pitch = correction.packet_pitch_deg,
-            on_ground = correction.on_ground,
+            on_ground = effective_on_ground,
             on_ground_known = correction.on_ground_known,
             repeats = self.repeated_correction_count,
             "movement-session: correction queued"
@@ -284,6 +293,7 @@ impl MovementSession {
     }
 
     fn make_ack_packet(&self, correction: ServerCorrection) -> PlannedMovementPacket {
+        let on_ground = Self::correction_effective_on_ground(correction);
         PlannedMovementPacket {
             source: MovementPacketSource::Ack,
             kind: MovementPacketKind::PosLook,
@@ -295,7 +305,7 @@ impl MovementSession {
             ),
             yaw: correction.packet_yaw_deg,
             pitch: correction.packet_pitch_deg,
-            on_ground: correction.on_ground,
+            on_ground,
         }
     }
 
@@ -856,6 +866,13 @@ mod tests {
         }
     }
 
+    fn sample_unknown_ground_correction() -> ServerCorrection {
+        ServerCorrection {
+            on_ground_known: false,
+            ..sample_correction()
+        }
+    }
+
     #[test]
     fn correction_ack_uses_exact_server_payload() {
         let mut session = MovementSession::default();
@@ -1033,5 +1050,15 @@ mod tests {
         );
         let first = session.pop_next_tx_ack_for_send(false);
         assert_eq!(first.map(|ack| ack.action_number), Some(-1));
+    }
+
+    #[test]
+    fn correction_ack_uses_conservative_ground_when_server_omits_it() {
+        let mut session = MovementSession::default();
+        let correction = sample_unknown_ground_correction();
+        session.begin_correction(correction);
+        let packet = session.make_ack_packet(correction);
+        assert!(!packet.on_ground);
+        assert!(!session.last_authoritative_state.on_ground);
     }
 }
