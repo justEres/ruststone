@@ -236,9 +236,9 @@ pub fn fixed_sim_tick_system(
             correction_guard.pending_acks.pop_front()
         {
             let _ = params.to_net.0.send(ToNetMessage::PlayerMovePosLook {
-                x: ack_pos.x as f64,
-                y: ack_pos.y as f64,
-                z: ack_pos.z as f64,
+                x: ack_pos.0,
+                y: ack_pos.1,
+                z: ack_pos.2,
                 yaw: ack_yaw,
                 pitch: ack_pitch,
                 on_ground: ack_on_ground,
@@ -247,7 +247,7 @@ pub fn fixed_sim_tick_system(
                 tick,
                 "ack",
                 MOVE_PKT_POS_LOOK,
-                ack_pos,
+                Vec3::new(ack_pos.0 as f32, ack_pos.1 as f32, ack_pos.2 as f32),
                 ack_yaw,
                 ack_pitch,
                 ack_on_ground,
@@ -255,7 +255,7 @@ pub fn fixed_sim_tick_system(
             record_sent_movement_packet(
                 &mut move_pkt_state,
                 MOVE_PKT_POS_LOOK,
-                ack_pos,
+                Vec3::new(ack_pos.0 as f32, ack_pos.1 as f32, ack_pos.2 as f32),
                 ack_yaw,
                 ack_pitch,
                 ack_on_ground,
@@ -519,14 +519,15 @@ pub fn net_event_apply_system(
     let timer = Timing::start();
     let world = WorldCollision::with_map(&collision_map);
     for event in net_events.drain() {
-        let (pos, yaw, pitch, on_ground, recv_instant) = match event {
+        let (pos, ack_pos, yaw, pitch, on_ground, recv_instant) = match event {
             crate::net::events::NetEvent::ServerPosLook {
                 pos,
+                ack_pos,
                 yaw,
                 pitch,
                 on_ground,
                 recv_instant,
-            } => (pos, yaw, pitch, on_ground, recv_instant),
+            } => (pos, ack_pos, yaw, pitch, on_ground, recv_instant),
             crate::net::events::NetEvent::ServerVelocity {
                 velocity,
                 recv_instant,
@@ -622,7 +623,7 @@ pub fn net_event_apply_system(
         correction_guard.pending_acks.clear();
         correction_guard
             .pending_acks
-            .push_back((pos, ack_yaw_deg, ack_pitch_deg, on_ground));
+            .push_back((ack_pos, ack_yaw_deg, ack_pitch_deg, on_ground));
 
         // Clientbound player position packets are authoritative teleports/setbacks.
         // Replaying buffered movement on top of them causes immediate divergence and

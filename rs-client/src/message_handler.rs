@@ -197,22 +197,33 @@ pub fn handle_messages(
                 let raw_pitch = pos.pitch;
                 let raw_flags = pos.flags;
                 let raw_on_ground = pos.on_ground;
+                let mut exact_position = (
+                    sim_state.current.pos.x as f64,
+                    sim_state.current.pos.y as f64,
+                    sim_state.current.pos.z as f64,
+                );
                 let mut position = sim_state.current.pos;
                 if let Some((x, y, z)) = pos.position {
                     let flags = pos.flags.unwrap_or(0);
                     if (flags & FLAG_REL_X) != 0 {
+                        exact_position.0 += x;
                         position.x += x as f32;
                     } else {
+                        exact_position.0 = x;
                         position.x = x as f32;
                     }
                     if (flags & FLAG_REL_Y) != 0 {
+                        exact_position.1 += y;
                         position.y += y as f32;
                     } else {
+                        exact_position.1 = y;
                         position.y = y as f32;
                     }
                     if (flags & FLAG_REL_Z) != 0 {
+                        exact_position.2 += z;
                         position.z += z as f32;
                     } else {
+                        exact_position.2 = z;
                         position.z = z as f32;
                     }
                 }
@@ -255,6 +266,7 @@ pub fn handle_messages(
                 );
                 net_events.push(NetEvent::ServerPosLook {
                     pos: position,
+                    ack_pos: exact_position,
                     yaw,
                     pitch,
                     on_ground,

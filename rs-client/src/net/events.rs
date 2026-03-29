@@ -7,6 +7,7 @@ use bevy::prelude::{Resource, Vec3};
 pub enum NetEvent {
     ServerPosLook {
         pos: Vec3,
+        ack_pos: (f64, f64, f64),
         yaw: f32,
         pitch: f32,
         on_ground: bool,
