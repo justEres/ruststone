@@ -828,3 +828,23 @@ fn missing_chunk_does_not_hard_stop_player_motion() {
     );
     assert!(!next.collided_horizontally);
 }
+
+#[test]
+fn stepping_off_edge_clears_grounded_state_without_downward_motion() {
+    let mut map = WorldCollisionMap::default();
+    lay_floor(&mut map, 0, 0, 0, 0, 0);
+    let world = WorldCollision::with_map(&map);
+
+    let pos = Vec3::new(0.95, 1.0, 0.5);
+    let vel = Vec3::new(0.4, 0.0, 0.0);
+
+    let (next_pos, _next_vel, on_ground, collided_horizontally) = world.resolve(pos, vel, true);
+
+    assert!(
+        next_pos.x > 1.3,
+        "expected resolved position beyond supporting block, x={}",
+        next_pos.x
+    );
+    assert!(!on_ground, "walking off support should clear grounded state");
+    assert!(!collided_horizontally);
+}
