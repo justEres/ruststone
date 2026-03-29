@@ -150,6 +150,12 @@ impl Default for MovementSession {
 }
 
 impl MovementSession {
+    fn has_pending_grim_transactions(&self) -> bool {
+        self.pending_tx_acks
+            .iter()
+            .any(|ack| ack.window_id == 0 && ack.action_number < 0)
+    }
+
     fn correction_effective_on_ground(correction: ServerCorrection) -> bool {
         correction.on_ground
     }
@@ -438,6 +444,16 @@ impl MovementSession {
                 return None;
             }
             MovementPhase::Replay | MovementPhase::Normal => {}
+        }
+
+        if self.active_correction.is_some() && self.has_pending_grim_transactions() {
+            warn!(
+                tick,
+                phase = ?self.phase,
+                pending_tx_acks = self.pending_tx_acks.len(),
+                "movement-session: suppressing movement until grim transactions drain"
+            );
+            return None;
         }
 
         if !chunk_loaded {
@@ -1042,6 +1058,44 @@ mod tests {
         );
         let first = session.pop_next_tx_ack_for_send(false);
         assert_eq!(first.map(|ack| ack.action_number), Some(-1));
+    }
+
+    #[test]
+    fn replay_waits_for_grim_transactions_to_drain() {
+        let mut session = MovementSession::default();
+        let correction = sample_correction();
+        session.begin_correction(correction);
+        let packet = session.make_ack_packet(correction);
+        session.phase_ticks_remaining = 0;
+        session.transition_to(MovementPhase::Replay, "test replay phase");
+        session.record_packet(1, packet);
+        session.queue_transaction_ack(0, -1, true);
+
+        let packet = session.plan_movement_packet(
+            2,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        assert!(packet.is_none());
+
+        let _ = session.pop_next_tx_ack_for_send(false);
+        let packet = session.plan_movement_packet(
+            3,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true,
+        );
+        assert!(packet.is_some());
+        assert_eq!(session.phase, MovementPhase::Normal);
     }
 
     #[test]
