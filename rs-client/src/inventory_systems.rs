@@ -5,6 +5,8 @@ use rs_utils::{
     SoundEventQueue, ToNet, ToNetMessage, UiState,
 };
 
+use crate::sim::CorrectionLoopGuard;
+
 const HOTBAR_DIGIT_KEYS: [(KeyCode, u8); 9] = [
     (KeyCode::Digit1, 0),
     (KeyCode::Digit2, 1),
@@ -106,8 +108,17 @@ pub fn hotbar_input_system(
     }
 }
 
-pub fn inventory_transaction_ack_system(to_net: Res<ToNet>, mut inventory: ResMut<InventoryState>) {
+pub fn inventory_transaction_ack_system(
+    to_net: Res<ToNet>,
+    correction_guard: Res<CorrectionLoopGuard>,
+    mut inventory: ResMut<InventoryState>,
+) {
+    let has_pending_teleport_ack = !correction_guard.pending_acks.is_empty();
     for (id, action_number) in inventory.drain_confirm_acks() {
+        if has_pending_teleport_ack && id == 0 && action_number < 0 {
+            inventory.queue_confirm_ack(id, action_number);
+            continue;
+        }
         let _ = to_net.0.send(ToNetMessage::ConfirmTransaction {
             id,
             action_number,
