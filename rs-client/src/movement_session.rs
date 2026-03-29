@@ -21,7 +21,7 @@ const MOVE_PKT_LOOK: u8 = 1;
 const MOVE_PKT_POS: u8 = 2;
 const MOVE_PKT_POS_LOOK: u8 = 3;
 
-const TELEPORT_COMMIT_HOLD_TICKS: u8 = 1;
+const TELEPORT_COMMIT_HOLD_TICKS: u8 = 2;
 const TELEPORT_RESYNC_HOLD_TICKS: u8 = 1;
 const JOURNAL_LIMIT: usize = 32;
 const POS_DELTA_SQ_EPS: f32 = 0.0009;
@@ -58,6 +58,7 @@ pub struct ServerCorrection {
     pub packet_yaw_deg: f32,
     pub packet_pitch_deg: f32,
     pub on_ground: bool,
+    pub on_ground_known: bool,
     #[allow(dead_code)]
     pub recv_instant: Instant,
     pub recv_sim_tick: u32,
@@ -121,6 +122,7 @@ pub struct MovementSession {
     pub ticks_since_pos: u32,
     pub last_sent_tick: Option<u32>,
     pub repeated_correction_count: u32,
+    pub force_poslook_after_correction: bool,
 }
 
 impl Default for MovementSession {
@@ -141,6 +143,7 @@ impl Default for MovementSession {
             ticks_since_pos: 0,
             last_sent_tick: None,
             repeated_correction_count: 0,
+            force_poslook_after_correction: false,
         }
     }
 }
@@ -162,6 +165,7 @@ impl MovementSession {
         self.last_sent_tick = None;
         self.outbound_journal.clear();
         self.repeated_correction_count = 0;
+        self.force_poslook_after_correction = false;
     }
 
     pub fn queue_server_correction(&mut self, correction: ServerCorrection) {
@@ -244,6 +248,7 @@ impl MovementSession {
             correction.packet_yaw_deg,
             correction.packet_pitch_deg,
         );
+        self.force_poslook_after_correction = true;
         self.transition_to(MovementPhase::AwaitingTeleportAck, "server correction received");
         info!(
             sim_tick = correction.recv_sim_tick,
@@ -253,6 +258,7 @@ impl MovementSession {
             yaw = correction.packet_yaw_deg,
             pitch = correction.packet_pitch_deg,
             on_ground = correction.on_ground,
+            on_ground_known = correction.on_ground_known,
             repeats = self.repeated_correction_count,
             "movement-session: correction queued"
         );
@@ -310,7 +316,7 @@ impl MovementSession {
             true
         };
 
-        let kind = if moved && rotated {
+        let mut kind = if moved && rotated {
             MovementPacketKind::PosLook
         } else if moved {
             MovementPacketKind::Pos
@@ -319,6 +325,11 @@ impl MovementSession {
         } else {
             MovementPacketKind::Ground
         };
+
+        if self.force_poslook_after_correction && moved {
+            kind = MovementPacketKind::PosLook;
+            self.force_poslook_after_correction = false;
+        }
 
         if moved {
             self.baseline_pos = obs.pos;
@@ -580,6 +591,7 @@ pub fn movement_session_receive_system(
                 yaw,
                 pitch,
                 on_ground,
+                on_ground_known,
                 recv_instant,
             } => {
                 if let Some(last_sent) = latency.last_sent {
@@ -599,6 +611,7 @@ pub fn movement_session_receive_system(
                     packet_yaw_deg: wrap_degrees((std::f32::consts::PI - yaw).to_degrees()),
                     packet_pitch_deg: (-pitch.to_degrees()).clamp(-90.0, 90.0),
                     on_ground,
+                    on_ground_known,
                     recv_instant,
                     recv_sim_tick: sim_clock.tick,
                 };
@@ -819,6 +832,7 @@ mod tests {
             packet_yaw_deg: 180.0,
             packet_pitch_deg: 0.0,
             on_ground: true,
+            on_ground_known: true,
             recv_instant: Instant::now(),
             recv_sim_tick: 42,
         }
@@ -880,8 +894,18 @@ mod tests {
             },
             true
         ).is_none());
-        let packet = session.plan_movement_packet(
+        assert!(session.plan_movement_packet(
             4,
+            MovementObservation {
+                pos: Vec3::new(2.0, 64.0, 2.0),
+                yaw: 10.0,
+                pitch: 0.0,
+                on_ground: true,
+            },
+            true
+        ).is_none());
+        let packet = session.plan_movement_packet(
+            5,
             MovementObservation {
                 pos: Vec3::new(2.0, 64.0, 2.0),
                 yaw: 10.0,

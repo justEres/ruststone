@@ -91,6 +91,14 @@ impl<'a> WorldCollision<'a> {
         false
     }
 
+    pub fn is_supported(&self, pos: Vec3) -> bool {
+        if !self.has_chunk_at_pos(pos) {
+            return false;
+        }
+        let bb = player_aabb(pos).offset(Vec3::new(0.0, -0.001, 0.0));
+        self.aabb_collides(bb.min, bb.max)
+    }
+
     fn aabb_has_liquid(&self, bb: &Aabb) -> bool {
         let (min_x, max_x) = block_range(bb.min.x, bb.max.x);
         let (min_y, max_y) = block_range(bb.min.y, bb.max.y);

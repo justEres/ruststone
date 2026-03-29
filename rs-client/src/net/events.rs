@@ -11,6 +11,7 @@ pub enum NetEvent {
         yaw: f32,
         pitch: f32,
         on_ground: bool,
+        on_ground_known: bool,
         recv_instant: Instant,
     },
     ServerVelocity {

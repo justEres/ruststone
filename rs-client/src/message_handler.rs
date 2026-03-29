@@ -16,6 +16,7 @@ use crate::entities::{RemoteEntityEventQueue, RemoteEntityRegistry};
 use crate::movement_session::MovementSession;
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
+use crate::sim::movement::WorldCollision;
 use crate::sim::{SimClock, SimReady, SimRenderState, SimState};
 use crate::sim_systems::PredictionHistory;
 use crate::timing::Timing;
@@ -253,8 +254,11 @@ pub fn handle_messages(
                 }
 
                 // 1.8 player position packets commonly omit on_ground.
-                // Preserve the current state when absent instead of forcing false.
-                let on_ground = pos.on_ground.unwrap_or(sim_state.current.on_ground);
+                // Infer support from local collision instead of carrying the previous flag
+                // through teleports/setbacks, which tends to make ground state sticky.
+                let inferred_on_ground = WorldCollision::with_map(&collision_map).is_supported(position);
+                let on_ground_known = pos.on_ground.is_some();
+                let on_ground = pos.on_ground.unwrap_or(inferred_on_ground);
                 debug!(
                     "[net/correction] tick={} raw_pos={:?} raw_yaw={:?} raw_pitch={:?} flags={:?} raw_on_ground={:?} -> resolved_pos=({:.4},{:.4},{:.4}) resolved_yaw={:.4}rad resolved_pitch={:.4}rad resolved_on_ground={}",
                     game.sim_clock.tick,
@@ -276,6 +280,7 @@ pub fn handle_messages(
                     yaw,
                     pitch,
                     on_ground,
+                    on_ground_known,
                     recv_instant: Instant::now(),
                 });
             }
