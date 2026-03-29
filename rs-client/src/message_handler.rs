@@ -279,6 +279,7 @@ pub fn handle_messages(
                     ack_pos: exact_position,
                     yaw,
                     pitch,
+                    flags: pos.flags.unwrap_or(0),
                     on_ground,
                     on_ground_known,
                     recv_instant: Instant::now(),

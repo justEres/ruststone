@@ -619,6 +619,7 @@ pub fn movement_session_receive_system(
                 ack_pos,
                 yaw,
                 pitch,
+                flags,
                 on_ground,
                 on_ground_known,
                 recv_instant,
@@ -644,9 +645,20 @@ pub fn movement_session_receive_system(
                     recv_instant,
                     recv_sim_tick: sim_clock.tick,
                 };
+                let mut corrected_velocity = sim_state.current.vel;
+                if (flags & 0x01) == 0 {
+                    corrected_velocity.x = 0.0;
+                }
+                if (flags & 0x02) == 0 {
+                    corrected_velocity.y = 0.0;
+                }
+                if (flags & 0x04) == 0 {
+                    corrected_velocity.z = 0.0;
+                }
+
                 let server_state = PlayerSimState {
                     pos,
-                    vel: Vec3::ZERO,
+                    vel: corrected_velocity,
                     on_ground,
                     collided_horizontally: false,
                     jump_ticks: 0,
@@ -694,6 +706,14 @@ pub fn movement_session_receive_system(
                 debug.last_replay = 0;
                 debug.last_velocity_correction = 0.0;
                 debug.last_reconciled_server_tick = None;
+                debug!(
+                    tick,
+                    flags,
+                    vel_x = corrected_velocity.x,
+                    vel_y = corrected_velocity.y,
+                    vel_z = corrected_velocity.z,
+                    "movement-session: applied vanilla-style correction velocity"
+                );
                 sim_ready.0 = true;
             }
             NetEvent::ServerVelocity {

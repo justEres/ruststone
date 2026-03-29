@@ -10,6 +10,7 @@ pub enum NetEvent {
         ack_pos: (f64, f64, f64),
         yaw: f32,
         pitch: f32,
+        flags: u8,
         on_ground: bool,
         on_ground_known: bool,
         recv_instant: Instant,
