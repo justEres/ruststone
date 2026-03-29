@@ -15,6 +15,7 @@ use crate::entity_model;
 use crate::inventory_systems;
 use crate::item_textures;
 use crate::message_handler;
+use crate::movement_session;
 use crate::net;
 use crate::sim;
 use crate::sim_systems;
@@ -89,8 +90,7 @@ impl Plugin for ClientCorePlugin {
             .insert_resource(sim::VisualCorrectionOffset::default())
             .insert_resource(sim::DebugStats::default())
             .insert_resource(sim::SimReady::default())
-            .insert_resource(sim::CorrectionLoopGuard::default())
-            .insert_resource(sim::MovementPacketState::default())
+            .insert_resource(movement_session::MovementSession::default())
             .insert_resource(sim::DebugUiState::default())
             .insert_resource(sim::ZoomState::default())
             .insert_resource(sim::FreecamState::default())
@@ -122,12 +122,7 @@ pub struct ClientInventoryPlugin;
 
 impl Plugin for ClientInventoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, inventory_systems::hotbar_input_system)
-            .add_systems(
-                FixedUpdate,
-                inventory_systems::inventory_transaction_ack_system
-                    .after(sim_systems::fixed_sim_tick_system),
-            );
+        app.add_systems(Update, inventory_systems::hotbar_input_system);
     }
 }
 
@@ -248,8 +243,10 @@ impl Plugin for ClientSimPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    sim_systems::net_event_apply_system,
+                    movement_session::movement_session_receive_system,
                     sim_systems::fixed_sim_tick_system,
+                    movement_session::movement_session_send_system,
+                    movement_session::transaction_pacing_system,
                     sim_systems::local_movement_sound_system,
                 )
                     .chain(),
@@ -285,11 +282,13 @@ impl Plugin for ClientTimingPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                sim_systems::fixed_update_timing_start.before(sim_systems::net_event_apply_system),
+                sim_systems::fixed_update_timing_start
+                    .before(movement_session::movement_session_receive_system),
             )
             .add_systems(
                 FixedUpdate,
-                sim_systems::fixed_update_timing_end.after(sim_systems::fixed_sim_tick_system),
+                sim_systems::fixed_update_timing_end
+                    .after(movement_session::transaction_pacing_system),
             )
             .add_systems(
                 Last,

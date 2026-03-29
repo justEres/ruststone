@@ -13,6 +13,7 @@ use tracing_subscriber::EnvFilter;
 mod embedded_assets;
 mod inventory_systems;
 mod message_handler;
+mod movement_session;
 mod net;
 mod plugins;
 mod sim_systems;

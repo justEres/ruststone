@@ -13,17 +13,15 @@ use rs_utils::{
     AppState, ApplicationState, SoundCategory, SoundEventQueue, ToNet, ToNetMessage, UiState,
 };
 
-use crate::net::events::NetEventQueue;
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::movement::{
     WorldCollision, debug_block_collision_boxes, effective_sprint, simulate_tick,
 };
 use crate::sim::predict::PredictionBuffer;
-use crate::sim::reconcile::reconcile;
 use crate::sim::{
-    CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CorrectionLoopGuard,
-    CurrentInput, DebugStats, DebugUiState, FreecamState, LocalArmSwing, MovementPacketState,
-    PredictedFrame, SimClock, SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
+    CameraPerspectiveAltHold, CameraPerspectiveMode, CameraPerspectiveState, CurrentInput,
+    DebugStats, DebugUiState, FreecamState, LocalArmSwing, PredictedFrame, SimClock,
+    SimRenderState, SimState, VisualCorrectionOffset, ZoomState,
 };
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use rs_render::{RenderDebugSettings, debug::RenderPerfStats};
@@ -36,6 +34,7 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 use crate::entities::{ItemSpriteStack, RemoteVisual};
 use crate::entities::{RemoteEntity, RemoteEntityRegistry};
 use crate::item_textures::{ItemSpriteMesh, ItemTextureCache};
+use crate::movement_session::MovementSession;
 use crate::timing::Timing;
 
 #[derive(Resource, Default)]
@@ -144,16 +143,6 @@ fn gameplay_input_allowed(
         && !ui_state.paused
         && !ui_state.inventory_open
         && !player_status.dead
-}
-
-fn wrap_degrees(mut deg: f32) -> f32 {
-    while deg <= -180.0 {
-        deg += 360.0;
-    }
-    while deg > 180.0 {
-        deg -= 360.0;
-    }
-    deg
 }
 
 fn client_abilities_flags(player_status: &rs_utils::PlayerStatus) -> u8 {
@@ -447,7 +436,7 @@ pub use camera::{
 };
 pub use simulation::{
     fixed_sim_tick_system, local_arm_swing_tick_system, local_movement_sound_system,
-    net_event_apply_system, visual_smoothing_system,
+    visual_smoothing_system,
 };
 pub use timing::{
     fixed_update_timing_end, fixed_update_timing_start, frame_timing_end, frame_timing_start,

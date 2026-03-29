@@ -13,6 +13,7 @@ use rs_utils::{
 use tracing::{debug, info};
 
 use crate::entities::{RemoteEntityEventQueue, RemoteEntityRegistry};
+use crate::movement_session::MovementSession;
 use crate::net::events::{NetEvent, NetEventQueue};
 use crate::sim::collision::WorldCollisionMap;
 use crate::sim::{SimClock, SimReady, SimRenderState, SimState};
@@ -55,6 +56,7 @@ pub fn handle_messages(
     mut ui: MessageUiState,
     mut chunk_updates: ResMut<ChunkUpdateQueue>,
     mut net_events: ResMut<NetEventQueue>,
+    mut movement_session: ResMut<MovementSession>,
     mut remote_entity_events: ResMut<RemoteEntityEventQueue>,
     remote_entity_registry: Res<RemoteEntityRegistry>,
     mut collision_map: ResMut<WorldCollisionMap>,
@@ -87,6 +89,7 @@ pub fn handle_messages(
                 game.sim_ready.0 = false;
                 game.history.0 = PredictionHistory::default().0;
                 game.sim_render.previous = sim_state.current;
+                movement_session.reset_all();
                 ui.inventory_state.reset();
                 info!("Connected to server");
             }
@@ -99,6 +102,7 @@ pub fn handle_messages(
                 game.scoreboard.reset();
                 game.sim_ready.0 = false;
                 game.sim_render.previous = sim_state.current;
+                movement_session.reset_all();
                 ui.inventory_state.reset();
                 game.player_status.gamemode = 0;
                 game.player_status.can_fly = false;
@@ -116,6 +120,7 @@ pub fn handle_messages(
                 game.tab_list_header_footer.footer.clear();
                 game.scoreboard.reset();
                 game.sim_ready.0 = false;
+                movement_session.reset_all();
                 ui.inventory_state.reset();
             }
             FromNetMessage::ChatMessage(msg) => {
@@ -145,6 +150,7 @@ pub fn handle_messages(
                 game.sim_ready.0 = false;
                 game.history.0 = PredictionHistory::default().0;
                 game.sim_render.previous = sim_state.current;
+                movement_session.reset_all();
                 net_events.events.clear();
                 collision_map.clear();
                 chunk_updates.0.clear();
@@ -388,7 +394,12 @@ pub fn handle_messages(
                 }
             }
             FromNetMessage::Inventory(event) => {
-                apply_inventory_message(&mut ui.inventory_state, &mut game.sound_queue, event);
+                apply_inventory_message(
+                    &mut ui.inventory_state,
+                    &mut game.sound_queue,
+                    &mut movement_session,
+                    event,
+                );
             }
             FromNetMessage::Sound(event) => {
                 game.sound_queue.push(event);
@@ -476,6 +487,7 @@ pub fn handle_messages(
 fn apply_inventory_message(
     inventory_state: &mut InventoryState,
     sound_queue: &mut SoundEventQueue,
+    movement_session: &mut MovementSession,
     event: InventoryMessage,
 ) {
     match event {
@@ -529,7 +541,7 @@ fn apply_inventory_message(
         } => {
             inventory_state.apply_transaction_result(id, action_number, accepted);
             if !accepted {
-                inventory_state.queue_confirm_ack(id, action_number);
+                movement_session.queue_transaction_ack(id, action_number, true);
             }
             let next = action_number.saturating_add(1);
             inventory_state.next_action_number = next.max(0) as u16;
