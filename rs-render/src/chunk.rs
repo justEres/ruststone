@@ -3198,6 +3198,16 @@ fn vanilla_light_mix(sky_level: f32, block_level: f32, vanilla_bake: VanillaBake
     mixed.powf(1.0 / curve)
 }
 
+fn is_softened_vanilla_foliage(block_id: u16) -> bool {
+    if is_leaves_block(block_type(block_id)) {
+        return true;
+    }
+    matches!(
+        classify_tint(block_id, None),
+        TintClass::Grass | TintClass::Foliage | TintClass::FoliageFixed(_)
+    )
+}
+
 fn vanilla_block_shadow_factor(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
@@ -3394,15 +3404,19 @@ fn compute_vertex_shade(
     if !can_apply_vertex_shading(block_id, voxel_ao_cutout) {
         return 1.0;
     }
+    let softened_foliage = is_softened_vanilla_foliage(block_id);
     let (ao, sky_level, block_level) =
         face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
     let ao_term = if voxel_ao_enabled {
-        let s = voxel_ao_strength.clamp(0.0, 1.0);
+        let mut s = voxel_ao_strength.clamp(0.0, 1.0);
+        if softened_foliage {
+            s *= 0.38;
+        }
         1.0 - s + ao * s
     } else {
         1.0
     };
-    let shadow_term = vanilla_block_shadow_factor(
+    let mut shadow_term = vanilla_block_shadow_factor(
         snapshot,
         chunk_x,
         chunk_z,
@@ -3413,15 +3427,37 @@ fn compute_vertex_shade(
         sky_level,
         vanilla_bake,
     );
+    if softened_foliage {
+        shadow_term = shadow_term * 0.45 + 0.55;
+    }
     let ao_shadow_term = if voxel_ao_enabled {
-        let blend = vanilla_bake.ao_shadow_blend.clamp(0.0, 1.0);
+        let mut blend = vanilla_bake.ao_shadow_blend.clamp(0.0, 1.0);
+        if softened_foliage {
+            blend *= 0.45;
+        }
         ao_term * (1.0 - blend) + (ao_term * shadow_term) * blend
     } else {
         shadow_term
     };
-    let face_term = vanilla_face_shade(face, vanilla_bake);
-    let light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
-    (light * face_term * ao_shadow_term).clamp(0.0, 1.0)
+    let mut face_term = vanilla_face_shade(face, vanilla_bake);
+    if softened_foliage {
+        face_term = face_term * 0.28 + 0.72;
+    }
+    let mut light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
+    let base_floor = 0.10 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.85;
+    let foliage_floor = 0.28 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.80;
+    if softened_foliage {
+        light = light.max(foliage_floor);
+    } else {
+        light = light.max(base_floor);
+    }
+    let shade = light * face_term * ao_shadow_term;
+    let min_final = if softened_foliage {
+        foliage_floor
+    } else {
+        base_floor * 0.92
+    };
+    shade.max(min_final).clamp(0.0, 1.0)
 }
 
 fn face_vertex_light_ao(

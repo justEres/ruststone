@@ -16,11 +16,6 @@ use crate::sim::{
 use crate::sim_systems::{LatencyEstimate, PredictionHistory};
 use crate::timing::Timing;
 
-const MOVE_PKT_GROUND: u8 = 0;
-const MOVE_PKT_LOOK: u8 = 1;
-const MOVE_PKT_POS: u8 = 2;
-const MOVE_PKT_POS_LOOK: u8 = 3;
-
 const TELEPORT_COMMIT_HOLD_TICKS: u8 = 4;
 const TELEPORT_RESYNC_HOLD_TICKS: u8 = 2;
 const FORCE_POSLOOK_TICKS_AFTER_CORRECTION: u8 = 8;
@@ -515,31 +510,6 @@ impl MovementSession {
     }
 }
 
-fn kind_to_wire(kind: MovementPacketKind) -> u8 {
-    match kind {
-        MovementPacketKind::Ground => MOVE_PKT_GROUND,
-        MovementPacketKind::Look => MOVE_PKT_LOOK,
-        MovementPacketKind::Pos => MOVE_PKT_POS,
-        MovementPacketKind::PosLook => MOVE_PKT_POS_LOOK,
-    }
-}
-
-fn kind_name(kind: MovementPacketKind) -> &'static str {
-    match kind {
-        MovementPacketKind::Ground => "ground",
-        MovementPacketKind::Look => "look",
-        MovementPacketKind::Pos => "pos",
-        MovementPacketKind::PosLook => "poslook",
-    }
-}
-
-fn source_name(source: MovementPacketSource) -> &'static str {
-    match source {
-        MovementPacketSource::Ack => "ack",
-        MovementPacketSource::Normal => "normal",
-    }
-}
-
 fn wrap_degrees(mut deg: f32) -> f32 {
     while deg <= -180.0 {
         deg += 360.0;
@@ -691,20 +661,20 @@ pub fn movement_session_receive_system(
                     "teleport ack sent immediately",
                 );
                 session.record_packet(tick, ack_packet);
-                tracing::info!(
-                    tick,
-                    source = source_name(ack_packet.source),
-                    kind = kind_name(ack_packet.kind),
-                    wire_kind = kind_to_wire(ack_packet.kind),
-                    x = ack_packet.pos_f64.0,
-                    y = ack_packet.pos_f64.1,
-                    z = ack_packet.pos_f64.2,
-                    yaw = ack_packet.yaw,
-                    pitch = ack_packet.pitch,
-                    on_ground = ack_packet.on_ground,
-                    phase = ?session.phase,
-                    "Outgoing movement packet"
-                );
+                // tracing::info!(
+                //     tick,
+                //     source = source_name(ack_packet.source),
+                //     kind = kind_name(ack_packet.kind),
+                //     wire_kind = kind_to_wire(ack_packet.kind),
+                //     x = ack_packet.pos_f64.0,
+                //     y = ack_packet.pos_f64.1,
+                //     z = ack_packet.pos_f64.2,
+                //     yaw = ack_packet.yaw,
+                //     pitch = ack_packet.pitch,
+                //     on_ground = ack_packet.on_ground,
+                //     phase = ?session.phase,
+                //     "Outgoing movement packet"
+                // );
                 latency.last_sent = Some(Instant::now());
                 sim_render.previous = server_state;
                 sim_state.current = server_state;
@@ -860,20 +830,6 @@ pub fn movement_session_send_system(
         }
     }
 
-    tracing::info!(
-        tick,
-        source = source_name(packet.source),
-        kind = kind_name(packet.kind),
-        wire_kind = kind_to_wire(packet.kind),
-        x = packet.pos_f64.0,
-        y = packet.pos_f64.1,
-        z = packet.pos_f64.2,
-        yaw = packet.yaw,
-        pitch = packet.pitch,
-        on_ground = packet.on_ground,
-        phase = ?session.phase,
-        "Outgoing movement packet"
-    );
     latency.last_sent = Some(Instant::now());
 }
 
