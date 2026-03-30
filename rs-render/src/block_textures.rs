@@ -62,10 +62,7 @@ impl AtlasBlockMapping {
                 4 => "stone_diorite_smooth.png",
                 5 => "stone_andesite.png",
                 6 => "stone_andesite_smooth.png",
-                _ => match face {
-                    Face::PosY | Face::NegY => "stone_slab_top.png",
-                    _ => "stone_slab_side.png",
-                },
+                _ => "stone.png",
             }),
             2 => Some(match face {
                 Face::PosY => "grass_top.png",

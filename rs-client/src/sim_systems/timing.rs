@@ -26,12 +26,22 @@ pub fn performance_monitor_sample_system(
     } else {
         timings.main_thread_ms
     };
-    let render_ms = (render_perf.last_apply_ms
-        + render_perf.last_enqueue_ms
-        + render_perf.occlusion_cull_ms
-        + render_perf.apply_debug_ms
-        + render_perf.gather_stats_ms)
+    let render_mesh_upload_ms = render_perf.last_apply_ms.max(0.0);
+    let render_mesh_queue_ms = render_perf.last_enqueue_ms.max(0.0);
+    let render_occlusion_ms = render_perf.occlusion_cull_ms.max(0.0);
+    let render_material_ms = render_perf.apply_debug_ms.max(0.0);
+    let render_stats_ms = render_perf.gather_stats_ms.max(0.0);
+    let render_proxy_ms = (render_mesh_upload_ms
+        + render_mesh_queue_ms
+        + render_occlusion_ms
+        + render_material_ms
+        + render_stats_ms)
         .max(0.0);
+    let (render_ms, render_breakdown_is_gpu) = if render_perf.gpu_timing_supported {
+        (render_perf.gpu_frame_ms.max(0.0), true)
+    } else {
+        (render_proxy_ms, false)
+    };
 
     let system = system.get_or_insert_with(System::new);
     let (cpu_percent, ram_mb) = if let Some(pid) = monitor.pid {
@@ -56,6 +66,12 @@ pub fn performance_monitor_sample_system(
         cpu_percent,
         ram_mb,
         render_ms,
+        render_mesh_upload_ms,
+        render_mesh_queue_ms,
+        render_occlusion_ms,
+        render_material_ms,
+        render_stats_ms,
+        render_breakdown_is_gpu,
     });
 }
 

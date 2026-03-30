@@ -97,6 +97,12 @@ pub struct PerfMonitorSample {
     pub cpu_percent: f32,
     pub ram_mb: f32,
     pub render_ms: f32,
+    pub render_mesh_upload_ms: f32,
+    pub render_mesh_queue_ms: f32,
+    pub render_occlusion_ms: f32,
+    pub render_material_ms: f32,
+    pub render_stats_ms: f32,
+    pub render_breakdown_is_gpu: bool,
 }
 
 #[derive(Resource)]

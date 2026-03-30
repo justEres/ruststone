@@ -729,6 +729,8 @@ fn draw_performance_monitor(ctx: &egui::Context, monitor: &PerformanceMonitorSta
                         |sample| sample.render_ms,
                         16.67,
                     );
+                    ui.add_space(if compact { 4.0 } else { 8.0 });
+                    draw_render_breakdown_pie(ui, latest, compact);
                     ui.add_space(spacing);
                     draw_monitor_row(
                         ui,
@@ -747,6 +749,101 @@ fn draw_performance_monitor(ctx: &egui::Context, monitor: &PerformanceMonitorSta
                     }
                 });
         });
+}
+
+fn draw_render_breakdown_pie(ui: &mut egui::Ui, latest: PerfMonitorSample, compact: bool) {
+    let title = if latest.render_breakdown_is_gpu {
+        "GPU pass breakdown"
+    } else {
+        "Render breakdown (proxy)"
+    };
+    ui.label(title);
+    if !latest.render_breakdown_is_gpu {
+        ui.small("GPU timings unavailable on this backend. Showing render-side proxy buckets.");
+    }
+
+    let slices = [
+        (
+            "Mesh Upload",
+            latest.render_mesh_upload_ms,
+            egui::Color32::from_rgb(88, 180, 255),
+        ),
+        (
+            "Mesh Queue",
+            latest.render_mesh_queue_ms,
+            egui::Color32::from_rgb(255, 170, 84),
+        ),
+        (
+            "Occlusion",
+            latest.render_occlusion_ms,
+            egui::Color32::from_rgb(120, 214, 120),
+        ),
+        (
+            "Materials",
+            latest.render_material_ms,
+            egui::Color32::from_rgb(220, 120, 220),
+        ),
+        (
+            "Stats/Other",
+            latest.render_stats_ms,
+            egui::Color32::from_rgb(210, 210, 120),
+        ),
+    ];
+    let total: f32 = slices.iter().map(|(_, value, _)| *value).sum();
+    if total <= 0.0001 {
+        ui.small("No render breakdown samples yet.");
+        return;
+    }
+
+    let pie_size = if compact {
+        egui::vec2(110.0, 110.0)
+    } else {
+        egui::vec2(140.0, 140.0)
+    };
+    let (rect, _) = ui.allocate_exact_size(pie_size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.5 - 4.0;
+    let mut start_angle = -std::f32::consts::FRAC_PI_2;
+    for (_, value, color) in slices {
+        if value <= 0.0001 {
+            continue;
+        }
+        let sweep = std::f32::consts::TAU * (value / total);
+        let segments = ((sweep.abs() * 24.0).ceil() as usize).max(12);
+        let mut points = Vec::with_capacity(segments + 2);
+        points.push(center);
+        for step in 0..=segments {
+            let t = start_angle + sweep * (step as f32 / segments as f32);
+            points.push(center + egui::vec2(t.cos() * radius, t.sin() * radius));
+        }
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            color,
+            egui::Stroke::new(1.0, egui::Color32::from_black_alpha(80)),
+        ));
+        start_angle += sweep;
+    }
+    painter.circle_filled(center, radius * 0.42, egui::Color32::from_black_alpha(180));
+    painter.text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        format!("{:.2} ms", latest.render_ms),
+        egui::FontId::proportional(if compact { 11.0 } else { 12.0 }),
+        egui::Color32::WHITE,
+    );
+
+    ui.add_space(4.0);
+    for (label, value, color) in slices {
+        if value <= 0.0001 {
+            continue;
+        }
+        ui.horizontal(|ui| {
+            let swatch = egui::RichText::new("■").color(color);
+            ui.label(swatch);
+            ui.label(format!("{label}: {:.2} ms ({:.0}%)", value, (value / total) * 100.0));
+        });
+    }
 }
 
 fn draw_monitor_row(
