@@ -61,6 +61,7 @@ pub struct VanillaBakeSettings {
     pub face_shading_strength: f32,
     pub ambient_floor: f32,
     pub light_curve: f32,
+    pub foliage_tint_strength: f32,
     pub block_shadow_mode: VanillaBlockShadowMode,
     pub block_shadow_strength: f32,
     pub sun_trace_samples: u8,
@@ -78,6 +79,7 @@ impl VanillaBakeSettings {
             face_shading_strength: settings.vanilla_face_shading_strength,
             ambient_floor: settings.vanilla_ambient_floor,
             light_curve: settings.vanilla_light_curve,
+            foliage_tint_strength: settings.vanilla_foliage_tint_strength,
             block_shadow_mode: settings.vanilla_block_shadow_mode,
             block_shadow_strength: settings.vanilla_block_shadow_strength,
             sun_trace_samples: settings.vanilla_sun_trace_samples,
@@ -1442,7 +1444,7 @@ fn add_greedy_quad(
             .push([uv[0] * quad.w as f32, uv[1] * quad.h as f32]);
         data.uvs_b.push(tile_origin);
     }
-    let base_color = tint_color_untargeted(block_id, tint);
+    let base_color = tint_color_untargeted(block_id, tint, Some(vanilla_bake));
     let shades = greedy_face_corner_shades(
         snapshot,
         chunk_x,
@@ -1654,6 +1656,7 @@ fn add_block_faces(
             y,
             z,
             biome_tints,
+            Some(vanilla_bake),
         );
         for vert in verts {
             let shade = compute_vertex_shade(
@@ -1699,6 +1702,43 @@ fn is_grass_side_face(block_state: u16, face: Face) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn apply_foliage_tint_strength(color: [f32; 4], strength: f32) -> [f32; 4] {
+    let strength = strength.clamp(0.0, 2.5);
+    if strength <= 1.0 {
+        return [
+            1.0 + (color[0] - 1.0) * strength,
+            1.0 + (color[1] - 1.0) * strength,
+            1.0 + (color[2] - 1.0) * strength,
+            color[3],
+        ];
+    }
+
+    let extra = strength - 1.0;
+    let luma = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
+    let sat_scale = 1.0 + extra * 0.85;
+    let lift = extra * 0.10;
+    [
+        (luma + (color[0] - luma) * sat_scale + (1.0 - color[0]) * lift).clamp(0.0, 1.0),
+        (luma + (color[1] - luma) * sat_scale + (1.0 - color[1]) * lift).clamp(0.0, 1.0),
+        (luma + (color[2] - luma) * sat_scale + (1.0 - color[2]) * lift).clamp(0.0, 1.0),
+        color[3],
+    ]
+}
+
+fn apply_runtime_biome_tint(
+    block_id: u16,
+    below: Option<u16>,
+    color: [f32; 4],
+    vanilla_bake: Option<VanillaBakeSettings>,
+) -> [f32; 4] {
+    match (classify_tint(block_id, below), vanilla_bake) {
+        (TintClass::Foliage, Some(vanilla_bake)) => {
+            apply_foliage_tint_strength(color, vanilla_bake.foliage_tint_strength)
+        }
+        _ => color,
+    }
+}
+
 fn tint_color(
     block_id: u16,
     tint: BiomeTint,
@@ -1709,13 +1749,14 @@ fn tint_color(
     y: i32,
     z: i32,
     biome_tints: &BiomeTintResolver,
+    vanilla_bake: Option<VanillaBakeSettings>,
 ) -> [f32; 4] {
     let below = if block_type(block_id) == 175 {
         Some(block_at(snapshot, chunk_x, chunk_z, x, y - 1, z))
     } else {
         None
     };
-    match classify_tint(block_id, below) {
+    let color = match classify_tint(block_id, below) {
         TintClass::Grass => tint.grass,
         TintClass::Foliage => tint.foliage,
         TintClass::Water => [tint.water[0], tint.water[1], tint.water[2], 0.5],
@@ -1729,11 +1770,16 @@ fn tint_color(
             let _ = biome_tints;
             [1.0, 1.0, 1.0, 1.0]
         }
-    }
+    };
+    apply_runtime_biome_tint(block_id, below, color, vanilla_bake)
 }
 
-fn tint_color_untargeted(block_id: u16, tint: BiomeTint) -> [f32; 4] {
-    match classify_tint(block_id, None) {
+fn tint_color_untargeted(
+    block_id: u16,
+    tint: BiomeTint,
+    vanilla_bake: Option<VanillaBakeSettings>,
+) -> [f32; 4] {
+    let color = match classify_tint(block_id, None) {
         TintClass::Grass => tint.grass,
         TintClass::Foliage => tint.foliage,
         TintClass::Water => [tint.water[0], tint.water[1], tint.water[2], 0.5],
@@ -1744,7 +1790,8 @@ fn tint_color_untargeted(block_id: u16, tint: BiomeTint) -> [f32; 4] {
             1.0,
         ],
         TintClass::None => [1.0, 1.0, 1.0, 1.0],
-    }
+    };
+    apply_runtime_biome_tint(block_id, None, color, vanilla_bake)
 }
 
 fn add_cross_plant(
@@ -1773,6 +1820,7 @@ fn add_cross_plant(
         y,
         z,
         biome_tints,
+        None,
     );
     if let Some(tint_rgb) =
         cross_vegetation_biome_tint(block_id, snapshot, chunk_x, chunk_z, x, y, z, tint)
@@ -2890,9 +2938,10 @@ fn add_box(
                 by,
                 bz,
                 biome_tints,
+                None,
             )
         } else {
-            tint_color_untargeted(block_id, tint)
+            tint_color_untargeted(block_id, tint, None)
         };
         if let Some((snapshot, chunk_x, chunk_z, bx, by, bz, _)) = neighbor_ctx {
             let shade = if should_apply_prebaked_shade(block_id) {
@@ -3214,6 +3263,19 @@ fn is_softened_vanilla_foliage(block_id: u16) -> bool {
     )
 }
 
+fn is_vanilla_leaf_block(block_id: u16) -> bool {
+    is_leaves_block(block_type(block_id))
+}
+
+fn vanilla_leaf_face_shade(face: Face) -> f32 {
+    match face {
+        Face::PosY => 1.0,
+        Face::NegY => 0.84,
+        Face::PosZ | Face::NegZ => 0.93,
+        Face::PosX | Face::NegX => 0.89,
+    }
+}
+
 fn vanilla_block_shadow_factor(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
@@ -3411,12 +3473,15 @@ fn compute_vertex_shade(
     if !can_apply_vertex_shading(block_id, voxel_ao_cutout) {
         return 1.0;
     }
+    let leaf_block = is_vanilla_leaf_block(block_id);
     let softened_foliage = is_softened_vanilla_foliage(block_id);
     let (ao, sky_level, block_level) =
         face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
     let ao_term = if voxel_ao_enabled {
         let mut s = voxel_ao_strength.clamp(0.0, 1.0);
-        if softened_foliage {
+        if leaf_block {
+            s *= 0.10;
+        } else if softened_foliage {
             s *= 0.38;
         }
         1.0 - s + ao * s
@@ -3435,13 +3500,19 @@ fn compute_vertex_shade(
         vanilla_bake,
     );
     shadow_term = if softened_foliage {
-        shadow_term * 0.40 + 0.60
+        if leaf_block {
+            shadow_term * 0.18 + 0.82
+        } else {
+            shadow_term * 0.40 + 0.60
+        }
     } else {
         shadow_term * 0.70 + 0.30
     };
     let ao_shadow_term = if voxel_ao_enabled {
         let mut blend = vanilla_bake.ao_shadow_blend.clamp(0.0, 1.0);
-        if softened_foliage {
+        if leaf_block {
+            blend *= 0.15;
+        } else if softened_foliage {
             blend *= 0.45;
         }
         ao_term * (1.0 - blend) + (ao_term * shadow_term) * blend
@@ -3449,19 +3520,27 @@ fn compute_vertex_shade(
         shadow_term
     };
     let mut face_term = vanilla_face_shade(face, vanilla_bake);
-    if softened_foliage {
+    if leaf_block {
+        let leaf_target = vanilla_leaf_face_shade(face);
+        face_term = face_term * 0.25 + leaf_target * 0.75;
+    } else if softened_foliage {
         face_term = face_term * 0.28 + 0.72;
     }
     let mut light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
     let base_floor = 0.18 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.72;
     let foliage_floor = 0.34 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.66;
-    if softened_foliage {
+    if leaf_block {
+        let leaf_floor = 0.52 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.34;
+        light = (light * 1.12 + 0.04).max(leaf_floor);
+    } else if softened_foliage {
         light = light.max(foliage_floor);
     } else {
         light = light.max(base_floor);
     }
     let shade = light * face_term * ao_shadow_term;
-    let min_final = if softened_foliage {
+    let min_final = if leaf_block {
+        0.52 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.20
+    } else if softened_foliage {
         foliage_floor
     } else {
         base_floor * 0.92

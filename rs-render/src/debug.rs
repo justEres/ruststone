@@ -199,6 +199,7 @@ pub struct RenderDebugSettings {
     pub vanilla_face_shading_strength: f32,
     pub vanilla_ambient_floor: f32,
     pub vanilla_light_curve: f32,
+    pub vanilla_foliage_tint_strength: f32,
     pub vanilla_block_shadow_mode: VanillaBlockShadowMode,
     pub vanilla_block_shadow_strength: f32,
     pub vanilla_sun_trace_samples: u8,
@@ -304,6 +305,7 @@ impl Default for RenderDebugSettings {
             vanilla_face_shading_strength: 0.52,
             vanilla_ambient_floor: 0.26,
             vanilla_light_curve: 1.10,
+            vanilla_foliage_tint_strength: 1.35,
             vanilla_block_shadow_mode: VanillaBlockShadowMode::SkylightOnly,
             vanilla_block_shadow_strength: 0.28,
             vanilla_sun_trace_samples: 4,
@@ -393,6 +395,7 @@ pub struct MeshingToggleState {
     pub last_vanilla_face_shading_strength: f32,
     pub last_vanilla_ambient_floor: f32,
     pub last_vanilla_light_curve: f32,
+    pub last_vanilla_foliage_tint_strength: f32,
     pub last_vanilla_sky_light_strength: f32,
     pub last_vanilla_block_light_strength: f32,
     pub last_vanilla_ao_shadow_blend: f32,
@@ -415,6 +418,7 @@ impl Default for MeshingToggleState {
             last_vanilla_face_shading_strength: 0.70,
             last_vanilla_ambient_floor: 0.16,
             last_vanilla_light_curve: 1.10,
+            last_vanilla_foliage_tint_strength: 1.35,
             last_vanilla_sky_light_strength: 1.00,
             last_vanilla_block_light_strength: 0.92,
             last_vanilla_ao_shadow_blend: 0.55,
@@ -784,6 +788,9 @@ pub fn remesh_on_meshing_toggle(
             < 0.001
         && (settings.vanilla_ambient_floor - state.last_vanilla_ambient_floor).abs() < 0.001
         && (settings.vanilla_light_curve - state.last_vanilla_light_curve).abs() < 0.001
+        && (settings.vanilla_foliage_tint_strength - state.last_vanilla_foliage_tint_strength)
+            .abs()
+            < 0.001
         && (settings.vanilla_sky_light_strength - state.last_vanilla_sky_light_strength).abs()
             < 0.001
         && (settings.vanilla_block_light_strength - state.last_vanilla_block_light_strength)
@@ -809,6 +816,7 @@ pub fn remesh_on_meshing_toggle(
     state.last_vanilla_face_shading_strength = settings.vanilla_face_shading_strength;
     state.last_vanilla_ambient_floor = settings.vanilla_ambient_floor;
     state.last_vanilla_light_curve = settings.vanilla_light_curve;
+    state.last_vanilla_foliage_tint_strength = settings.vanilla_foliage_tint_strength;
     state.last_vanilla_sky_light_strength = settings.vanilla_sky_light_strength;
     state.last_vanilla_block_light_strength = settings.vanilla_block_light_strength;
     state.last_vanilla_ao_shadow_blend = settings.vanilla_ao_shadow_blend;

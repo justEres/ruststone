@@ -126,6 +126,7 @@ enum SettingId {
     VanillaFaceShadingStrength,
     VanillaAmbientFloor,
     VanillaLightCurve,
+    VanillaFoliageTintStrength,
     VanillaBlockShadowMode,
     VanillaBlockShadowStrength,
     VanillaSunTraceSamples,
@@ -266,6 +267,7 @@ const SETTINGS: &[SettingEntry] = &[
     SettingEntry { id: SettingId::VanillaFaceShadingStrength, title: "Face shading strength", category: SettingsCategory::Lighting, aliases: &["face shading"], visible: vanilla_only },
     SettingEntry { id: SettingId::VanillaAmbientFloor, title: "Ambient floor", category: SettingsCategory::Lighting, aliases: &["ambient floor"], visible: vanilla_only },
     SettingEntry { id: SettingId::VanillaLightCurve, title: "Light curve", category: SettingsCategory::Lighting, aliases: &["curve"], visible: vanilla_only },
+    SettingEntry { id: SettingId::VanillaFoliageTintStrength, title: "Foliage tint strength", category: SettingsCategory::Lighting, aliases: &["leaf tint", "biome tint", "foliage tint"], visible: vanilla_only },
     SettingEntry { id: SettingId::VanillaBlockShadowMode, title: "Block shadow mode", category: SettingsCategory::Lighting, aliases: &["block shadows"], visible: vanilla_only },
     SettingEntry { id: SettingId::VanillaBlockShadowStrength, title: "Block shadow strength", category: SettingsCategory::Lighting, aliases: &["shadow strength"], visible: vanilla_only },
     SettingEntry { id: SettingId::VanillaSunTraceSamples, title: "Sun trace samples", category: SettingsCategory::Lighting, aliases: &["sun trace"], visible: vanilla_only },
@@ -557,6 +559,7 @@ fn render_setting_row(
         SettingId::VanillaFaceShadingStrength => ui.add(egui::Slider::new(&mut render_debug.vanilla_face_shading_strength, 0.0..=1.0).text("Face shading strength")).changed(),
         SettingId::VanillaAmbientFloor => ui.add(egui::Slider::new(&mut render_debug.vanilla_ambient_floor, 0.0..=0.95).text("Ambient floor")).changed(),
         SettingId::VanillaLightCurve => ui.add(egui::Slider::new(&mut render_debug.vanilla_light_curve, 0.35..=2.5).text("Light curve")).changed(),
+        SettingId::VanillaFoliageTintStrength => ui.add(egui::Slider::new(&mut render_debug.vanilla_foliage_tint_strength, 0.0..=2.5).text("Foliage tint strength")).changed(),
         SettingId::VanillaBlockShadowMode => {
             let mut selected = render_debug.vanilla_block_shadow_mode;
             egui::ComboBox::from_label("Block shadow mode")

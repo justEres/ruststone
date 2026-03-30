@@ -814,6 +814,7 @@ struct ClientOptionsFile {
     pub vanilla_face_shading_strength: f32,
     pub vanilla_ambient_floor: f32,
     pub vanilla_light_curve: f32,
+    pub vanilla_foliage_tint_strength: f32,
     pub vanilla_block_shadow_mode: String,
     pub vanilla_block_shadow_strength: f32,
     pub vanilla_sun_trace_samples: u8,
@@ -926,6 +927,7 @@ impl Default for ClientOptionsFile {
             vanilla_face_shading_strength: render.vanilla_face_shading_strength,
             vanilla_ambient_floor: render.vanilla_ambient_floor,
             vanilla_light_curve: render.vanilla_light_curve,
+            vanilla_foliage_tint_strength: render.vanilla_foliage_tint_strength,
             vanilla_block_shadow_mode: render.vanilla_block_shadow_mode.as_options_value().to_string(),
             vanilla_block_shadow_strength: render.vanilla_block_shadow_strength,
             vanilla_sun_trace_samples: render.vanilla_sun_trace_samples,
@@ -1042,6 +1044,7 @@ fn options_to_file(
         vanilla_face_shading_strength: render.vanilla_face_shading_strength,
         vanilla_ambient_floor: render.vanilla_ambient_floor,
         vanilla_light_curve: render.vanilla_light_curve,
+        vanilla_foliage_tint_strength: render.vanilla_foliage_tint_strength,
         vanilla_block_shadow_mode: render.vanilla_block_shadow_mode.as_options_value().to_string(),
         vanilla_block_shadow_strength: render.vanilla_block_shadow_strength,
         vanilla_sun_trace_samples: render.vanilla_sun_trace_samples,
@@ -1166,6 +1169,8 @@ fn apply_options(
         options.vanilla_face_shading_strength.clamp(0.0, 1.0);
     render.vanilla_ambient_floor = options.vanilla_ambient_floor.clamp(0.0, 0.95);
     render.vanilla_light_curve = options.vanilla_light_curve.clamp(0.35, 2.5);
+    render.vanilla_foliage_tint_strength =
+        options.vanilla_foliage_tint_strength.clamp(0.0, 2.5);
     render.vanilla_block_shadow_mode =
         VanillaBlockShadowMode::from_options_value(&options.vanilla_block_shadow_mode)
             .unwrap_or(VanillaBlockShadowMode::SkylightOnly);

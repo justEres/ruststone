@@ -742,7 +742,7 @@ impl BiomeTintResolver {
             .unwrap_or_else(|| sample_colormap(&self.foliage_colormap, climate.temp, climate.rain));
         BiomeTint {
             grass: tuned_biome_tint(rgb_hex(grass), 0.48, 1.18, 1.05),
-            foliage: tuned_biome_tint(rgb_hex(foliage), 0.44, 1.15, 1.03),
+            foliage: tuned_biome_tint(rgb_hex(foliage), 0.52, 1.34, 1.18),
             water: rgb_hex(climate.water),
         }
     }
