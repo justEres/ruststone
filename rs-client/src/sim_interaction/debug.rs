@@ -651,6 +651,25 @@ pub fn debug_overlay_system(
                         params.render_perf.mat_unlit_cutout_culled,
                         params.render_perf.mat_unlit_transparent
                     ));
+                    let shading_model_label = match params.render_perf.shading_model {
+                        0 => "Classic Fast",
+                        1 => "Vanilla Lighting",
+                        2 => "PBR Fancy",
+                        _ => "Unknown",
+                    };
+                    ui.label(format!("shading model: {}", shading_model_label));
+                    if params.render_perf.gpu_timing_supported {
+                        ui.label(format!(
+                            "gpu frame: {:.2} ms (hottest pass {:.2} ms)",
+                            params.render_perf.gpu_frame_ms, params.render_perf.gpu_hottest_pass_ms
+                        ));
+                    } else {
+                        ui.label("gpu timings: unavailable, using CPU render proxy");
+                    }
+                    ui.label(format!(
+                        "mesh bake shadow cost: {:.2} ms",
+                        params.render_perf.mesh_bake_shadow_ms
+                    ));
                 }
             }
         });

@@ -1,6 +1,6 @@
 use bevy::prelude::Reflect;
 
-use crate::debug::RenderDebugSettings;
+use crate::debug::{RenderDebugSettings, ShadingModel};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
@@ -96,6 +96,6 @@ impl ShadowQualityPreset {
     }
 }
 
-pub const fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
-    settings.enable_pbr_terrain_lighting
+pub fn uses_shadowed_pbr_path(settings: &RenderDebugSettings) -> bool {
+    settings.shading_model == ShadingModel::PbrFancy || settings.enable_pbr_terrain_lighting
 }

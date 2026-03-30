@@ -24,6 +24,7 @@ use crate::block_textures::{
     BiomeTintResolver, Face, TintClass, atlas_tile_origin, build_block_texture_mapping,
     classify_tint, is_leaves_block, is_transparent_block, uv_for_texture,
 };
+use crate::debug::{RenderDebugSettings, ShadingModel, VanillaBlockShadowMode};
 use crate::lighting::{lighting_uniform_for_mode, uses_shadowed_pbr_path};
 
 const CHUNK_SIZE: i32 = 16;
@@ -41,6 +42,8 @@ pub struct AtlasLightingUniform {
     pub ambient_and_fog: Vec4,
     pub quality_and_water: Vec4,
     pub color_grading: Vec4,
+    pub vanilla_light: Vec4,
+    pub vanilla_shadow: Vec4,
     pub water_effects: Vec4,
     pub water_controls: Vec4,
     pub water_extra: Vec4,
@@ -48,6 +51,41 @@ pub struct AtlasLightingUniform {
     pub debug_flags: Vec4,
     pub grass_overlay_info: Vec4,
     pub reflection_view_proj: Mat4,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct VanillaBakeSettings {
+    pub shading_model: ShadingModel,
+    pub sky_light_strength: f32,
+    pub block_light_strength: f32,
+    pub face_shading_strength: f32,
+    pub ambient_floor: f32,
+    pub light_curve: f32,
+    pub block_shadow_mode: VanillaBlockShadowMode,
+    pub block_shadow_strength: f32,
+    pub sun_trace_samples: u8,
+    pub sun_trace_distance: f32,
+    pub top_face_sun_bias: f32,
+    pub ao_shadow_blend: f32,
+}
+
+impl VanillaBakeSettings {
+    pub fn from_render_settings(settings: &RenderDebugSettings) -> Self {
+        Self {
+            shading_model: settings.shading_model,
+            sky_light_strength: settings.vanilla_sky_light_strength,
+            block_light_strength: settings.vanilla_block_light_strength,
+            face_shading_strength: settings.vanilla_face_shading_strength,
+            ambient_floor: settings.vanilla_ambient_floor,
+            light_curve: settings.vanilla_light_curve,
+            block_shadow_mode: settings.vanilla_block_shadow_mode,
+            block_shadow_strength: settings.vanilla_block_shadow_strength,
+            sun_trace_samples: settings.vanilla_sun_trace_samples,
+            sun_trace_distance: settings.vanilla_sun_trace_distance,
+            top_face_sun_bias: settings.vanilla_top_face_sun_bias,
+            ao_shadow_blend: settings.vanilla_ao_shadow_blend,
+        }
+    }
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -196,6 +234,7 @@ impl ChunkColumnSnapshot {
         voxel_ao_strength: f32,
         voxel_ao_cutout: bool,
         barrier_billboard: bool,
+        vanilla_bake: VanillaBakeSettings,
         texture_mapping: &AtlasBlockMapping,
         biome_tints: &BiomeTintResolver,
     ) -> MeshBatch {
@@ -209,6 +248,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_strength,
                 voxel_ao_cutout,
                 barrier_billboard,
+                vanilla_bake,
                 texture_mapping,
                 biome_tints,
             )
@@ -222,6 +262,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_strength,
                 voxel_ao_cutout,
                 barrier_billboard,
+                vanilla_bake,
                 texture_mapping,
                 biome_tints,
             )
@@ -1064,6 +1105,7 @@ fn build_chunk_mesh_culled(
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
     barrier_billboard: bool,
+    vanilla_bake: VanillaBakeSettings,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -1115,6 +1157,7 @@ fn build_chunk_mesh_culled(
                         voxel_ao_enabled,
                         voxel_ao_strength,
                         voxel_ao_cutout,
+                        vanilla_bake,
                         chunk_x,
                         chunk_z,
                         x,
@@ -1156,6 +1199,7 @@ fn build_chunk_mesh_greedy(
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
     barrier_billboard: bool,
+    vanilla_bake: VanillaBakeSettings,
     texture_mapping: &AtlasBlockMapping,
     biome_tints: &BiomeTintResolver,
 ) -> MeshBatch {
@@ -1262,6 +1306,7 @@ fn build_chunk_mesh_greedy(
                                 voxel_ao_enabled,
                                 voxel_ao_strength,
                                 voxel_ao_cutout,
+                                vanilla_bake,
                             ),
                         };
 
@@ -1292,13 +1337,14 @@ fn build_chunk_mesh_greedy(
                             quad,
                             key.texture_index,
                             key.block_id,
-                            tint,
-                            voxel_ao_enabled,
-                            voxel_ao_strength,
-                            voxel_ao_cutout,
-                        );
-                    }
+                        tint,
+                        voxel_ao_enabled,
+                        voxel_ao_strength,
+                        voxel_ao_cutout,
+                        vanilla_bake,
+                    );
                 }
+            }
             }
         }
     }
@@ -1321,6 +1367,7 @@ fn add_greedy_quad(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    vanilla_bake: VanillaBakeSettings,
 ) {
     let data = batch.data_for(block_id);
     let base_index = data.positions.len() as u32;
@@ -1408,6 +1455,7 @@ fn add_greedy_quad(
         voxel_ao_enabled,
         voxel_ao_strength,
         voxel_ao_cutout,
+        vanilla_bake,
     );
     for shade in shades {
         if is_grass_side_face(block_id, face) {
@@ -1489,6 +1537,7 @@ fn add_block_faces(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    vanilla_bake: VanillaBakeSettings,
     chunk_x: i32,
     chunk_z: i32,
     x: i32,
@@ -1620,6 +1669,7 @@ fn add_block_faces(
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                vanilla_bake,
             );
             if is_grass_side_face(block_id, face) {
                 data.colors
@@ -3127,6 +3177,108 @@ fn ao_factor(side1: bool, side2: bool, corner: bool) -> f32 {
     }
 }
 
+fn vanilla_face_shade(face: Face, vanilla_bake: VanillaBakeSettings) -> f32 {
+    let target = match face {
+        Face::PosY => 1.0,
+        Face::NegY => 0.52,
+        Face::PosZ | Face::NegZ => 0.80,
+        Face::PosX | Face::NegX => 0.66,
+    };
+    let strength = vanilla_bake.face_shading_strength.clamp(0.0, 1.0);
+    1.0 - strength + target * strength
+}
+
+fn vanilla_light_mix(sky_level: f32, block_level: f32, vanilla_bake: VanillaBakeSettings) -> f32 {
+    let sky = (sky_level / 15.0).clamp(0.0, 1.0) * vanilla_bake.sky_light_strength.clamp(0.0, 2.0);
+    let block =
+        (block_level / 15.0).clamp(0.0, 1.0) * vanilla_bake.block_light_strength.clamp(0.0, 2.0);
+    let ambient = vanilla_bake.ambient_floor.clamp(0.0, 0.95);
+    let mixed = (ambient + sky + block).clamp(0.0, 1.0);
+    let curve = vanilla_bake.light_curve.clamp(0.35, 2.5);
+    mixed.powf(1.0 / curve)
+}
+
+fn vanilla_block_shadow_factor(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    sky_level: f32,
+    vanilla_bake: VanillaBakeSettings,
+) -> f32 {
+    if matches!(vanilla_bake.block_shadow_mode, VanillaBlockShadowMode::Off) {
+        return 1.0;
+    }
+    let strength = vanilla_bake.block_shadow_strength.clamp(0.0, 1.0);
+    if strength <= 0.001 {
+        return 1.0;
+    }
+
+    let skylight_occlusion = 1.0 - (sky_level / 15.0).clamp(0.0, 1.0);
+    let mut shadow = skylight_occlusion;
+
+    if matches!(
+        vanilla_bake.block_shadow_mode,
+        VanillaBlockShadowMode::SkylightPlusSunTrace
+    ) && matches!(face, Face::PosY | Face::PosX | Face::NegX | Face::PosZ | Face::NegZ)
+    {
+        let trace = trace_sun_shadow(snapshot, chunk_x, chunk_z, x, y, z, face, vanilla_bake);
+        shadow = shadow.max(trace);
+        if matches!(face, Face::PosY) {
+            shadow = (shadow - vanilla_bake.top_face_sun_bias.clamp(0.0, 0.5)).max(0.0);
+        }
+    }
+
+    (1.0 - shadow * strength).clamp(0.0, 1.0)
+}
+
+fn trace_sun_shadow(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    vanilla_bake: VanillaBakeSettings,
+) -> f32 {
+    let samples = vanilla_bake.sun_trace_samples.clamp(1, 8) as i32;
+    let max_distance = vanilla_bake.sun_trace_distance.clamp(1.0, 12.0);
+    let origin = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+    let bias = match face {
+        Face::PosY => Vec3::new(0.0, 0.55, 0.0),
+        Face::NegY => Vec3::new(0.0, -0.1, 0.0),
+        Face::PosX => Vec3::new(0.55, 0.2, 0.0),
+        Face::NegX => Vec3::new(-0.55, 0.2, 0.0),
+        Face::PosZ => Vec3::new(0.0, 0.2, 0.55),
+        Face::NegZ => Vec3::new(0.0, 0.2, -0.55),
+    };
+    let start = origin + bias;
+    let sun_dir = Vec3::new(-0.55, 1.0, -0.35).normalize();
+    let mut occluded = 0.0;
+
+    for step in 1..=samples {
+        let t = max_distance * (step as f32 / samples as f32);
+        let sample_pos = start + sun_dir * t;
+        let block = block_at(
+            snapshot,
+            chunk_x,
+            chunk_z,
+            sample_pos.x.floor() as i32,
+            sample_pos.y.floor() as i32,
+            sample_pos.z.floor() as i32,
+        );
+        if is_ao_occluder(block) {
+            occluded += 1.0;
+        }
+    }
+
+    (occluded / samples as f32).clamp(0.0, 1.0)
+}
+
 fn light_factor_from_level_with_floor(level: f32, floor: f32) -> f32 {
     let floor = floor.clamp(0.0, 0.95);
     (floor + (level / 15.0) * (1.0 - floor)).clamp(0.0, 1.0)
@@ -3190,6 +3342,7 @@ fn face_shade_signature(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    vanilla_bake: VanillaBakeSettings,
 ) -> u16 {
     let verts = face_vertices(face);
     let mut packed = 0u16;
@@ -3207,6 +3360,7 @@ fn face_shade_signature(
             voxel_ao_enabled,
             voxel_ao_strength,
             voxel_ao_cutout,
+            vanilla_bake,
         );
         packed |= quantize_shade_4bit(shade) << (idx * 4);
     }
@@ -3235,17 +3389,39 @@ fn compute_vertex_shade(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    vanilla_bake: VanillaBakeSettings,
 ) -> f32 {
     if !can_apply_vertex_shading(block_id, voxel_ao_cutout) {
         return 1.0;
     }
-    let (ao, light) = face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
-    if voxel_ao_enabled {
+    let (ao, sky_level, block_level) =
+        face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
+    let ao_term = if voxel_ao_enabled {
         let s = voxel_ao_strength.clamp(0.0, 1.0);
-        light * (1.0 - s + ao * s)
+        1.0 - s + ao * s
     } else {
-        light
-    }
+        1.0
+    };
+    let shadow_term = vanilla_block_shadow_factor(
+        snapshot,
+        chunk_x,
+        chunk_z,
+        x,
+        y,
+        z,
+        face,
+        sky_level,
+        vanilla_bake,
+    );
+    let ao_shadow_term = if voxel_ao_enabled {
+        let blend = vanilla_bake.ao_shadow_blend.clamp(0.0, 1.0);
+        ao_term * (1.0 - blend) + (ao_term * shadow_term) * blend
+    } else {
+        shadow_term
+    };
+    let face_term = vanilla_face_shade(face, vanilla_bake);
+    let light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
+    (light * face_term * ao_shadow_term).clamp(0.0, 1.0)
 }
 
 fn face_vertex_light_ao(
@@ -3257,7 +3433,7 @@ fn face_vertex_light_ao(
     z: i32,
     face: Face,
     vertex: [f32; 3],
-) -> (f32, f32) {
+) -> (f32, f32, f32) {
     let (nx, ny, nz, axis_a, axis_b) = match face {
         Face::PosX => (1, 0, 0, 1usize, 2usize), // y,z
         Face::NegX => (-1, 0, 0, 1usize, 2usize),
@@ -3297,8 +3473,13 @@ fn face_vertex_light_ao(
         + f32::from(l2.block.max(l2.sky))
         + f32::from(l3.block.max(l3.sky)))
         * 0.25;
-    let light = light_factor_from_level_with_floor(level, 0.18);
-    (ao, light)
+    let sky_level = (f32::from(l0.sky) + f32::from(l1.sky) + f32::from(l2.sky) + f32::from(l3.sky))
+        * 0.25;
+    let block_level =
+        (f32::from(l0.block) + f32::from(l1.block) + f32::from(l2.block) + f32::from(l3.block))
+            * 0.25;
+    let _ = level;
+    (ao, sky_level, block_level)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3314,6 +3495,7 @@ fn greedy_face_corner_shades(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    vanilla_bake: VanillaBakeSettings,
 ) -> [f32; 4] {
     let x0 = quad.x as i32;
     let x1 = quad.x as i32 + quad.w as i32 - 1;
@@ -3336,6 +3518,7 @@ fn greedy_face_corner_shades(
             voxel_ao_enabled,
             voxel_ao_strength,
             voxel_ao_cutout,
+            vanilla_bake,
         )
     };
 

@@ -13,7 +13,7 @@ use bevy_egui::{
 };
 use rs_render::{
     AntiAliasingMode, BlockModelResolver, IconQuad, ModelFace, RenderDebugSettings,
-    default_model_roots,
+    ShadingModel, VanillaBlockShadowMode, default_model_roots,
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,
@@ -1119,10 +1119,22 @@ fn connect_ui(
                 let lighting_section = egui::CollapsingHeader::new("Lighting & Shadows")
                     .default_open(state.options_section_lighting)
                     .show(ui, |ui| {
+                        let mut shading_model = render_debug.shading_model;
+                        egui::ComboBox::from_label("Shading preset")
+                            .selected_text(shading_model.label())
+                            .show_ui(ui, |ui| {
+                                for mode in ShadingModel::ALL {
+                                    ui.selectable_value(&mut shading_model, mode, mode.label());
+                                }
+                            });
+                        if shading_model != render_debug.shading_model {
+                            render_debug.shading_model = shading_model;
+                            options_changed = true;
+                        }
                         options_changed |= ui
                             .checkbox(
                                 &mut render_debug.enable_pbr_terrain_lighting,
-                                "PBR terrain path",
+                                "Force PBR terrain path",
                             )
                             .changed();
                         options_changed |= ui
@@ -1143,6 +1155,113 @@ fn connect_ui(
                                     .text("Shader quality mode"),
                             )
                             .changed();
+                        ui.separator();
+                        ui.collapsing("Advanced Vanilla Lighting", |ui| {
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_sky_light_strength,
+                                        0.0..=2.0,
+                                    )
+                                    .text("Sky light strength"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_block_light_strength,
+                                        0.0..=2.0,
+                                    )
+                                    .text("Block light strength"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_face_shading_strength,
+                                        0.0..=1.0,
+                                    )
+                                    .text("Face shading strength"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_ambient_floor,
+                                        0.0..=0.95,
+                                    )
+                                    .text("Ambient floor"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_light_curve,
+                                        0.35..=2.5,
+                                    )
+                                    .text("Light curve"),
+                                )
+                                .changed();
+
+                            let mut shadow_mode = render_debug.vanilla_block_shadow_mode;
+                            egui::ComboBox::from_label("Block shadow mode")
+                                .selected_text(shadow_mode.label())
+                                .show_ui(ui, |ui| {
+                                    for mode in VanillaBlockShadowMode::ALL {
+                                        ui.selectable_value(&mut shadow_mode, mode, mode.label());
+                                    }
+                                });
+                            if shadow_mode != render_debug.vanilla_block_shadow_mode {
+                                render_debug.vanilla_block_shadow_mode = shadow_mode;
+                                options_changed = true;
+                            }
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_block_shadow_strength,
+                                        0.0..=1.0,
+                                    )
+                                    .text("Block shadow strength"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_sun_trace_samples,
+                                        1..=8,
+                                    )
+                                    .text("Sun trace samples"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_sun_trace_distance,
+                                        1.0..=12.0,
+                                    )
+                                    .text("Sun trace distance"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_top_face_sun_bias,
+                                        0.0..=0.5,
+                                    )
+                                    .text("Top-face sun bias"),
+                                )
+                                .changed();
+                            options_changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut render_debug.vanilla_ao_shadow_blend,
+                                        0.0..=1.0,
+                                    )
+                                    .text("AO/shadow blend"),
+                                )
+                                .changed();
+                        });
+                        ui.separator();
                         options_changed |= ui
                             .add(
                                 egui::Slider::new(
@@ -2016,8 +2135,20 @@ struct ClientOptionsFile {
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
     pub show_chunk_borders: bool,
+    pub shading_model: String,
     pub shader_quality_mode: u8,
     pub enable_pbr_terrain_lighting: bool,
+    pub vanilla_sky_light_strength: f32,
+    pub vanilla_block_light_strength: f32,
+    pub vanilla_face_shading_strength: f32,
+    pub vanilla_ambient_floor: f32,
+    pub vanilla_light_curve: f32,
+    pub vanilla_block_shadow_mode: String,
+    pub vanilla_block_shadow_strength: f32,
+    pub vanilla_sun_trace_samples: u8,
+    pub vanilla_sun_trace_distance: f32,
+    pub vanilla_top_face_sun_bias: f32,
+    pub vanilla_ao_shadow_blend: f32,
     pub sync_sun_with_time: bool,
     pub render_sun_sprite: bool,
     pub sun_azimuth_deg: f32,
@@ -2116,8 +2247,20 @@ impl Default for ClientOptionsFile {
             render_first_person_arms: render.render_first_person_arms,
             render_self_model: render.render_self_model,
             show_chunk_borders: render.show_chunk_borders,
+            shading_model: render.shading_model.as_options_value().to_string(),
             shader_quality_mode: render.shader_quality_mode,
             enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+            vanilla_sky_light_strength: render.vanilla_sky_light_strength,
+            vanilla_block_light_strength: render.vanilla_block_light_strength,
+            vanilla_face_shading_strength: render.vanilla_face_shading_strength,
+            vanilla_ambient_floor: render.vanilla_ambient_floor,
+            vanilla_light_curve: render.vanilla_light_curve,
+            vanilla_block_shadow_mode: render.vanilla_block_shadow_mode.as_options_value().to_string(),
+            vanilla_block_shadow_strength: render.vanilla_block_shadow_strength,
+            vanilla_sun_trace_samples: render.vanilla_sun_trace_samples,
+            vanilla_sun_trace_distance: render.vanilla_sun_trace_distance,
+            vanilla_top_face_sun_bias: render.vanilla_top_face_sun_bias,
+            vanilla_ao_shadow_blend: render.vanilla_ao_shadow_blend,
             sync_sun_with_time: render.sync_sun_with_time,
             render_sun_sprite: render.render_sun_sprite,
             sun_azimuth_deg: render.sun_azimuth_deg,
@@ -2220,8 +2363,20 @@ fn options_to_file(
         render_first_person_arms: render.render_first_person_arms,
         render_self_model: render.render_self_model,
         show_chunk_borders: render.show_chunk_borders,
+        shading_model: render.shading_model.as_options_value().to_string(),
         shader_quality_mode: render.shader_quality_mode,
         enable_pbr_terrain_lighting: render.enable_pbr_terrain_lighting,
+        vanilla_sky_light_strength: render.vanilla_sky_light_strength,
+        vanilla_block_light_strength: render.vanilla_block_light_strength,
+        vanilla_face_shading_strength: render.vanilla_face_shading_strength,
+        vanilla_ambient_floor: render.vanilla_ambient_floor,
+        vanilla_light_curve: render.vanilla_light_curve,
+        vanilla_block_shadow_mode: render.vanilla_block_shadow_mode.as_options_value().to_string(),
+        vanilla_block_shadow_strength: render.vanilla_block_shadow_strength,
+        vanilla_sun_trace_samples: render.vanilla_sun_trace_samples,
+        vanilla_sun_trace_distance: render.vanilla_sun_trace_distance,
+        vanilla_top_face_sun_bias: render.vanilla_top_face_sun_bias,
+        vanilla_ao_shadow_blend: render.vanilla_ao_shadow_blend,
         sync_sun_with_time: render.sync_sun_with_time,
         render_sun_sprite: render.render_sun_sprite,
         sun_azimuth_deg: render.sun_azimuth_deg,
@@ -2327,7 +2482,28 @@ fn apply_options(
     render.render_first_person_arms = options.render_first_person_arms;
     render.render_self_model = options.render_self_model;
     render.show_chunk_borders = options.show_chunk_borders;
+    render.shading_model = ShadingModel::from_options_value(&options.shading_model)
+        .unwrap_or(if options.enable_pbr_terrain_lighting {
+            ShadingModel::PbrFancy
+        } else {
+            ShadingModel::VanillaLighting
+        });
     render.enable_pbr_terrain_lighting = options.enable_pbr_terrain_lighting;
+    render.vanilla_sky_light_strength = options.vanilla_sky_light_strength.clamp(0.0, 2.0);
+    render.vanilla_block_light_strength = options.vanilla_block_light_strength.clamp(0.0, 2.0);
+    render.vanilla_face_shading_strength =
+        options.vanilla_face_shading_strength.clamp(0.0, 1.0);
+    render.vanilla_ambient_floor = options.vanilla_ambient_floor.clamp(0.0, 0.95);
+    render.vanilla_light_curve = options.vanilla_light_curve.clamp(0.35, 2.5);
+    render.vanilla_block_shadow_mode =
+        VanillaBlockShadowMode::from_options_value(&options.vanilla_block_shadow_mode)
+            .unwrap_or(VanillaBlockShadowMode::SkylightOnly);
+    render.vanilla_block_shadow_strength =
+        options.vanilla_block_shadow_strength.clamp(0.0, 1.0);
+    render.vanilla_sun_trace_samples = options.vanilla_sun_trace_samples.clamp(1, 8);
+    render.vanilla_sun_trace_distance = options.vanilla_sun_trace_distance.clamp(1.0, 12.0);
+    render.vanilla_top_face_sun_bias = options.vanilla_top_face_sun_bias.clamp(0.0, 0.5);
+    render.vanilla_ao_shadow_blend = options.vanilla_ao_shadow_blend.clamp(0.0, 1.0);
     render.sync_sun_with_time = options.sync_sun_with_time;
     render.render_sun_sprite = options.render_sun_sprite;
     render.sun_azimuth_deg = options.sun_azimuth_deg.clamp(-360.0, 360.0);

@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::chunk::{ChunkAtlasMaterial, ChunkRenderAssets};
 use crate::components::ShadowCasterLight;
-use crate::debug::{RenderDebugSettings, RenderPerfStats};
+use crate::debug::{RenderDebugSettings, RenderPerfStats, ShadingModel};
 use rs_utils::WorldTime;
 
 use super::presets::uses_shadowed_pbr_path;
@@ -195,7 +195,9 @@ pub fn apply_lighting_quality(
     let shadow_dist_scale = settings.shadow_distance_scale.clamp(0.25, 20.0);
     shadow_map.size = settings.shadow_map_size.clamp(256, 4096) as usize;
 
-    let allow_shadows = settings.shadows_enabled && settings.shadow_cascades > 0;
+    let allow_shadows = settings.shading_model == ShadingModel::PbrFancy
+        && settings.shadows_enabled
+        && settings.shadow_cascades > 0;
     let is_fancy = uses_shadowed_pbr_path(&settings);
     let shadow_opacity = settings.shadow_opacity.clamp(0.0, 1.0);
     let sun_color = sun_color_from_warmth(settings.sun_warmth);
@@ -347,8 +349,13 @@ fn alpha_mode_code(mode: &AlphaMode) -> u8 {
 pub fn update_material_debug_stats(
     assets: Res<ChunkRenderAssets>,
     materials: Res<Assets<ChunkAtlasMaterial>>,
+    settings: Res<RenderDebugSettings>,
     mut perf: ResMut<RenderPerfStats>,
 ) {
+    perf.shading_model = settings.shading_model as u32;
+    perf.gpu_timing_supported = false;
+    perf.gpu_frame_ms = 0.0;
+    perf.gpu_hottest_pass_ms = 0.0;
     if let Some(mat) = materials.get(&assets.opaque_material) {
         perf.mat_pass_opaque = mat.extension.lighting.quality_and_water.w;
         perf.mat_alpha_opaque = alpha_mode_code(&mat.base.alpha_mode);

@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::block_textures::AtlasBlockMapping;
 use crate::block_textures::BiomeTintResolver;
-use crate::chunk::{ChunkColumnSnapshot, MeshBatch};
+use crate::chunk::{ChunkColumnSnapshot, MeshBatch, VanillaBakeSettings};
 
 #[derive(Resource)]
 pub struct MeshAsyncResources {
@@ -71,6 +71,7 @@ pub struct MeshJob {
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
     pub barrier_billboard: bool,
+    pub vanilla_bake: VanillaBakeSettings,
     pub texture_mapping: Arc<AtlasBlockMapping>,
     pub biome_tints: Arc<BiomeTintResolver>,
 }
@@ -84,6 +85,7 @@ impl MeshJob {
             self.voxel_ao_strength,
             self.voxel_ao_cutout,
             self.barrier_billboard,
+            self.vanilla_bake,
             &self.texture_mapping,
             &self.biome_tints,
         )

@@ -26,7 +26,9 @@ pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
-pub use debug::{AntiAliasingMode, RenderDebugSettings};
+pub use debug::{
+    AntiAliasingMode, RenderDebugSettings, ShadingModel, VanillaBlockShadowMode,
+};
 pub use lighting::{LightingQualityPreset, ShadowQualityPreset};
 pub const MAIN_RENDER_LAYER: usize = reflection::MAIN_RENDER_LAYER;
 pub const CHUNK_OPAQUE_RENDER_LAYER: usize = reflection::CHUNK_OPAQUE_RENDER_LAYER;
@@ -222,6 +224,7 @@ fn enqueue_chunk_meshes(
             voxel_ao_strength: render_debug.voxel_ao_strength,
             voxel_ao_cutout: render_debug.voxel_ao_cutout,
             barrier_billboard: render_debug.barrier_billboard,
+            vanilla_bake: chunk::VanillaBakeSettings::from_render_settings(&render_debug),
             texture_mapping: assets.texture_mapping.clone(),
             biome_tints: assets.biome_tints.clone(),
         };
@@ -434,6 +437,7 @@ fn apply_mesh_results(
                 voxel_ao_strength: render_debug.voxel_ao_strength,
                 voxel_ao_cutout: render_debug.voxel_ao_cutout,
                 barrier_billboard: render_debug.barrier_billboard,
+                vanilla_bake: chunk::VanillaBakeSettings::from_render_settings(&render_debug),
                 texture_mapping: assets.texture_mapping.clone(),
                 biome_tints: assets.biome_tints.clone(),
             };
@@ -452,6 +456,7 @@ fn apply_mesh_results(
         perf.avg_apply_ms * 0.9 + elapsed_ms * 0.1
     };
     perf.last_mesh_build_ms = last_build_ms;
+    perf.mesh_bake_shadow_ms = last_build_ms;
     perf.avg_mesh_build_ms = if perf.avg_mesh_build_ms == 0.0 {
         last_build_ms
     } else {

@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 
 use crate::chunk::AtlasLightingUniform;
-use crate::debug::RenderDebugSettings;
+use crate::debug::{RenderDebugSettings, ShadingModel, VanillaBlockShadowMode};
 use crate::reflection::DEFAULT_WATER_PLANE_Y;
 use rs_utils::WorldTime;
 
@@ -15,6 +15,12 @@ pub(super) fn cutout_alpha_mode(settings: &RenderDebugSettings) -> AlphaMode {
 pub(super) fn water_reflection_mode(settings: &RenderDebugSettings, fixed_debug: bool) -> f32 {
     if fixed_debug {
         0.0
+    } else if settings.shading_model != ShadingModel::PbrFancy {
+        if settings.water_reflections_enabled {
+            2.0
+        } else {
+            0.0
+        }
     } else if settings.water_reflections_enabled && settings.water_reflection_screen_space {
         4.0
     } else {
@@ -71,6 +77,16 @@ pub fn lighting_uniform_for_mode(
     } else {
         settings.shader_quality_mode.clamp(0, 3) as f32
     };
+    let shading_model = match settings.shading_model {
+        ShadingModel::ClassicFast => 0.0,
+        ShadingModel::VanillaLighting => 1.0,
+        ShadingModel::PbrFancy => 2.0,
+    };
+    let vanilla_shadow_mode = match settings.vanilla_block_shadow_mode {
+        VanillaBlockShadowMode::Off => 0.0,
+        VanillaBlockShadowMode::SkylightOnly => 1.0,
+        VanillaBlockShadowMode::SkylightPlusSunTrace => 2.0,
+    };
     AtlasLightingUniform {
         sun_dir_and_strength: Vec4::new(sun_dir.x, sun_dir.y, sun_dir.z, settings.sun_strength),
         ambient_and_fog: Vec4::new(
@@ -108,6 +124,18 @@ pub fn lighting_uniform_for_mode(
             if fixed_debug { 1.0 } else { settings.color_contrast },
             if fixed_debug { 0.0 } else { settings.color_brightness },
             if fixed_debug { 1.0 } else { settings.color_gamma },
+        ),
+        vanilla_light: Vec4::new(
+            shading_model,
+            settings.vanilla_sky_light_strength,
+            settings.vanilla_block_light_strength,
+            settings.vanilla_face_shading_strength,
+        ),
+        vanilla_shadow: Vec4::new(
+            vanilla_shadow_mode,
+            settings.vanilla_block_shadow_strength,
+            settings.vanilla_light_curve,
+            settings.vanilla_ambient_floor,
         ),
         water_effects: Vec4::new(
             water_reflection_mode(settings, fixed_debug),
@@ -181,7 +209,7 @@ pub fn lighting_uniform_for_mode(
             settings.cutout_debug_mode as f32,
             settings.water_reflection_sky_fill,
             settings.shadow_opacity.clamp(0.0, 1.0),
-            0.0,
+            shading_model,
         ),
         grass_overlay_info: Vec4::new(f32::NAN, f32::NAN, f32::NAN, f32::NAN),
         reflection_view_proj: Mat4::IDENTITY,

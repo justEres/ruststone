@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
 use crate::components::PlayerCamera;
-use crate::debug::{AntiAliasingMode, RenderDebugSettings};
+use crate::debug::{AntiAliasingMode, RenderDebugSettings, ShadingModel};
 
 pub fn apply_antialiasing(
     settings: Res<RenderDebugSettings>,
@@ -137,8 +137,9 @@ pub fn apply_depth_prepass_for_ssr(
     let Ok((camera_entity, has_depth_prepass)) = camera_query.single() else {
         return;
     };
-    let want_depth_prepass =
-        settings.water_reflections_enabled && settings.water_reflection_screen_space;
+    let want_depth_prepass = settings.shading_model == ShadingModel::PbrFancy
+        && settings.water_reflections_enabled
+        && settings.water_reflection_screen_space;
     match (want_depth_prepass, has_depth_prepass.is_some()) {
         (true, false) => {
             commands.entity(camera_entity).insert(DepthPrepass);

@@ -80,6 +80,94 @@ impl AntiAliasingMode {
     }
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+pub enum ShadingModel {
+    ClassicFast,
+    VanillaLighting,
+    PbrFancy,
+}
+
+impl Default for ShadingModel {
+    fn default() -> Self {
+        Self::VanillaLighting
+    }
+}
+
+impl ShadingModel {
+    pub const ALL: [Self; 3] = [Self::ClassicFast, Self::VanillaLighting, Self::PbrFancy];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ClassicFast => "Classic Fast",
+            Self::VanillaLighting => "Vanilla Lighting",
+            Self::PbrFancy => "PBR Fancy",
+        }
+    }
+
+    pub const fn as_options_value(self) -> &'static str {
+        match self {
+            Self::ClassicFast => "classic_fast",
+            Self::VanillaLighting => "vanilla_lighting",
+            Self::PbrFancy => "pbr_fancy",
+        }
+    }
+
+    pub fn from_options_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "classic_fast" | "classicfast" | "fast" => Some(Self::ClassicFast),
+            "vanilla_lighting" | "vanillalighting" | "vanilla" => Some(Self::VanillaLighting),
+            "pbr_fancy" | "pbrfancy" | "pbr" | "fancy" => Some(Self::PbrFancy),
+            _ => None,
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+pub enum VanillaBlockShadowMode {
+    Off,
+    SkylightOnly,
+    SkylightPlusSunTrace,
+}
+
+impl Default for VanillaBlockShadowMode {
+    fn default() -> Self {
+        Self::SkylightOnly
+    }
+}
+
+impl VanillaBlockShadowMode {
+    pub const ALL: [Self; 3] = [Self::Off, Self::SkylightOnly, Self::SkylightPlusSunTrace];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::SkylightOnly => "Skylight Only",
+            Self::SkylightPlusSunTrace => "Skylight + Sun Trace",
+        }
+    }
+
+    pub const fn as_options_value(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::SkylightOnly => "skylight_only",
+            Self::SkylightPlusSunTrace => "skylight_plus_sun_trace",
+        }
+    }
+
+    pub fn from_options_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "skylight_only" | "skylightonly" => Some(Self::SkylightOnly),
+            "skylight_plus_sun_trace" | "skylightplussuntrace" | "sun_trace" => {
+                Some(Self::SkylightPlusSunTrace)
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct RenderDebugSettings {
     pub shadows_enabled: bool,
@@ -103,8 +191,20 @@ pub struct RenderDebugSettings {
     pub render_held_items: bool,
     pub render_first_person_arms: bool,
     pub render_self_model: bool,
+    pub shading_model: ShadingModel,
     pub shader_quality_mode: u8, // 0 fast .. 3 fancy
     pub enable_pbr_terrain_lighting: bool,
+    pub vanilla_sky_light_strength: f32,
+    pub vanilla_block_light_strength: f32,
+    pub vanilla_face_shading_strength: f32,
+    pub vanilla_ambient_floor: f32,
+    pub vanilla_light_curve: f32,
+    pub vanilla_block_shadow_mode: VanillaBlockShadowMode,
+    pub vanilla_block_shadow_strength: f32,
+    pub vanilla_sun_trace_samples: u8,
+    pub vanilla_sun_trace_distance: f32,
+    pub vanilla_top_face_sun_bias: f32,
+    pub vanilla_ao_shadow_blend: f32,
     pub sync_sun_with_time: bool,
     pub render_sun_sprite: bool,
     pub sun_azimuth_deg: f32,
@@ -196,8 +296,20 @@ impl Default for RenderDebugSettings {
             render_held_items: true,
             render_first_person_arms: true,
             render_self_model: true,
+            shading_model: ShadingModel::VanillaLighting,
             shader_quality_mode: 2,
             enable_pbr_terrain_lighting: false,
+            vanilla_sky_light_strength: 1.00,
+            vanilla_block_light_strength: 0.92,
+            vanilla_face_shading_strength: 0.70,
+            vanilla_ambient_floor: 0.16,
+            vanilla_light_curve: 1.10,
+            vanilla_block_shadow_mode: VanillaBlockShadowMode::SkylightOnly,
+            vanilla_block_shadow_strength: 0.42,
+            vanilla_sun_trace_samples: 4,
+            vanilla_sun_trace_distance: 4.0,
+            vanilla_top_face_sun_bias: 0.12,
+            vanilla_ao_shadow_blend: 0.55,
             sync_sun_with_time: true,
             render_sun_sprite: true,
             sun_azimuth_deg: 62.0,
@@ -272,6 +384,18 @@ pub struct MeshingToggleState {
     pub last_voxel_ao_cutout: bool,
     pub last_voxel_ao_strength: f32,
     pub last_barrier_billboard: bool,
+    pub last_shading_model: ShadingModel,
+    pub last_vanilla_block_shadow_mode: VanillaBlockShadowMode,
+    pub last_vanilla_block_shadow_strength: f32,
+    pub last_vanilla_sun_trace_samples: u8,
+    pub last_vanilla_sun_trace_distance: f32,
+    pub last_vanilla_top_face_sun_bias: f32,
+    pub last_vanilla_face_shading_strength: f32,
+    pub last_vanilla_ambient_floor: f32,
+    pub last_vanilla_light_curve: f32,
+    pub last_vanilla_sky_light_strength: f32,
+    pub last_vanilla_block_light_strength: f32,
+    pub last_vanilla_ao_shadow_blend: f32,
 }
 
 impl Default for MeshingToggleState {
@@ -282,6 +406,18 @@ impl Default for MeshingToggleState {
             last_voxel_ao_cutout: true,
             last_voxel_ao_strength: 1.0,
             last_barrier_billboard: true,
+            last_shading_model: ShadingModel::VanillaLighting,
+            last_vanilla_block_shadow_mode: VanillaBlockShadowMode::SkylightOnly,
+            last_vanilla_block_shadow_strength: 0.42,
+            last_vanilla_sun_trace_samples: 4,
+            last_vanilla_sun_trace_distance: 4.0,
+            last_vanilla_top_face_sun_bias: 0.12,
+            last_vanilla_face_shading_strength: 0.70,
+            last_vanilla_ambient_floor: 0.16,
+            last_vanilla_light_curve: 1.10,
+            last_vanilla_sky_light_strength: 1.00,
+            last_vanilla_block_light_strength: 0.92,
+            last_vanilla_ao_shadow_blend: 0.55,
         }
     }
 }
@@ -320,6 +456,11 @@ pub struct RenderPerfStats {
     pub mat_unlit_cutout: bool,
     pub mat_unlit_cutout_culled: bool,
     pub mat_unlit_transparent: bool,
+    pub shading_model: u32,
+    pub gpu_timing_supported: bool,
+    pub gpu_frame_ms: f32,
+    pub gpu_hottest_pass_ms: f32,
+    pub mesh_bake_shadow_ms: f32,
 }
 
 pub fn occlusion_cull_chunks(
@@ -628,6 +769,28 @@ pub fn remesh_on_meshing_toggle(
         && settings.voxel_ao_cutout == state.last_voxel_ao_cutout
         && (settings.voxel_ao_strength - state.last_voxel_ao_strength).abs() < 0.001
         && settings.barrier_billboard == state.last_barrier_billboard
+        && settings.shading_model == state.last_shading_model
+        && settings.vanilla_block_shadow_mode == state.last_vanilla_block_shadow_mode
+        && (settings.vanilla_block_shadow_strength - state.last_vanilla_block_shadow_strength)
+            .abs()
+            < 0.001
+        && settings.vanilla_sun_trace_samples == state.last_vanilla_sun_trace_samples
+        && (settings.vanilla_sun_trace_distance - state.last_vanilla_sun_trace_distance).abs()
+            < 0.001
+        && (settings.vanilla_top_face_sun_bias - state.last_vanilla_top_face_sun_bias).abs()
+            < 0.001
+        && (settings.vanilla_face_shading_strength - state.last_vanilla_face_shading_strength)
+            .abs()
+            < 0.001
+        && (settings.vanilla_ambient_floor - state.last_vanilla_ambient_floor).abs() < 0.001
+        && (settings.vanilla_light_curve - state.last_vanilla_light_curve).abs() < 0.001
+        && (settings.vanilla_sky_light_strength - state.last_vanilla_sky_light_strength).abs()
+            < 0.001
+        && (settings.vanilla_block_light_strength - state.last_vanilla_block_light_strength)
+            .abs()
+            < 0.001
+        && (settings.vanilla_ao_shadow_blend - state.last_vanilla_ao_shadow_blend).abs()
+            < 0.001
         && !settings.force_remesh
     {
         return;
@@ -637,6 +800,18 @@ pub fn remesh_on_meshing_toggle(
     state.last_voxel_ao_cutout = settings.voxel_ao_cutout;
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
     state.last_barrier_billboard = settings.barrier_billboard;
+    state.last_shading_model = settings.shading_model;
+    state.last_vanilla_block_shadow_mode = settings.vanilla_block_shadow_mode;
+    state.last_vanilla_block_shadow_strength = settings.vanilla_block_shadow_strength;
+    state.last_vanilla_sun_trace_samples = settings.vanilla_sun_trace_samples;
+    state.last_vanilla_sun_trace_distance = settings.vanilla_sun_trace_distance;
+    state.last_vanilla_top_face_sun_bias = settings.vanilla_top_face_sun_bias;
+    state.last_vanilla_face_shading_strength = settings.vanilla_face_shading_strength;
+    state.last_vanilla_ambient_floor = settings.vanilla_ambient_floor;
+    state.last_vanilla_light_curve = settings.vanilla_light_curve;
+    state.last_vanilla_sky_light_strength = settings.vanilla_sky_light_strength;
+    state.last_vanilla_block_light_strength = settings.vanilla_block_light_strength;
+    state.last_vanilla_ao_shadow_blend = settings.vanilla_ao_shadow_blend;
     settings.force_remesh = false;
     settings.clear_and_rebuild_meshes = false;
     generation.0 = generation.0.wrapping_add(1);
@@ -648,11 +823,12 @@ pub fn remesh_on_meshing_toggle(
 
 pub fn refresh_render_state_on_mode_change(
     mut settings: ResMut<RenderDebugSettings>,
-    mut last_mode: Local<Option<(u8, bool)>>,
+    mut last_mode: Local<Option<(u8, bool, ShadingModel)>>,
 ) {
     let mode = (
         settings.shader_quality_mode,
         settings.enable_pbr_terrain_lighting,
+        settings.shading_model,
     );
     let changed = last_mode.map(|m| m != mode).unwrap_or(false);
     if changed {

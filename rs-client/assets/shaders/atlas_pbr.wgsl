@@ -68,6 +68,8 @@ struct AtlasLightingUniform {
     ambient_and_fog: vec4<f32>,
     quality_and_water: vec4<f32>,
     color_grading: vec4<f32>,
+    vanilla_light: vec4<f32>,
+    vanilla_shadow: vec4<f32>,
     water_effects: vec4<f32>,
     water_controls: vec4<f32>,
     water_extra: vec4<f32>,
@@ -200,28 +202,33 @@ fn apply_voxel_lighting(
     water_scene_reflection_valid: f32,
 ) -> vec4<f32> {
     let quality_mode = lighting_uniform.quality_and_water.x;
+    let shading_model = i32(round(lighting_uniform.vanilla_light.x));
     let sun_dir = safe_normalize(lighting_uniform.sun_dir_and_strength.xyz, vec3(0.0, 1.0, 0.0));
     let sun_strength = lighting_uniform.sun_dir_and_strength.w;
     let ambient_strength = lighting_uniform.ambient_and_fog.x;
 
     let ndotl = max(dot(normal, sun_dir), 0.0);
-    var shade = ambient_strength;
-    if quality_mode >= 1.0 {
-        shade += ndotl * sun_strength;
+    let hemi = normal.y * 0.5 + 0.5;
+    var rgb = base.rgb;
+    if shading_model == 2 {
+        var shade = ambient_strength;
+        if quality_mode >= 1.0 {
+            shade += ndotl * sun_strength;
+        }
+        if quality_mode >= 2.0 {
+            shade *= mix(0.84, 1.12, hemi);
+        }
+        if quality_mode >= 3.0 {
+            shade = pow(max(shade, 0.0), 0.92);
+        }
+        rgb = base.rgb * shade;
+    } else if shading_model == 0 {
+        let fast_hemi = mix(0.92, 1.04, hemi);
+        rgb = base.rgb * fast_hemi;
+    } else {
+        let sun_lift = 1.0 + ndotl * lighting_uniform.sun_dir_and_strength.w * 0.06;
+        rgb = base.rgb * sun_lift;
     }
-
-    if quality_mode >= 2.0 {
-        // Cheap hemispherical lift to avoid pure black undersides.
-        let hemi = normal.y * 0.5 + 0.5;
-        shade *= mix(0.84, 1.12, hemi);
-    }
-
-    if quality_mode >= 3.0 {
-        // Slightly soften contrast in the highest preset.
-        shade = pow(max(shade, 0.0), 0.92);
-    }
-
-    var rgb = base.rgb * shade;
 
     let pass_mode = lighting_uniform.quality_and_water.w;
     let transparent_pass = pass_mode > 0.5 && pass_mode < 1.5;
@@ -437,7 +444,7 @@ fn fragment(
     let vertex_tint_alpha = pbr_input.material.base_color.a;
     is_water_surface = transparent_pass && vertex_tint_alpha < 0.75;
     let shader_debug_view = i32(round(lighting_uniform.debug_flags.x));
-    let fixed_debug_state = lighting_uniform.debug_flags.w > 0.5;
+    let fixed_debug_state = false;
 #endif
 
     let packed_uv = in.uv;
@@ -635,7 +642,10 @@ fn fragment(
     }
     let view_dir = safe_normalize(pbr_input.V, vec3(0.0, 0.0, 1.0));
     let quality_mode = lighting_uniform.quality_and_water.x;
-    if quality_mode >= 2.0 && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+    let shading_model = i32(round(lighting_uniform.vanilla_light.x));
+    if shading_model == 2 && quality_mode >= 2.0
+        && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u
+    {
         out.color = apply_pbr_lighting(pbr_input);
         out.color = apply_fancy_post_lighting(
             out.color,
