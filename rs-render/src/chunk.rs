@@ -3154,6 +3154,12 @@ fn is_ao_occluder(block_state: u16) -> bool {
     if is_transparent_block(id) {
         return false;
     }
+    // Vanilla fancy leaves are not treated like normal opaque cubes for AO.
+    // Keeping rendered leaf layers visible is fine, but letting every leaf
+    // fully occlude its neighbors crushes the canopy into black.
+    if is_leaves_block(id) || is_alpha_cutout_cube(id) {
+        return false;
+    }
     !matches!(
         block_model_kind(id),
         BlockModelKind::Cross
