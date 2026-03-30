@@ -214,59 +214,6 @@ fn run_connected_session(
                         other => {
                             send_seq = send_seq.wrapping_add(1);
                             match &other {
-                                ToNetMessage::PlayerMovePosLook {
-                                    epoch,
-                                    x,
-                                    y,
-                                    z,
-                                    yaw,
-                                    pitch,
-                                    on_ground,
-                                } => info!(
-                                    send_seq,
-                                    movement_epoch = epoch,
-                                    x,
-                                    y,
-                                    z,
-                                    yaw,
-                                    pitch,
-                                    on_ground,
-                                    "Net send PlayerMovePosLook"
-                                ),
-                                ToNetMessage::PlayerMovePos {
-                                    epoch,
-                                    x,
-                                    y,
-                                    z,
-                                    on_ground,
-                                } => info!(
-                                    send_seq,
-                                    movement_epoch = epoch,
-                                    x,
-                                    y,
-                                    z,
-                                    on_ground,
-                                    "Net send PlayerMovePos"
-                                ),
-                                ToNetMessage::PlayerMoveLook {
-                                    epoch,
-                                    yaw,
-                                    pitch,
-                                    on_ground,
-                                } => info!(
-                                    send_seq,
-                                    movement_epoch = epoch,
-                                    yaw,
-                                    pitch,
-                                    on_ground,
-                                    "Net send PlayerMoveLook"
-                                ),
-                                ToNetMessage::PlayerMoveGround { epoch, on_ground } => info!(
-                                    send_seq,
-                                    movement_epoch = epoch,
-                                    on_ground,
-                                    "Net send PlayerMoveGround"
-                                ),
                                 ToNetMessage::ConfirmTransaction {
                                     id,
                                     action_number,

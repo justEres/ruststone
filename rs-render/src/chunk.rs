@@ -3180,9 +3180,9 @@ fn ao_factor(side1: bool, side2: bool, corner: bool) -> f32 {
 fn vanilla_face_shade(face: Face, vanilla_bake: VanillaBakeSettings) -> f32 {
     let target = match face {
         Face::PosY => 1.0,
-        Face::NegY => 0.52,
-        Face::PosZ | Face::NegZ => 0.80,
-        Face::PosX | Face::NegX => 0.66,
+        Face::NegY => 0.62,
+        Face::PosZ | Face::NegZ => 0.86,
+        Face::PosX | Face::NegX => 0.78,
     };
     let strength = vanilla_bake.face_shading_strength.clamp(0.0, 1.0);
     1.0 - strength + target * strength
@@ -3227,7 +3227,8 @@ fn vanilla_block_shadow_factor(
         return 1.0;
     }
 
-    let skylight_occlusion = 1.0 - (sky_level / 15.0).clamp(0.0, 1.0);
+    let raw_occlusion = 1.0 - (sky_level / 15.0).clamp(0.0, 1.0);
+    let skylight_occlusion = raw_occlusion * raw_occlusion * (3.0 - 2.0 * raw_occlusion);
     let mut shadow = skylight_occlusion;
 
     if matches!(
@@ -3242,7 +3243,7 @@ fn vanilla_block_shadow_factor(
         }
     }
 
-    (1.0 - shadow * strength).clamp(0.0, 1.0)
+    (1.0 - shadow * strength * 0.82).clamp(0.24, 1.0)
 }
 
 fn trace_sun_shadow(
@@ -3427,9 +3428,11 @@ fn compute_vertex_shade(
         sky_level,
         vanilla_bake,
     );
-    if softened_foliage {
-        shadow_term = shadow_term * 0.45 + 0.55;
-    }
+    shadow_term = if softened_foliage {
+        shadow_term * 0.40 + 0.60
+    } else {
+        shadow_term * 0.70 + 0.30
+    };
     let ao_shadow_term = if voxel_ao_enabled {
         let mut blend = vanilla_bake.ao_shadow_blend.clamp(0.0, 1.0);
         if softened_foliage {
@@ -3444,8 +3447,8 @@ fn compute_vertex_shade(
         face_term = face_term * 0.28 + 0.72;
     }
     let mut light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
-    let base_floor = 0.10 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.85;
-    let foliage_floor = 0.28 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.80;
+    let base_floor = 0.18 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.72;
+    let foliage_floor = 0.34 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.66;
     if softened_foliage {
         light = light.max(foliage_floor);
     } else {
