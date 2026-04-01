@@ -50,6 +50,7 @@ impl Plugin for RenderPlugin {
         .init_resource::<debug::RenderDebugSettings>()
         .init_resource::<debug::MeshingToggleState>()
         .init_resource::<debug::RenderPerfStats>()
+        .init_resource::<debug::OcclusionCullCache>()
         .init_resource::<chunk::ChunkUpdateQueue>()
         .init_resource::<chunk::PendingChunkRemesh>()
         .init_resource::<chunk::ChunkRenderState>()
@@ -155,6 +156,7 @@ fn enqueue_chunk_meshes(
         generation.0 = generation.0.wrapping_add(1);
         in_flight.chunks.clear();
         in_flight.pending_remesh.clear();
+        state.occlusion_revision = state.occlusion_revision.wrapping_add(1);
     }
 
     if reset_world {
@@ -177,6 +179,7 @@ fn enqueue_chunk_meshes(
             pending.keys.remove(&key);
             if let Some(entry) = state.entries.remove(&key) {
                 commands.entity(entry.entity).despawn_recursive();
+                state.occlusion_revision = state.occlusion_revision.wrapping_add(1);
             }
             for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                 let neighbor = (key.0 + dx, key.1 + dz);
@@ -423,6 +426,7 @@ fn apply_mesh_results(
         for key in remove_keys {
             entry.submeshes.remove(&key);
         }
+        state.occlusion_revision = state.occlusion_revision.wrapping_add(1);
 
         in_flight.chunks.remove(&key);
         if in_flight.pending_remesh.remove(&key) {

@@ -467,6 +467,18 @@ pub struct RenderPerfStats {
     pub mesh_bake_shadow_ms: f32,
 }
 
+#[derive(Resource, Default)]
+pub struct OcclusionCullCache {
+    pub anchor_chunk: Option<(i32, i32)>,
+    pub camera_chunk: Option<(i32, i32)>,
+    pub cull_pos: Option<Vec3>,
+    pub cull_forward: Option<Vec3>,
+    pub occlusion_revision: u64,
+    pub guard_radius: i32,
+    pub visible_chunks_after_occlusion: u32,
+    pub occluded_chunks: u32,
+}
+
 pub fn occlusion_cull_chunks(
     settings: Res<RenderDebugSettings>,
     camera_query: Query<(&GlobalTransform, &Projection), With<PlayerCamera>>,
@@ -474,6 +486,7 @@ pub fn occlusion_cull_chunks(
     state: Res<ChunkRenderState>,
     mut chunks: Query<(&ChunkRoot, &mut Visibility)>,
     mut perf: ResMut<RenderPerfStats>,
+    mut cache: ResMut<OcclusionCullCache>,
 ) {
     let guard_radius = settings.cull_guard_chunk_radius.clamp(0, 5);
     let distance_visible_count = chunks
@@ -485,6 +498,7 @@ pub fn occlusion_cull_chunks(
         perf.occlusion_cull_ms = 0.0;
         perf.visible_chunks_after_occlusion = distance_visible_count;
         perf.occluded_chunks = 0;
+        *cache = OcclusionCullCache::default();
         return;
     }
     let start = std::time::Instant::now();
@@ -492,6 +506,7 @@ pub fn occlusion_cull_chunks(
         perf.occlusion_cull_ms = 0.0;
         perf.visible_chunks_after_occlusion = distance_visible_count;
         perf.occluded_chunks = 0;
+        *cache = OcclusionCullCache::default();
         return;
     };
     let (fov_y, aspect, near, far) = camera_fov_params(&settings, projection);
@@ -533,6 +548,25 @@ pub fn occlusion_cull_chunks(
             )
         };
 
+    let stable_camera = cache.camera_chunk == Some(camera_chunk)
+        && cache.anchor_chunk == Some(anchor_chunk)
+        && cache.guard_radius == guard_radius
+        && cache.occlusion_revision == state.occlusion_revision
+        && cache
+            .cull_pos
+            .map(|prev| prev.distance_squared(cull_pos) <= 4.0)
+            .unwrap_or(false)
+        && cache
+            .cull_forward
+            .map(|prev| prev.dot(*cull_forward) >= 0.995)
+            .unwrap_or(false);
+    if stable_camera {
+        perf.occlusion_cull_ms = 0.0;
+        perf.visible_chunks_after_occlusion = cache.visible_chunks_after_occlusion;
+        perf.occluded_chunks = cache.occluded_chunks;
+        return;
+    }
+
     let mut distance_visible = HashSet::new();
     let mut frustum_candidates = HashSet::new();
     let mut guard_visible = HashSet::new();
@@ -565,6 +599,14 @@ pub fn occlusion_cull_chunks(
         perf.visible_chunks_after_occlusion = 0;
         perf.occluded_chunks = 0;
         perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
+        cache.anchor_chunk = Some(anchor_chunk);
+        cache.camera_chunk = Some(camera_chunk);
+        cache.cull_pos = Some(cull_pos);
+        cache.cull_forward = Some(*cull_forward);
+        cache.occlusion_revision = state.occlusion_revision;
+        cache.guard_radius = guard_radius;
+        cache.visible_chunks_after_occlusion = 0;
+        cache.occluded_chunks = 0;
         return;
     }
 
@@ -664,6 +706,14 @@ pub fn occlusion_cull_chunks(
     perf.visible_chunks_after_occlusion = keep_visible.len() as u32;
     perf.occluded_chunks = distance_visible.len().saturating_sub(keep_visible.len()) as u32;
     perf.occlusion_cull_ms = start.elapsed().as_secs_f32() * 1000.0;
+    cache.anchor_chunk = Some(anchor_chunk);
+    cache.camera_chunk = Some(camera_chunk);
+    cache.cull_pos = Some(cull_pos);
+    cache.cull_forward = Some(*cull_forward);
+    cache.occlusion_revision = state.occlusion_revision;
+    cache.guard_radius = guard_radius;
+    cache.visible_chunks_after_occlusion = perf.visible_chunks_after_occlusion;
+    cache.occluded_chunks = perf.occluded_chunks;
 }
 
 #[allow(clippy::too_many_arguments)]
