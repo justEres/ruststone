@@ -741,8 +741,8 @@ impl BiomeTintResolver {
             .foliage_override
             .unwrap_or_else(|| sample_colormap(&self.foliage_colormap, climate.temp, climate.rain));
         BiomeTint {
-            grass: tuned_biome_tint(rgb_hex(grass), 0.48, 1.18, 1.05),
-            foliage: tuned_biome_tint(rgb_hex(foliage), 0.52, 1.34, 1.18),
+            grass: rgb_hex(grass),
+            foliage: rgb_hex(foliage),
             water: rgb_hex(climate.water),
         }
     }
@@ -758,22 +758,6 @@ fn rgb_hex(color: u32) -> [f32; 4] {
         ((color >> 8) & 0xFF) as f32 / 255.0,
         (color & 0xFF) as f32 / 255.0,
     )
-}
-
-fn tuned_biome_tint(mut color: [f32; 4], target_luma: f32, max_boost: f32, saturation: f32) -> [f32; 4] {
-    let luma_weights = [0.2126, 0.7152, 0.0722];
-    let luma = color[0] * luma_weights[0] + color[1] * luma_weights[1] + color[2] * luma_weights[2];
-    let boost = (target_luma / luma.max(0.001)).clamp(1.0, max_boost);
-    color[0] = (color[0] * boost).clamp(0.0, 1.0);
-    color[1] = (color[1] * boost).clamp(0.0, 1.0);
-    color[2] = (color[2] * boost).clamp(0.0, 1.0);
-
-    let boosted_luma =
-        color[0] * luma_weights[0] + color[1] * luma_weights[1] + color[2] * luma_weights[2];
-    color[0] = (boosted_luma + (color[0] - boosted_luma) * saturation).clamp(0.0, 1.0);
-    color[1] = (boosted_luma + (color[1] - boosted_luma) * saturation).clamp(0.0, 1.0);
-    color[2] = (boosted_luma + (color[2] - boosted_luma) * saturation).clamp(0.0, 1.0);
-    color
 }
 
 fn load_colormap(path: &Path, fallback: u32) -> Vec<u32> {

@@ -668,7 +668,7 @@ fn fragment(
             water_scene_reflection_valid,
         );
     }
-    if !fixed_debug_state {
+    if !fixed_debug_state && shading_model != 1 {
         out.color = vec4(apply_color_grading(out.color.rgb), out.color.a);
     }
 
