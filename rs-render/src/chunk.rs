@@ -1146,6 +1146,9 @@ fn build_chunk_mesh_culled(
                             block_id,
                             tint,
                             barrier_billboard,
+                            voxel_ao_enabled,
+                            voxel_ao_strength,
+                            voxel_ao_cutout,
                         );
                         continue;
                     }
@@ -1241,6 +1244,9 @@ fn build_chunk_mesh_greedy(
                         block_id,
                         tint,
                         barrier_billboard,
+                        voxel_ao_enabled,
+                        voxel_ao_strength,
+                        voxel_ao_cutout,
                     );
                 }
             }
@@ -1806,6 +1812,9 @@ fn add_cross_plant(
     z: i32,
     block_id: u16,
     tint: BiomeTint,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
 ) {
     let texture_index = texture_mapping.texture_index_for_state(block_id, Face::PosZ);
     let tile_origin = atlas_tile_origin(texture_index);
@@ -1829,7 +1838,19 @@ fn add_cross_plant(
         color[1] = tint_rgb[1];
         color[2] = tint_rgb[2];
     }
-    let shade = if should_apply_prebaked_shade(block_id) {
+    let shade = if can_apply_vertex_shading(block_id, voxel_ao_cutout) {
+        cross_plant_shade(
+            snapshot,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+        )
+    } else if should_apply_prebaked_shade(block_id) {
         block_light_factor(snapshot, chunk_x, chunk_z, x, y, z)
     } else {
         1.0
@@ -1959,6 +1980,9 @@ fn add_custom_block(
     block_id: u16,
     tint: BiomeTint,
     barrier_billboard: bool,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+    voxel_ao_cutout: bool,
 ) {
     match block_model_kind(block_type(block_id)) {
         BlockModelKind::Cross => add_cross_plant(
@@ -1973,6 +1997,9 @@ fn add_custom_block(
             z,
             block_id,
             tint,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
         ),
         BlockModelKind::TorchLike => add_cross_plant(
             batch,
@@ -1986,6 +2013,9 @@ fn add_custom_block(
             z,
             block_id,
             tint,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
         ),
         BlockModelKind::Slab => add_box(
             batch,
@@ -2768,6 +2798,9 @@ fn add_custom_block(
                             z,
                             block_id,
                             tint,
+                            voxel_ao_enabled,
+                            voxel_ao_strength,
+                            voxel_ao_cutout,
                         );
                     } else {
                         add_box(
@@ -2797,6 +2830,9 @@ fn add_custom_block(
                     z,
                     block_id,
                     tint,
+                    voxel_ao_enabled,
+                    voxel_ao_strength,
+                    voxel_ao_cutout,
                 ),
                 _ => {}
             }
@@ -3526,6 +3562,8 @@ fn compute_vertex_shade(
             y,
             z,
             face,
+            voxel_ao_enabled,
+            voxel_ao_strength,
             vanilla_bake,
         );
     }
@@ -3715,6 +3753,43 @@ fn averaged_face_weighted_ao(
     total * 0.25
 }
 
+fn apply_ao_strength(ao: f32, strength: f32) -> f32 {
+    let strength = strength.clamp(0.0, 1.0);
+    1.0 - strength + ao.clamp(0.0, 1.0) * strength
+}
+
+fn cross_plant_shade(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
+) -> f32 {
+    let mut shade = block_light_factor(snapshot, chunk_x, chunk_z, x, y, z).max(0.34);
+    if voxel_ao_enabled {
+        let side_ao = [
+            averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, Face::PosX),
+            averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, Face::NegX),
+            averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, Face::PosZ),
+            averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, Face::NegZ),
+        ]
+        .into_iter()
+        .sum::<f32>()
+            * 0.25;
+        let ao_strength = if is_softened_vanilla_foliage(block_id) {
+            voxel_ao_strength * 0.75
+        } else {
+            voxel_ao_strength * 0.55
+        };
+        shade *= apply_ao_strength(side_ao, ao_strength);
+    }
+    shade.clamp(0.0, 1.0)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn greedy_face_corner_shades(
     snapshot: &ChunkColumnSnapshot,
@@ -3865,6 +3940,8 @@ fn vanilla_leaf_face_baked_shade(
     y: i32,
     z: i32,
     face: Face,
+    voxel_ao_enabled: bool,
+    voxel_ao_strength: f32,
     vanilla_bake: VanillaBakeSettings,
 ) -> f32 {
     let (sky_level, block_level) = face_light_levels(snapshot, chunk_x, chunk_z, x, y, z, face);
@@ -3884,7 +3961,14 @@ fn vanilla_leaf_face_baked_shade(
         vanilla_face_shade(face, vanilla_bake) * 0.25 + vanilla_leaf_face_shade(face) * 0.75;
     let ambient_floor = vanilla_bake.ambient_floor.clamp(0.0, 0.95);
     let leaf_floor = 0.52 + ambient_floor * 0.34;
-    let ao_term = averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, face);
+    let ao_term = if voxel_ao_enabled {
+        apply_ao_strength(
+            averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, face),
+            voxel_ao_strength * 0.75,
+        )
+    } else {
+        1.0
+    };
     let light = (vanilla_light_mix(sky_level, block_level, vanilla_bake) * 1.12 + 0.04)
         .max(leaf_floor);
     let min_final = 0.52 + ambient_floor * 0.20;
