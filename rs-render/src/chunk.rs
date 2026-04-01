@@ -3232,6 +3232,49 @@ fn ao_factor(side1: bool, side2: bool, corner: bool) -> f32 {
     }
 }
 
+fn ao_occlusion_weight(block_state: u16) -> f32 {
+    let id = block_type(block_state);
+    if id == 0 || id == 78 {
+        return 0.0;
+    }
+    if is_transparent_block(id) {
+        return 0.0;
+    }
+    if is_leaves_block(id) {
+        return 0.45;
+    }
+    if is_alpha_cutout_cube(id) {
+        return 0.20;
+    }
+    if matches!(
+        block_model_kind(id),
+        BlockModelKind::Cross
+            | BlockModelKind::Pane
+            | BlockModelKind::TorchLike
+            | BlockModelKind::Custom
+    ) {
+        return 0.0;
+    }
+    1.0
+}
+
+fn weighted_ao_factor(side1: f32, side2: f32, corner: f32) -> f32 {
+    let full = ao_factor(side1 > 0.0, side2 > 0.0, corner > 0.0);
+    let mut weight_sum = 0.0;
+    let mut contributors = 0.0;
+    for weight in [side1, side2, corner] {
+        if weight > 0.0 {
+            weight_sum += weight;
+            contributors += 1.0;
+        }
+    }
+    if contributors <= 0.0 {
+        return 1.0;
+    }
+    let avg_weight = (weight_sum / contributors).clamp(0.0, 1.0);
+    1.0 - (1.0 - full) * avg_weight
+}
+
 fn vanilla_face_shade(face: Face, vanilla_bake: VanillaBakeSettings) -> f32 {
     let target = match face {
         Face::PosY => 1.0,
@@ -3618,6 +3661,60 @@ fn face_vertex_light_ao(
     (ao, sky_level, block_level)
 }
 
+fn face_vertex_weighted_ao(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    vertex: [f32; 3],
+) -> f32 {
+    let (nx, ny, nz, axis_a, axis_b) = match face {
+        Face::PosX => (1, 0, 0, 1usize, 2usize),
+        Face::NegX => (-1, 0, 0, 1usize, 2usize),
+        Face::PosY => (0, 1, 0, 0usize, 2usize),
+        Face::NegY => (0, -1, 0, 0usize, 2usize),
+        Face::PosZ => (0, 0, 1, 0usize, 1usize),
+        Face::NegZ => (0, 0, -1, 0usize, 1usize),
+    };
+
+    let signs = |coord: f32| if coord <= 0.0 { -1 } else { 1 };
+    let mut delta = [0i32; 3];
+    delta[axis_a] = signs(vertex[axis_a]);
+    delta[axis_b] = signs(vertex[axis_b]);
+
+    let base = (x + nx, y + ny, z + nz);
+    let s1 = (base.0 + delta[0], base.1 + delta[1], base.2 + delta[2]);
+    let mut side1 = [base.0, base.1, base.2];
+    side1[axis_a] += delta[axis_a];
+    let mut side2 = [base.0, base.1, base.2];
+    side2[axis_b] += delta[axis_b];
+
+    weighted_ao_factor(
+        ao_occlusion_weight(block_at(snapshot, chunk_x, chunk_z, side1[0], side1[1], side1[2])),
+        ao_occlusion_weight(block_at(snapshot, chunk_x, chunk_z, side2[0], side2[1], side2[2])),
+        ao_occlusion_weight(block_at(snapshot, chunk_x, chunk_z, s1.0, s1.1, s1.2)),
+    )
+}
+
+fn averaged_face_weighted_ao(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+) -> f32 {
+    let mut total = 0.0;
+    for vertex in face_vertices(face) {
+        total += face_vertex_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
+    }
+    total * 0.25
+}
+
 #[allow(clippy::too_many_arguments)]
 fn greedy_face_corner_shades(
     snapshot: &ChunkColumnSnapshot,
@@ -3787,10 +3884,11 @@ fn vanilla_leaf_face_baked_shade(
         vanilla_face_shade(face, vanilla_bake) * 0.25 + vanilla_leaf_face_shade(face) * 0.75;
     let ambient_floor = vanilla_bake.ambient_floor.clamp(0.0, 0.95);
     let leaf_floor = 0.52 + ambient_floor * 0.34;
+    let ao_term = averaged_face_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, face);
     let light = (vanilla_light_mix(sky_level, block_level, vanilla_bake) * 1.12 + 0.04)
         .max(leaf_floor);
     let min_final = 0.52 + ambient_floor * 0.20;
-    (light * face_term * shadow_term)
+    (light * face_term * shadow_term * ao_term)
         .max(min_final)
         .clamp(0.0, 1.0)
 }
