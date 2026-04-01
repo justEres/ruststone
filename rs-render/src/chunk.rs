@@ -3474,6 +3474,18 @@ fn compute_vertex_shade(
         return 1.0;
     }
     let leaf_block = is_vanilla_leaf_block(block_id);
+    if leaf_block {
+        return vanilla_leaf_face_baked_shade(
+            snapshot,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            face,
+            vanilla_bake,
+        );
+    }
     let softened_foliage = is_softened_vanilla_foliage(block_id);
     let (ao, sky_level, block_level) =
         face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
@@ -3721,6 +3733,66 @@ fn block_light_factor(
     let l1 = light_at(snapshot, chunk_x, chunk_z, x, y + 1, z);
     let level = (f32::from(l0.block.max(l0.sky)) + f32::from(l1.block.max(l1.sky))) * 0.5;
     light_factor_from_level_with_floor(level, 0.18)
+}
+
+fn face_light_levels(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+) -> (f32, f32) {
+    let (dx, dy, dz) = match face {
+        Face::PosX => (1, 0, 0),
+        Face::NegX => (-1, 0, 0),
+        Face::PosY => (0, 1, 0),
+        Face::NegY => (0, -1, 0),
+        Face::PosZ => (0, 0, 1),
+        Face::NegZ => (0, 0, -1),
+    };
+    let a = light_at(snapshot, chunk_x, chunk_z, x, y, z);
+    let b = light_at(snapshot, chunk_x, chunk_z, x + dx, y + dy, z + dz);
+    (
+        (f32::from(a.sky) + f32::from(b.sky)) * 0.5,
+        (f32::from(a.block) + f32::from(b.block)) * 0.5,
+    )
+}
+
+fn vanilla_leaf_face_baked_shade(
+    snapshot: &ChunkColumnSnapshot,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+    vanilla_bake: VanillaBakeSettings,
+) -> f32 {
+    let (sky_level, block_level) = face_light_levels(snapshot, chunk_x, chunk_z, x, y, z, face);
+    let shadow_term = vanilla_block_shadow_factor(
+        snapshot,
+        chunk_x,
+        chunk_z,
+        x,
+        y,
+        z,
+        face,
+        sky_level,
+        vanilla_bake,
+    ) * 0.18
+        + 0.82;
+    let face_term =
+        vanilla_face_shade(face, vanilla_bake) * 0.25 + vanilla_leaf_face_shade(face) * 0.75;
+    let ambient_floor = vanilla_bake.ambient_floor.clamp(0.0, 0.95);
+    let leaf_floor = 0.52 + ambient_floor * 0.34;
+    let light = (vanilla_light_mix(sky_level, block_level, vanilla_bake) * 1.12 + 0.04)
+        .max(leaf_floor);
+    let min_final = 0.52 + ambient_floor * 0.20;
+    (light * face_term * shadow_term)
+        .max(min_final)
+        .clamp(0.0, 1.0)
 }
 
 fn block_type(block_state: u16) -> u16 {
