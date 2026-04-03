@@ -186,18 +186,17 @@ Legend:
 
 ## Shipping Build (Single Binary)
 
-- `bundle_assets` compile feature embeds `rs-client/assets` into the executable and extracts them to a runtime cache directory automatically.
-- Runtime asset lookup is unified via `RUSTSTONE_ASSETS_ROOT` and no longer depends on repo-relative paths.
+- Runtime asset lookup is unified via `RUSTSTONE_ASSETS_ROOT`.
 - Bevy `dynamic_linking` is disabled in workspace crates so release builds can be shipped as a single executable.
 
 ### Build commands
 
-- Linux/macOS shipping build:
-  - `cargo build -p rs-client --release --features bundle_assets`
+- Linux/macOS release build:
+  - `cargo build -p rs-client --release`
 - Windows build from Linux (GNU toolchain target):
   - `rustup target add x86_64-pc-windows-gnu`
   - install a MinGW-w64 cross linker (`x86_64-w64-mingw32-gcc`)
-  - `cargo build -p rs-client --release --target x86_64-pc-windows-gnu --features bundle_assets`
+  - `cargo build -p rs-client --release --target x86_64-pc-windows-gnu`
 
 Notes:
 - `ruststone_options.toml` and Prism `accounts.json` remain external runtime files.

@@ -9,7 +9,8 @@ binary_greedy_mesher_demo
 .VSCodeCounter
 .env
 
-rs-client/assets/texturepack/atlas_cache.png
+rs-client/assets/texturepack/
+rs-client/assets/.ruststone_assets_stamp
 ruststone_options.toml
 ruststone_sound_cache
 commands.md
