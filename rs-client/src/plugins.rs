@@ -223,6 +223,7 @@ impl Plugin for ClientSimPlugin {
                     sim_systems::camera_perspective_toggle_system,
                     sim_systems::camera_perspective_alt_hold_system,
                     sim_systems::input_collect_system,
+                    sim_systems::prune_collision_chunks_system,
                     sim_systems::freecam_toggle_system.after(sim_systems::input_collect_system),
                     sim_systems::freecam_move_system.after(sim_systems::freecam_toggle_system),
                     sim_systems::camera_zoom_system

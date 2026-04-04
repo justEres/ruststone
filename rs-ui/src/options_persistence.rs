@@ -1,8 +1,14 @@
 use super::*;
 
+fn default_simulation_distance_chunks() -> i32 {
+    RenderDebugSettings::default().simulation_distance_chunks
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientOptionsFile {
     pub fov_deg: f32,
+    #[serde(default = "default_simulation_distance_chunks")]
+    pub simulation_distance_chunks: i32,
     pub render_distance_chunks: i32,
     pub infinite_render_distance: bool,
     pub mesh_enqueue_budget_per_frame: u32,
@@ -116,6 +122,7 @@ impl Default for ClientOptionsFile {
         let render = RenderDebugSettings::default();
         Self {
             fov_deg: render.fov_deg,
+            simulation_distance_chunks: render.simulation_distance_chunks,
             render_distance_chunks: render.render_distance_chunks,
             infinite_render_distance: render.infinite_render_distance,
             mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
@@ -233,6 +240,7 @@ pub(crate) fn options_to_file(
 ) -> ClientOptionsFile {
     ClientOptionsFile {
         fov_deg: render.fov_deg,
+        simulation_distance_chunks: render.simulation_distance_chunks,
         render_distance_chunks: render.render_distance_chunks,
         infinite_render_distance: render.infinite_render_distance,
         mesh_enqueue_budget_per_frame: render.mesh_enqueue_budget_per_frame,
@@ -350,6 +358,7 @@ pub fn apply_options(
     window: &mut Window,
 ) {
     render.fov_deg = options.fov_deg.clamp(60.0, 140.0);
+    render.simulation_distance_chunks = options.simulation_distance_chunks.clamp(2, 64);
     render.render_distance_chunks = options.render_distance_chunks.clamp(2, 64);
     render.infinite_render_distance = options.infinite_render_distance;
     render.mesh_enqueue_budget_per_frame = options.mesh_enqueue_budget_per_frame.clamp(1, 128);

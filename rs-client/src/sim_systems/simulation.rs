@@ -1,5 +1,29 @@
 use super::*;
 
+pub fn prune_collision_chunks_system(
+    app_state: Res<AppState>,
+    render_debug: Res<RenderDebugSettings>,
+    sim_state: Res<SimState>,
+    mut collision_map: ResMut<WorldCollisionMap>,
+    mut last_prune: Local<Option<(i32, i32, i32)>>,
+) {
+    if !matches!(app_state.0, ApplicationState::Connected) {
+        *last_prune = None;
+        return;
+    }
+
+    let center_chunk_x = (sim_state.current.pos.x / 16.0).floor() as i32;
+    let center_chunk_z = (sim_state.current.pos.z / 16.0).floor() as i32;
+    let radius_chunks = render_debug.simulation_distance_chunks.clamp(0, 64);
+    let signature = (center_chunk_x, center_chunk_z, radius_chunks);
+    if last_prune.as_ref() == Some(&signature) && !render_debug.is_changed() {
+        return;
+    }
+
+    collision_map.retain_nearby_chunks(center_chunk_x, center_chunk_z, radius_chunks);
+    *last_prune = Some(signature);
+}
+
 pub fn fixed_sim_tick_system(
     mut sim_clock: ResMut<SimClock>,
     mut sim_render: ResMut<SimRenderState>,

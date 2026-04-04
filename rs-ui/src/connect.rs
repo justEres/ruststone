@@ -312,7 +312,7 @@ fn connect_ui(
                                 auth_account_uuid,
                                 prism_accounts_path: Some(state.prism_accounts_path.clone()),
                                 requested_view_distance: render_debug
-                                    .render_distance_chunks
+                                    .simulation_distance_chunks
                                     .clamp(2, 64) as u8,
                             }) {
                                 Ok(()) => {

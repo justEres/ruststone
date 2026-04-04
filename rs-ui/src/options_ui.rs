@@ -86,6 +86,7 @@ struct SettingEntry {
 #[derive(Clone, Copy)]
 enum SettingId {
     Fov,
+    SimulationDistance,
     RenderDistance,
     InfiniteRenderDistance,
     FlightSpeedBoostEnabled,
@@ -227,7 +228,8 @@ fn frustum_fov_visible(
 
 const SETTINGS: &[SettingEntry] = &[
     SettingEntry { id: SettingId::Fov, title: "FOV", category: SettingsCategory::General, aliases: &["field of view"], visible: always },
-    SettingEntry { id: SettingId::RenderDistance, title: "Render Distance", category: SettingsCategory::General, aliases: &["chunks", "distance"], visible: always },
+    SettingEntry { id: SettingId::SimulationDistance, title: "Simulation Distance", category: SettingsCategory::General, aliases: &["server distance", "collision distance", "simulation chunks"], visible: always },
+    SettingEntry { id: SettingId::RenderDistance, title: "Render Distance", category: SettingsCategory::General, aliases: &["chunks", "visual distance"], visible: always },
     SettingEntry { id: SettingId::InfiniteRenderDistance, title: "Infinite local render distance", category: SettingsCategory::General, aliases: &["infinite", "unlimited render distance"], visible: always },
     SettingEntry { id: SettingId::FlightSpeedBoostEnabled, title: "Boost creative flight speed", category: SettingsCategory::General, aliases: &["flight speed", "creative speed"], visible: always },
     SettingEntry { id: SettingId::FlightSpeedBoostMultiplier, title: "Flight speed multiplier", category: SettingsCategory::General, aliases: &["flight multiplier"], visible: when_flight_boost },
@@ -467,16 +469,23 @@ fn render_setting_row(
 ) -> bool {
     match id {
         SettingId::Fov => ui.add(egui::Slider::new(&mut render_debug.fov_deg, 60.0..=140.0).text("FOV")).changed(),
+        SettingId::SimulationDistance => {
+            let changed = ui
+                .add(egui::Slider::new(&mut render_debug.simulation_distance_chunks, 2..=64).text("Simulation Distance"))
+                .changed();
+            ui.label("Controls the server chunk request distance and the local collision/simulation radius. Reconnect to change what the server streams.");
+            changed
+        }
         SettingId::RenderDistance => {
             let changed = ui
                 .add(egui::Slider::new(&mut render_debug.render_distance_chunks, 2..=64).text("Render Distance"))
                 .changed();
-            ui.label("Reconnect after changing render distance if you want the server to send more chunks.");
+            ui.label("Controls local visibility only. With infinite local render distance enabled, this only affects normal near-chunk visibility.");
             changed
         }
         SettingId::InfiniteRenderDistance => {
             let changed = ui.checkbox(&mut render_debug.infinite_render_distance, "Infinite local render distance").changed();
-            ui.label("Keeps all received chunks visible locally. This does not make the server send more chunks.");
+            ui.label("Keeps received chunk meshes locally after they leave the simulation radius. Collision is still pruned to the simulation distance.");
             changed
         }
         SettingId::FlightSpeedBoostEnabled => ui.checkbox(&mut render_debug.flight_speed_boost_enabled, "Boost creative flight speed").changed(),

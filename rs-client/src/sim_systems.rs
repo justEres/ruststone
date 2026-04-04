@@ -443,7 +443,7 @@ pub use camera::{
 };
 pub use simulation::{
     fixed_sim_tick_system, local_arm_swing_tick_system, local_movement_sound_system,
-    visual_smoothing_system,
+    prune_collision_chunks_system, visual_smoothing_system,
 };
 pub use timing::{
     fixed_update_timing_end, fixed_update_timing_start, frame_timing_end, frame_timing_start,

@@ -154,6 +154,7 @@ impl VanillaBlockShadowMode {
 pub struct RenderDebugSettings {
     pub shadows_enabled: bool,
     pub shadow_distance_scale: f32,
+    pub simulation_distance_chunks: i32,
     pub render_distance_chunks: i32,
     pub infinite_render_distance: bool,
     pub fov_deg: f32,
@@ -258,6 +259,7 @@ impl Default for RenderDebugSettings {
         Self {
             shadows_enabled: true,
             shadow_distance_scale: 1.0,
+            simulation_distance_chunks: 12,
             render_distance_chunks: 12,
             infinite_render_distance: false,
             fov_deg: 110.0,

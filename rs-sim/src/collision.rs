@@ -75,6 +75,18 @@ impl WorldCollisionMap {
         self.chunks.remove(&(chunk_x, chunk_z));
     }
 
+    pub fn retain_nearby_chunks(
+        &mut self,
+        center_chunk_x: i32,
+        center_chunk_z: i32,
+        radius_chunks: i32,
+    ) {
+        let radius = radius_chunks.max(0);
+        self.chunks.retain(|(chunk_x, chunk_z), _| {
+            (chunk_x - center_chunk_x).abs() <= radius && (chunk_z - center_chunk_z).abs() <= radius
+        });
+    }
+
     pub fn clear(&mut self) {
         self.chunks.clear();
     }
@@ -151,6 +163,26 @@ mod tests {
         map.update_chunk(full_chunk_with_section(0, block_state_from_id(2)));
         assert_eq!(map.block_at(0, 0, 0), block_state_from_id(2));
         assert_eq!(map.block_at(0, 5 * 16, 0), 0);
+    }
+
+    #[test]
+    fn retain_nearby_chunks_prunes_outside_radius() {
+        let mut map = WorldCollisionMap::default();
+        map.update_chunk(ChunkData {
+            x: 0,
+            z: 0,
+            ..full_chunk_with_section(0, block_state_from_id(1))
+        });
+        map.update_chunk(ChunkData {
+            x: 5,
+            z: 0,
+            ..full_chunk_with_section(0, block_state_from_id(1))
+        });
+
+        map.retain_nearby_chunks(0, 0, 2);
+
+        assert!(map.has_chunk(0, 0));
+        assert!(!map.has_chunk(5, 0));
     }
 }
 
