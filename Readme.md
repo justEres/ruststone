@@ -20,11 +20,15 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 
 ### Networking and gameplay loop
 - Connect/login/play loop against 1.8.9 servers.
+- Offline username flow plus Prism-backed online-mode auth.
 - Chunk + block updates wired into world state and remeshing.
 - Local player movement send + server correction handling (including large-teleport snap path).
+- Server-driven gamemode, abilities, world time, health, hunger, and XP sync into local state/HUD.
 - Remote entity scaffolding for players, mobs, objects, dropped items and XP orbs.
+- Remote player name/skin ingestion and basic mob rendering coverage for common PvP-relevant mobs.
 - Entity click interactions (attack/interact), knockback velocity ingest, item use in air.
-- Chat, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
+- Chat, chat tab-complete, disconnect reasons, health/death/respawn flow, hotbar drop (`Q`, `Ctrl+Q`).
+- Title, subtitle, action bar, tab-list header/footer, scoreboard sidebar, and world sound ingest are wired.
 - Local block placement guard prevents placing into the local player collider.
 - Movement collision supports slab/stair shapes and includes vanilla-style step-up (`0.6`) for walking up stairs.
 - Movement collision now includes many custom/non-cube block shapes used in world meshing (not just slab/stair).
@@ -33,9 +37,12 @@ The long-term goal is playable PvP (including Bedwars-style gameplay), with prot
 - Connect screen, chat, pause menu, debug menu, death screen.
 - Crosshair + block break progress indicator.
 - HUD bars for health, hunger, and experience.
+- Scoreboard sidebar, title/subtitle/action-bar overlays, and tab-list header/footer.
 - Survival inventory/hotbar window scaffolding with server-synced item stacks.
 - Inventory item textures loaded from the client texture pack.
 - Debug overlay can show looked-at block details (position, id/state/meta, model kind, registry key, collision boxes).
+- Chat tab-complete and Prism account picker on the connect screen.
+- Persistent options UI for rendering, water, sound, HUD, and system settings.
 - Inventory interactions implemented for common survival actions:
   - left/right click
   - shift-click
@@ -70,10 +77,10 @@ Legend:
 | `0x00` | `KeepAliveServerbound_VarInt` | Implemented | Reply path for keepalive. |
 | `0x01` | `ChatMessage` | Implemented | Chat send. |
 | `0x02` | `UseEntity_Handsfree` | Implemented | Attack/interact entity packets. |
-| `0x03` | `Player` | Not implemented |  |
-| `0x04` | `PlayerPosition` | Not implemented |  |
-| `0x05` | `PlayerLook` | Not implemented |  |
-| `0x06` | `PlayerPositionLook` | Implemented | Main movement send packet. |
+| `0x03` | `Player` | Implemented | Ground-only movement heartbeat path. |
+| `0x04` | `PlayerPosition` | Implemented | Position-only movement send path. |
+| `0x05` | `PlayerLook` | Implemented | Look-only movement send path. |
+| `0x06` | `PlayerPositionLook` | Implemented | Full position+look movement send path. |
 | `0x07` | `PlayerDigging_u8` | Implemented | Start/cancel/finish dig + drop item/stack actions. |
 | `0x08` | `PlayerBlockPlacement_u8_Item` | Implemented | Place block + right-click-air item use path. |
 | `0x09` | `HeldItemChange` | Implemented | Hotbar select + wheel/number keys. |
@@ -87,8 +94,8 @@ Legend:
 | `0x11` | `EnchantItem` | Not implemented |  |
 | `0x12` | `SetSign` | Not implemented |  |
 | `0x13` | `ClientAbilities_f32` | Implemented | Flight ability flags/speeds sent when toggled. |
-| `0x14` | `TabComplete_NoAssume` | Not implemented |  |
-| `0x15` | `ClientSettings_u8_Handsfree` | Not implemented |  |
+| `0x14` | `TabComplete_NoAssume` | Implemented | Chat UI requests server tab-complete suggestions. |
+| `0x15` | `ClientSettings_u8_Handsfree` | Implemented | Sent immediately after `JoinGame` using requested view distance. |
 | `0x16` | `ClientStatus` | Implemented | Respawn action. |
 | `0x17` | `PluginMessageServerbound` | Not implemented |  |
 | `0x18` | `SpectateTeleport` | Not implemented |  |
@@ -101,11 +108,11 @@ Legend:
 | `0x00` | `KeepAliveClientbound_VarInt` | Implemented | Immediate reply sent. |
 | `0x01` | `JoinGame_i8` | Implemented | Local player entity id wiring. |
 | `0x02` | `ServerMessage_Position` | Implemented | Chat ingest (`ServerMessage_*` variants). |
-| `0x03` | `TimeUpdate` | Not implemented |  |
+| `0x03` | `TimeUpdate` | Implemented | World time sync updates HUD/render time state. |
 | `0x04` | `EntityEquipment_u16` | Implemented | Remote player held-item is visualized (slot 0); armor slots TODO. |
 | `0x05` | `SpawnPosition` | Not implemented |  |
 | `0x06` | `UpdateHealth` | Implemented | Health/food/death state. |
-| `0x07` | `Respawn_Gamemode` | Not implemented |  |
+| `0x07` | `Respawn_Gamemode` | Implemented | Also handles hashed-seed / NBT / world-name respawn variants. |
 | `0x08` | `TeleportPlayer_NoConfirm` | Implemented | Also handles protocol variants. |
 | `0x09` | `SetCurrentHotbarSlot` | Implemented | Hotbar slot sync. |
 | `0x0A` | `EntityUsedBed` | Not implemented |  |
@@ -116,7 +123,7 @@ Legend:
 | `0x0F` | `SpawnMob_u8_i32_NoUUID` | Implemented | Spawned as typed placeholder visuals. |
 | `0x10` | `SpawnPainting_NoUUID` | Not implemented |  |
 | `0x11` | `SpawnExperienceOrb_i32` | Implemented | Spawned as placeholder orb visuals. |
-| `0x12` | `EntityVelocity` | Partial | Local player knockback velocity applied; remote entity velocity is decoded but not yet simulated. |
+| `0x12` | `EntityVelocity` | Partial | Local player knockback velocity applied; remote entity velocity is decoded but not fully simulated. |
 | `0x13` | `EntityDestroy` | Implemented | Also handles `EntityDestroy_u8`. |
 | `0x14` | `Entity` | Not implemented |  |
 | `0x15` | `EntityMove_i8` | Implemented | Also handles alternate move variants. |
@@ -130,18 +137,18 @@ Legend:
 | `0x1D` | `EntityEffect` | Partial | Speed/Jump Boost applied to local simulation state. |
 | `0x1E` | `EntityRemoveEffect` | Partial | Clears Speed/Jump Boost state for local player. |
 | `0x1F` | `SetExperience` | Implemented | Experience bar / level / total XP sync to HUD state. |
-| `0x20` | `EntityProperties` | Partial | Parsed, ignored. |
+| `0x20` | `EntityProperties` | Partial | Local movement speed is derived from `generic.movementSpeed`; most other attributes are ignored. |
 | `0x21` | `ChunkData_NoEntities_u16` | Implemented | Handled via `ChunkData` decode path. |
 | `0x22` | `MultiBlockChange_VarInt` | Implemented | Also handles `MultiBlockChange_u16`. |
 | `0x23` | `BlockChange_VarInt` | Implemented | Also handles `BlockChange_u8`. |
 | `0x24` | `BlockAction` | Not implemented |  |
 | `0x25` | `BlockBreakAnimation` | Not implemented |  |
 | `0x26` | `ChunkDataBulk` | Implemented | Chunk ingest/decode path. |
-| `0x27` | `Explosion` | Not implemented |  |
-| `0x28` | `Effect` | Not implemented |  |
-| `0x29` | `NamedSoundEffect_u8_NoCategory` | Not implemented |  |
+| `0x27` | `Explosion` | Partial | Explosion sound is played; physics/particle effects are not yet applied. |
+| `0x28` | `Effect` | Partial | Common auxiliary effects are mapped to sounds only. |
+| `0x29` | `NamedSoundEffect_u8_NoCategory` | Implemented | Also handles named-sound variants with category fields. |
 | `0x2A` | `Particle_VarIntArray` | Not implemented |  |
-| `0x2B` | `ChangeGameState` | Not implemented |  |
+| `0x2B` | `ChangeGameState` | Partial | Gamemode-change reason is handled; most other reasons are ignored. |
 | `0x2C` | `SpawnGlobalEntity_i32` | Not implemented |  |
 | `0x2D` | `WindowOpen` | Implemented | Inventory windows + variants. |
 | `0x2E` | `WindowClose` | Implemented | Inventory close sync. |
@@ -156,20 +163,20 @@ Legend:
 | `0x37` | `Statistics` | Not implemented |  |
 | `0x38` | `PlayerInfo` | Implemented | Name/UUID registry updates. |
 | `0x39` | `PlayerAbilities` | Implemented | Syncs mayfly/flying + speed values into local status. |
-| `0x3A` | `TabCompleteReply` | Not implemented |  |
-| `0x3B` | `ScoreboardObjective` | Not implemented |  |
-| `0x3C` | `UpdateScore` | Not implemented |  |
-| `0x3D` | `ScoreboardDisplay` | Not implemented |  |
-| `0x3E` | `Teams_u8` | Not implemented |  |
+| `0x3A` | `TabCompleteReply` | Implemented | Suggestions feed the chat autocomplete UI. |
+| `0x3B` | `ScoreboardObjective` | Implemented | Objective create/update/remove wired into sidebar state. |
+| `0x3C` | `UpdateScore` | Implemented | Score entries update the sidebar scoreboard. |
+| `0x3D` | `ScoreboardDisplay` | Implemented | Sidebar display slot is tracked. |
+| `0x3E` | `Teams_u8` | Implemented | Team prefixes/suffixes and membership update scoreboard state. |
 | `0x3F` | `PluginMessageClientbound` | Not implemented |  |
-| `0x40` | `Disconnect` | Not implemented | Disconnect currently handled via read error path. |
+| `0x40` | `Disconnect` | Implemented | Disconnect reason is surfaced to the connect/chat UI. |
 | `0x41` | `ServerDifficulty` | Not implemented |  |
 | `0x42` | `CombatEvent` | Not implemented |  |
 | `0x43` | `Camera` | Not implemented |  |
 | `0x44` | `WorldBorder` | Not implemented |  |
-| `0x45` | `Title_notext_component` | Not implemented |  |
+| `0x45` | `Title_notext_component` | Implemented | Title/subtitle/action-bar/timing variants are displayed. |
 | `0x46` | `SetCompression` | Not implemented (play) | Compression is handled during login (`SetInitialCompression`). |
-| `0x47` | `PlayerListHeaderFooter` | Not implemented |  |
+| `0x47` | `PlayerListHeaderFooter` | Implemented | Tab-list header/footer text is displayed. |
 | `0x48` | `ResourcePackSend` | Not implemented |  |
 | `0x49` | `EntityUpdateNBT` | Not implemented |  |
 

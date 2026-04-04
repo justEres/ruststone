@@ -125,7 +125,9 @@ fn enqueue_chunk_meshes(
                 reset_world = true;
             }
             chunk::WorldUpdate::UnloadChunk(x, z) => {
-                unloaded_keys.push((x, z));
+                if !render_debug.infinite_render_distance {
+                    unloaded_keys.push((x, z));
+                }
             }
             chunk::WorldUpdate::ChunkData(chunk) => {
                 let key = (chunk.x, chunk.z);

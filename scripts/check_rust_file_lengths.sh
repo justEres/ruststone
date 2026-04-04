@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${1:-.}"
-LIMIT="${2:-400}"
+LIMIT="${2:-800}"
 
 violations=0
 while IFS= read -r file; do

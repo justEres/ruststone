@@ -23,6 +23,10 @@
     - sometimes chunks are missing. 
     - ambient occlusion for snow layers
 
+    - ✅ textures for non full blocks are stretched. for examles each face of a slab uses the whole texture and stretches it instead of just using half of it
+    - shadows in weird steps/lines
+    - 
+
 - Controls:
     - make controls editable using a gui in the settings and save and load them from config
 
@@ -102,7 +106,7 @@
         - ✅ first high-impact custom model batch implemented (farmland, ladder, snow layer, cactus, soul sand, trapdoor, carpet, rails, doors, fence gates, walls)
         - ⬜ remaining special blocks/states
     - ✅ better antialiasing
-    - textures on non full block models are currently stretched to each face. instead use correct scaling and uv mapping
+    - ✅ textures on non full block models are currently stretched to each face. instead use correct scaling and uv mapping
         - examples: stairs, doors, fences and so on
 
     - Lods (optional, very late in development, experimental)
