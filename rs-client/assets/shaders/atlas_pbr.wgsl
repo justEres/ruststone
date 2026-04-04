@@ -496,8 +496,10 @@ fn fragment(
         let overlay_sample = atlas_texel_from_repeating(uv_local, grass_overlay_origin);
         let overlay_mask = overlay_sample.a;
         let shade = clamp(pbr_input.material.base_color.a, 0.0, 1.0);
-        let tinted = mix(vec3<f32>(1.0, 1.0, 1.0), clamp(vertex_tint_rgb, vec3<f32>(0.0), vec3<f32>(1.0)), overlay_mask);
-        pbr_input.material.base_color = vec4(atlas_rgb * tinted * shade, atlas_alpha);
+        let biome_tint = clamp(vertex_tint_rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+        let tinted_overlay_rgb = atlas_rgb * biome_tint;
+        let combined_rgb = mix(atlas_rgb, tinted_overlay_rgb, overlay_mask) * shade;
+        pbr_input.material.base_color = vec4(combined_rgb, atlas_alpha);
     } else {
         pbr_input.material.base_color *= atlas_sample;
     }

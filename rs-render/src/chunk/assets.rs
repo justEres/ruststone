@@ -184,6 +184,18 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
             rgba
         };
         let mut rgba = rgba;
+        if texture_name == "grass_side.png"
+            && let Some(overlay_img) =
+                load_texture_image(&textures_root, "grass_side_overlay.png", &extra_sources)
+        {
+            let overlay_rgba = overlay_img.to_rgba8();
+            let overlay_rgba = if overlay_rgba.dimensions() != (tile_w, tile_h) {
+                imageops::resize(&overlay_rgba, tile_w, tile_h, imageops::Nearest)
+            } else {
+                overlay_rgba
+            };
+            neutralize_grass_side_base_with_overlay_mask(&mut rgba, &overlay_rgba);
+        }
         apply_default_foliage_tint(texture_name, &mut rgba);
         normalize_overlay_mask_texture(texture_name, &mut rgba);
         force_opaque_texture_alpha(texture_name, &mut rgba);

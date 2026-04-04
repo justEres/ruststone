@@ -21,6 +21,38 @@ pub(super) fn apply_default_foliage_tint(
     }
 }
 
+pub(super) fn neutralize_grass_side_base_with_overlay_mask(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    overlay: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) {
+    if img.dimensions() != overlay.dimensions() {
+        return;
+    }
+
+    for (base, mask_px) in img.pixels_mut().zip(overlay.pixels()) {
+        if base.0[3] == 0 {
+            continue;
+        }
+        let [r, g, b, a] = mask_px.0;
+        let mask = if a == 255 {
+            ((u16::from(r) + u16::from(g) + u16::from(b)) / 3) as u8
+        } else {
+            a
+        };
+        if mask == 0 {
+            continue;
+        }
+        let luma =
+            ((u16::from(base.0[0]) * 54 + u16::from(base.0[1]) * 183 + u16::from(base.0[2]) * 19)
+                / 256) as u8;
+        let blend = u16::from(mask);
+        let inv = 255_u16.saturating_sub(blend);
+        base.0[0] = ((u16::from(base.0[0]) * inv + u16::from(luma) * blend) / 255) as u8;
+        base.0[1] = ((u16::from(base.0[1]) * inv + u16::from(luma) * blend) / 255) as u8;
+        base.0[2] = ((u16::from(base.0[2]) * inv + u16::from(luma) * blend) / 255) as u8;
+    }
+}
+
 pub(super) fn normalize_overlay_mask_texture(
     texture_name: &str,
     img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
