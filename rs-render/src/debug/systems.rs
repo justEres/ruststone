@@ -32,6 +32,11 @@ pub fn apply_render_debug_settings(
         for mut projection in &mut cameras {
             if let Projection::Perspective(persp) = &mut *projection {
                 persp.fov = settings.fov_deg.to_radians();
+                persp.far = if settings.infinite_render_distance {
+                    100_000.0
+                } else {
+                    (settings.render_distance_chunks.max(1) as f32 * 16.0 + 256.0).max(512.0)
+                };
             }
         }
         wireframe.global = settings.wireframe_enabled;

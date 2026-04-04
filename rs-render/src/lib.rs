@@ -319,7 +319,7 @@ fn apply_mesh_results(
             transparent,
             occlusion,
         } = mesh_batch;
-        entry.occlusion = occlusion;
+        let previous_occlusion = entry.occlusion;
         for (group, data, material) in [
             (
                 chunk::MaterialGroup::Opaque,
@@ -418,9 +418,17 @@ fn apply_mesh_results(
             }
         }
 
+        let preserve_previous_visuals =
+            render_debug.infinite_render_distance && active_keys.is_empty() && !entry.submeshes.is_empty();
+        if preserve_previous_visuals {
+            entry.occlusion = previous_occlusion;
+        } else {
+            entry.occlusion = occlusion;
+        }
+
         let mut remove_keys = Vec::new();
         for (key, submesh) in entry.submeshes.iter() {
-            if !active_keys.contains(key) {
+            if !preserve_previous_visuals && !active_keys.contains(key) {
                 commands.entity(submesh.entity).despawn_recursive();
                 remove_keys.push(*key);
             }

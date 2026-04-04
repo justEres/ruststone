@@ -485,7 +485,7 @@ fn render_setting_row(
         }
         SettingId::InfiniteRenderDistance => {
             let changed = ui.checkbox(&mut render_debug.infinite_render_distance, "Infinite local render distance").changed();
-            ui.label("Keeps received chunk meshes locally after they leave the simulation radius. Collision is still pruned to the simulation distance.");
+            ui.label("Keeps received chunk meshes locally after they leave the simulation radius and bypasses local occlusion culling. Collision is still pruned to the simulation distance.");
             changed
         }
         SettingId::FlightSpeedBoostEnabled => ui.checkbox(&mut render_debug.flight_speed_boost_enabled, "Boost creative flight speed").changed(),

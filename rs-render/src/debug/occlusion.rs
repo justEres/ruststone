@@ -40,7 +40,7 @@ pub fn occlusion_cull_chunks(
         .filter(|(_, visibility)| !matches!(**visibility, Visibility::Hidden))
         .count() as u32;
 
-    if !settings.occlusion_cull_enabled {
+    if settings.infinite_render_distance || !settings.occlusion_cull_enabled {
         perf.occlusion_cull_ms = 0.0;
         perf.visible_chunks_after_occlusion = distance_visible_count;
         perf.occluded_chunks = 0;
