@@ -321,16 +321,16 @@ pub(super) fn add_box(
 pub(super) fn box_face_uvs(face: Face, min: [f32; 3], max: [f32; 3]) -> [[f32; 2]; 4] {
     match face {
         Face::PosX => [
-            [min[2], min[1]],
-            [max[2], min[1]],
-            [max[2], max[1]],
-            [min[2], max[1]],
+            [min[2], 1.0 - min[1]],
+            [max[2], 1.0 - min[1]],
+            [max[2], 1.0 - max[1]],
+            [min[2], 1.0 - max[1]],
         ],
         Face::NegX => [
-            [1.0 - max[2], min[1]],
-            [1.0 - min[2], min[1]],
-            [1.0 - min[2], max[1]],
-            [1.0 - max[2], max[1]],
+            [1.0 - max[2], 1.0 - min[1]],
+            [1.0 - min[2], 1.0 - min[1]],
+            [1.0 - min[2], 1.0 - max[1]],
+            [1.0 - max[2], 1.0 - max[1]],
         ],
         Face::PosY => [
             [min[0], min[2]],
@@ -345,16 +345,16 @@ pub(super) fn box_face_uvs(face: Face, min: [f32; 3], max: [f32; 3]) -> [[f32; 2
             [min[0], 1.0 - min[2]],
         ],
         Face::PosZ => [
-            [1.0 - max[0], min[1]],
-            [1.0 - min[0], min[1]],
-            [1.0 - min[0], max[1]],
-            [1.0 - max[0], max[1]],
+            [1.0 - max[0], 1.0 - min[1]],
+            [1.0 - min[0], 1.0 - min[1]],
+            [1.0 - min[0], 1.0 - max[1]],
+            [1.0 - max[0], 1.0 - max[1]],
         ],
         Face::NegZ => [
-            [min[0], min[1]],
-            [max[0], min[1]],
-            [max[0], max[1]],
-            [min[0], max[1]],
+            [min[0], 1.0 - min[1]],
+            [max[0], 1.0 - min[1]],
+            [max[0], 1.0 - max[1]],
+            [min[0], 1.0 - max[1]],
         ],
     }
 }
