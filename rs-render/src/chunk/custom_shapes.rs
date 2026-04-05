@@ -320,7 +320,7 @@ fn add_anvil_block(
             [top_max[0], y_top, top_max[2]],
             [top_min[0], y_top, top_max[2]],
         ],
-        uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        uv: [[3.0 / 16.0, 0.0], [13.0 / 16.0, 0.0], [13.0 / 16.0, 1.0], [3.0 / 16.0, 1.0]],
         texture_path: anvil_top_texture(meta).to_string(),
         tint_index: None,
     };

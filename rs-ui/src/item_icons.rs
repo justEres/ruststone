@@ -306,30 +306,86 @@ fn generate_chest_icon(
     let tex = load_model_texture(texture_name, texture_cache)?;
     let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
     let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
-    for quad in chest_icon_quads() {
+    for quad in chest_icon_quads(texture_name) {
         raster_iso_quad(&mut out, &mut depth, &quad, &tex, [255, 255, 255]);
     }
     Some(out)
 }
 
-fn chest_icon_quads() -> Vec<IconQuad> {
-    vec![
-        icon_quad(
-            [[1.0, 6.0, 15.0], [15.0, 6.0, 15.0], [15.0, 16.0, 15.0], [1.0, 16.0, 15.0]],
-            [[14.0 / 64.0, 29.0 / 64.0], [28.0 / 64.0, 29.0 / 64.0], [28.0 / 64.0, 19.0 / 64.0], [14.0 / 64.0, 19.0 / 64.0]],
-            "entity/chest/normal.png",
+fn chest_icon_quads(texture_path: &str) -> Vec<IconQuad> {
+    let mut out = Vec::new();
+    push_icon_box_quads(
+        &mut out,
+        texture_path,
+        (64.0, 64.0),
+        (0.0, 19.0),
+        [1.0, 6.0, 1.0],
+        [14.0, 10.0, 14.0],
+    );
+    push_icon_box_quads(
+        &mut out,
+        texture_path,
+        (64.0, 64.0),
+        (0.0, 0.0),
+        [1.0, 2.0, 1.0],
+        [14.0, 5.0, 14.0],
+    );
+    push_icon_box_quads(
+        &mut out,
+        texture_path,
+        (64.0, 64.0),
+        (0.0, 0.0),
+        [7.0, 5.0, 0.0],
+        [2.0, 4.0, 1.0],
+    );
+    out
+}
+
+fn push_icon_box_quads(
+    out: &mut Vec<IconQuad>,
+    texture_path: &str,
+    texture_size: (f32, f32),
+    texture_offset: (f32, f32),
+    box_origin: [f32; 3],
+    box_size: [f32; 3],
+) {
+    let (u, v) = texture_offset;
+    let (dx, dy, dz) = (box_size[0], box_size[1], box_size[2]);
+    let (x1, y1, z1) = (box_origin[0], box_origin[1], box_origin[2]);
+    let (x2, y2, z2) = (x1 + dx, y1 + dy, z1 + dz);
+    let (tex_w, tex_h) = texture_size;
+    let faces = [
+        (
+            [[x2, y1, z2], [x2, y1, z1], [x2, y2, z1], [x2, y2, z2]],
+            [[u + dz + dx, v + dz], [u + dz + dx + dz, v + dz], [u + dz + dx + dz, v + dz + dy], [u + dz + dx, v + dz + dy]],
         ),
-        icon_quad(
-            [[15.0, 6.0, 15.0], [15.0, 6.0, 1.0], [15.0, 16.0, 1.0], [15.0, 16.0, 15.0]],
-            [[42.0 / 64.0, 29.0 / 64.0], [56.0 / 64.0, 29.0 / 64.0], [56.0 / 64.0, 19.0 / 64.0], [42.0 / 64.0, 19.0 / 64.0]],
-            "entity/chest/normal.png",
+        (
+            [[x1, y1, z1], [x1, y1, z2], [x1, y2, z2], [x1, y2, z1]],
+            [[u, v + dz], [u + dz, v + dz], [u + dz, v + dz + dy], [u, v + dz + dy]],
         ),
-        icon_quad(
-            [[1.0, 16.0, 1.0], [15.0, 16.0, 1.0], [15.0, 16.0, 15.0], [1.0, 16.0, 15.0]],
-            [[14.0 / 64.0, 14.0 / 64.0], [28.0 / 64.0, 14.0 / 64.0], [28.0 / 64.0, 0.0], [14.0 / 64.0, 0.0]],
-            "entity/chest/normal.png",
+        (
+            [[x1, y2, z1], [x2, y2, z1], [x2, y2, z2], [x1, y2, z2]],
+            [[u + dz, v], [u + dz + dx, v], [u + dz + dx, v + dz], [u + dz, v + dz]],
         ),
-    ]
+        (
+            [[x1, y1, z2], [x2, y1, z2], [x2, y2, z2], [x1, y2, z2]],
+            [
+                [u + dz + dx + dz, v + dz],
+                [u + dz + dx + dz + dx, v + dz],
+                [u + dz + dx + dz + dx, v + dz + dy],
+                [u + dz + dx + dz, v + dz + dy],
+            ],
+        ),
+        (
+            [[x2, y1, z1], [x1, y1, z1], [x1, y2, z1], [x2, y2, z1]],
+            [[u + dz, v + dz], [u + dz + dx, v + dz], [u + dz + dx, v + dz + dy], [u + dz, v + dz + dy]],
+        ),
+    ];
+
+    for (vertices, uv_px) in faces {
+        let uv = uv_px.map(|[uu, vv]| [uu / tex_w, vv / tex_h]);
+        out.push(icon_quad(vertices, uv, texture_path));
+    }
 }
 
 fn icon_quad(vertices: [[f32; 3]; 4], uv: [[f32; 2]; 4], texture_path: &str) -> IconQuad {
