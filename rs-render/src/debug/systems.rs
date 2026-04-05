@@ -87,6 +87,7 @@ pub fn remesh_on_meshing_toggle(
         && settings.voxel_ao_enabled == state.last_voxel_ao_enabled
         && settings.voxel_ao_cutout == state.last_voxel_ao_cutout
         && (settings.voxel_ao_strength - state.last_voxel_ao_strength).abs() < 0.001
+        && (settings.voxel_ao_foliage_boost - state.last_voxel_ao_foliage_boost).abs() < 0.001
         && settings.barrier_billboard == state.last_barrier_billboard
         && settings.shading_model == state.last_shading_model
         && settings.vanilla_block_shadow_mode == state.last_vanilla_block_shadow_mode
@@ -121,6 +122,7 @@ pub fn remesh_on_meshing_toggle(
     state.last_voxel_ao_enabled = settings.voxel_ao_enabled;
     state.last_voxel_ao_cutout = settings.voxel_ao_cutout;
     state.last_voxel_ao_strength = settings.voxel_ao_strength;
+    state.last_voxel_ao_foliage_boost = settings.voxel_ao_foliage_boost;
     state.last_barrier_billboard = settings.barrier_billboard;
     state.last_shading_model = settings.shading_model;
     state.last_vanilla_block_shadow_mode = settings.vanilla_block_shadow_mode;

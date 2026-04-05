@@ -17,6 +17,7 @@ pub(super) fn add_named_custom_block(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
 ) {
     let id = block_type(block_id);
     match id {
@@ -409,6 +410,7 @@ pub(super) fn add_named_custom_block(
                     voxel_ao_enabled,
                     voxel_ao_strength,
                     voxel_ao_cutout,
+                    voxel_ao_foliage_boost,
                 );
             } else {
                 add_box(
@@ -441,6 +443,7 @@ pub(super) fn add_named_custom_block(
             voxel_ao_enabled,
             voxel_ao_strength,
             voxel_ao_cutout,
+            voxel_ao_foliage_boost,
         ),
         _ => {}
     }

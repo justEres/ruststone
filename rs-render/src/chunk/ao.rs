@@ -113,6 +113,7 @@ pub(super) fn face_shade_signature(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     vanilla_bake: VanillaBakeSettings,
 ) -> u16 {
     let verts = face_vertices(face);
@@ -131,6 +132,7 @@ pub(super) fn face_shade_signature(
             voxel_ao_enabled,
             voxel_ao_strength,
             voxel_ao_cutout,
+            voxel_ao_foliage_boost,
             vanilla_bake,
         );
         packed |= quantize_shade_4bit(shade) << (idx * 4);
@@ -190,7 +192,7 @@ pub(super) fn face_vertex_light_ao(
     (ao, sky_level, block_level)
 }
 
-fn face_vertex_weighted_ao(
+pub(super) fn face_vertex_weighted_ao(
     snapshot: &ChunkColumnSnapshot,
     chunk_x: i32,
     chunk_z: i32,
@@ -302,7 +304,7 @@ fn averaged_face_weighted_ao(
 }
 
 pub(super) fn apply_ao_strength(ao: f32, strength: f32) -> f32 {
-    let strength = strength.clamp(0.0, 1.0);
+    let strength = strength.clamp(0.0, 2.0);
     1.0 - strength + ao.clamp(0.0, 1.0) * strength
 }
 
@@ -319,6 +321,7 @@ pub(super) fn greedy_face_corner_shades(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     vanilla_bake: VanillaBakeSettings,
 ) -> [f32; 4] {
     let x0 = quad.x as i32;
@@ -342,6 +345,7 @@ pub(super) fn greedy_face_corner_shades(
             voxel_ao_enabled,
             voxel_ao_strength,
             voxel_ao_cutout,
+            voxel_ao_foliage_boost,
             vanilla_bake,
         )
     };
@@ -396,6 +400,7 @@ pub(super) fn cross_plant_shade(
     block_id: u16,
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
+    voxel_ao_foliage_boost: f32,
 ) -> f32 {
     let mut shade = block_light_factor(snapshot, chunk_x, chunk_z, x, y, z).max(0.34);
     if voxel_ao_enabled {
@@ -409,9 +414,9 @@ pub(super) fn cross_plant_shade(
         .sum::<f32>()
             * 0.25;
         let ao_strength = if is_softened_vanilla_foliage(block_id) {
-            voxel_ao_strength * 0.75
+            voxel_ao_strength * 0.75 * voxel_ao_foliage_boost.clamp(0.5, 4.0)
         } else {
-            voxel_ao_strength * 0.55
+            voxel_ao_strength * 0.55 * voxel_ao_foliage_boost.clamp(0.5, 4.0)
         };
         shade *= apply_ao_strength(side_ao, ao_strength);
     }

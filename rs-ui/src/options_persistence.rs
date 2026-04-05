@@ -4,6 +4,10 @@ fn default_simulation_distance_chunks() -> i32 {
     RenderDebugSettings::default().simulation_distance_chunks
 }
 
+fn default_voxel_ao_foliage_boost() -> f32 {
+    RenderDebugSettings::default().voxel_ao_foliage_boost
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientOptionsFile {
     pub fov_deg: f32,
@@ -76,6 +80,8 @@ struct ClientOptionsFile {
     pub voxel_ao_enabled: bool,
     pub voxel_ao_strength: f32,
     pub voxel_ao_cutout: bool,
+    #[serde(default = "default_voxel_ao_foliage_boost")]
+    pub voxel_ao_foliage_boost: f32,
     pub water_reflections_enabled: bool,
     pub water_reflection_screen_space: bool,
     pub water_reflection_strength: f32,
@@ -190,6 +196,7 @@ impl Default for ClientOptionsFile {
             voxel_ao_enabled: render.voxel_ao_enabled,
             voxel_ao_strength: render.voxel_ao_strength,
             voxel_ao_cutout: render.voxel_ao_cutout,
+            voxel_ao_foliage_boost: render.voxel_ao_foliage_boost,
             water_reflections_enabled: render.water_reflections_enabled,
             water_reflection_screen_space: render.water_reflection_screen_space,
             water_reflection_strength: render.water_reflection_strength,
@@ -308,6 +315,7 @@ pub(crate) fn options_to_file(
         voxel_ao_enabled: render.voxel_ao_enabled,
         voxel_ao_strength: render.voxel_ao_strength,
         voxel_ao_cutout: render.voxel_ao_cutout,
+        voxel_ao_foliage_boost: render.voxel_ao_foliage_boost,
         water_reflections_enabled: render.water_reflections_enabled,
         water_reflection_screen_space: render.water_reflection_screen_space,
         water_reflection_strength: render.water_reflection_strength,
@@ -439,6 +447,7 @@ pub fn apply_options(
     render.voxel_ao_enabled = options.voxel_ao_enabled;
     render.voxel_ao_strength = options.voxel_ao_strength.clamp(0.0, 1.0);
     render.voxel_ao_cutout = options.voxel_ao_cutout;
+    render.voxel_ao_foliage_boost = options.voxel_ao_foliage_boost.clamp(0.5, 4.);
     render.water_reflections_enabled = options.water_reflections_enabled;
     render.water_reflection_screen_space = options.water_reflection_screen_space;
     render.water_reflection_strength = options.water_reflection_strength.clamp(0.0, 3.0);

@@ -16,6 +16,7 @@ pub(super) fn add_cross_plant(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
 ) {
     let texture_index = texture_mapping.texture_index_for_state(block_id, Face::PosZ);
     let tile_origin = atlas_tile_origin(texture_index);
@@ -50,6 +51,7 @@ pub(super) fn add_cross_plant(
             block_id,
             voxel_ao_enabled,
             voxel_ao_strength,
+            voxel_ao_foliage_boost,
         )
     } else if should_apply_prebaked_shade(block_id) {
         block_light_factor(snapshot, chunk_x, chunk_z, x, y, z)
