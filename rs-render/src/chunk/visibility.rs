@@ -53,6 +53,7 @@ pub(super) fn render_group_for_block(block_id: u16) -> MaterialGroup {
             | 69
             | 71
             | 96
+            | 106
             | 140
             | 144
             | 157

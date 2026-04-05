@@ -177,6 +177,7 @@ impl AtlasBlockMapping {
                 15 => "wool_colored_black.png",
                 _ => "wool_colored_white.png",
             }),
+            37 => Some("flower_dandelion.png"),
             53 => Some("planks_oak.png"),
             67 => Some("cobblestone.png"),
             108 => Some("brick.png"),

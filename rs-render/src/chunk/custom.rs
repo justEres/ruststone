@@ -18,6 +18,7 @@ pub(super) fn add_custom_block(
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
     voxel_ao_foliage_boost: f32,
+    vanilla_bake: VanillaBakeSettings,
 ) {
     match block_model_kind(block_type(block_id)) {
         BlockModelKind::Cross | BlockModelKind::TorchLike => add_cross_plant(
@@ -106,6 +107,7 @@ pub(super) fn add_custom_block(
             voxel_ao_strength,
             voxel_ao_cutout,
             voxel_ao_foliage_boost,
+            vanilla_bake,
         ),
         _ => {}
     }

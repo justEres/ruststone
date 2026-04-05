@@ -1,4 +1,5 @@
 use super::*;
+use image::GenericImageView;
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
@@ -168,16 +169,23 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         name_to_index.insert(name.clone(), idx as u16);
     }
 
-    let mut tile_size = None;
+    let mut tile_size = (16, 16);
     let mut atlas = None::<ImageBuffer<Rgba<u8>, Vec<u8>>>;
+
+    for texture_name in &texture_names {
+        let img = load_texture_image(&textures_root, texture_name, &extra_sources)
+            .unwrap_or_else(missing_texture_image);
+        let (w, h) = img.dimensions();
+        tile_size.0 = tile_size.0.max(w);
+        tile_size.1 = tile_size.1.max(h);
+    }
 
     for (idx, texture_name) in texture_names.iter().enumerate() {
         let img = load_texture_image(&textures_root, texture_name, &extra_sources)
             .unwrap_or_else(missing_texture_image);
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
-        let size = tile_size.get_or_insert((w, h));
-        let (tile_w, tile_h) = *size;
+        let (tile_w, tile_h) = tile_size;
         let rgba = if w != tile_w || h != tile_h {
             imageops::resize(&rgba, tile_w, tile_h, imageops::Nearest)
         } else {
@@ -245,7 +253,9 @@ fn extra_texture_sources() -> HashMap<String, PathBuf> {
     [
         ("barrier_item.png", "items/barrier.png"),
         ("chest_normal.png", "entity/chest/normal.png"),
+        ("chest_normal_double.png", "entity/chest/normal_double.png"),
         ("chest_trapped.png", "entity/chest/trapped.png"),
+        ("chest_trapped_double.png", "entity/chest/trapped_double.png"),
         ("chest_ender.png", "entity/chest/ender.png"),
         ("sign_entity.png", "entity/sign.png"),
     ]
