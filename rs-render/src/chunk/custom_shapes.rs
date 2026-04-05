@@ -1,5 +1,8 @@
 use super::*;
-use crate::{IconQuad, anvil_display_quads};
+use crate::{
+    IconQuad, anvil_display_quads, brewing_stand_display_quads, skull_display_quads,
+    torch_display_quads,
+};
 
 fn atlas_texture_name(texture_path: &str) -> &str {
     texture_path
@@ -932,26 +935,63 @@ pub(super) fn add_named_custom_block(
             block_id,
             tint,
         ),
-        144 => {
-            let (min, max) = if (block_meta(block_id) & 0x7) == 1 {
-                ([0.25, 0.25, 0.5], [0.75, 0.75, 1.0])
-            } else {
-                ([0.25, 0.0, 0.25], [0.75, 0.5, 0.75])
-            };
-            add_box(
-                batch,
-                None,
-                texture_mapping,
-                biome_tints,
-                x,
-                y,
-                z,
-                min,
-                max,
-                block_id,
-                tint,
-            );
-        }
+        50 | 75 | 76 => add_model_quads(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            &torch_display_quads(block_id, block_meta(block_id)),
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
+            voxel_ao_foliage_boost,
+            vanilla_bake,
+        ),
+        117 => add_model_quads(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            &brewing_stand_display_quads(block_meta(block_id)),
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
+            voxel_ao_foliage_boost,
+            vanilla_bake,
+        ),
+        144 => add_model_quads(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            &skull_display_quads(block_meta(block_id)),
+            false,
+            0.0,
+            voxel_ao_cutout,
+            voxel_ao_foliage_boost,
+            vanilla_bake,
+        ),
         166 => {
             if barrier_billboard {
                 add_cross_plant(
