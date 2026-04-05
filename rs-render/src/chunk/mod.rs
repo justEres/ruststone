@@ -43,7 +43,9 @@ mod tests;
 
 #[allow(unused_imports)]
 pub use assets::{apply_mesh_data, build_mesh_from_data};
-pub use store::{apply_block_update, snapshot_for_chunk, update_store};
+pub use store::{
+    animate_chests, apply_block_update, set_chest_open_count, snapshot_for_chunk, update_store,
+};
 
 use ao::*;
 use custom::*;
@@ -153,6 +155,13 @@ pub enum WorldUpdate {
     UnloadChunk(i32, i32),
     ChunkData(ChunkData),
     BlockUpdate(BlockUpdate),
+    ChestAction {
+        x: i32,
+        y: i32,
+        z: i32,
+        block_id: u16,
+        open_count: u8,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -189,6 +198,13 @@ pub struct SubmeshKey {
 #[derive(Resource, Default)]
 pub struct ChunkStore {
     pub chunks: HashMap<(i32, i32), ChunkColumn>,
+    pub chest_states: HashMap<IVec3, ChestAnimationState>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ChestAnimationState {
+    pub open_count: u8,
+    pub progress: f32,
 }
 
 #[derive(Clone)]
@@ -257,6 +273,7 @@ impl ChunkColumn {
 pub struct ChunkColumnSnapshot {
     pub center_key: (i32, i32),
     pub columns: HashMap<(i32, i32), ChunkColumn>,
+    pub chest_states: HashMap<IVec3, ChestAnimationState>,
 }
 
 impl ChunkColumnSnapshot {

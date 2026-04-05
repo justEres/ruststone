@@ -53,6 +53,7 @@ pub(super) fn build_chunk_mesh_culled(
                             voxel_ao_strength,
                             voxel_ao_cutout,
                             voxel_ao_foliage_boost,
+                            vanilla_bake,
                         );
                         continue;
                     }
@@ -152,6 +153,7 @@ pub(super) fn build_chunk_mesh_greedy(
                         voxel_ao_strength,
                         voxel_ao_cutout,
                         voxel_ao_foliage_boost,
+                        vanilla_bake,
                     );
                 }
             }

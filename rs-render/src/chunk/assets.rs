@@ -1,4 +1,5 @@
 use super::*;
+use image::GenericImageView;
 
 impl FromWorld for ChunkRenderAssets {
     fn from_world(world: &mut World) -> Self {
@@ -168,16 +169,23 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         name_to_index.insert(name.clone(), idx as u16);
     }
 
-    let mut tile_size = None;
+    let mut tile_size = (16, 16);
     let mut atlas = None::<ImageBuffer<Rgba<u8>, Vec<u8>>>;
+
+    for texture_name in &texture_names {
+        let img = load_texture_image(&textures_root, texture_name, &extra_sources)
+            .unwrap_or_else(missing_texture_image);
+        let (w, h) = atlas_source_image(texture_name, img).dimensions();
+        tile_size.0 = tile_size.0.max(w);
+        tile_size.1 = tile_size.1.max(h);
+    }
 
     for (idx, texture_name) in texture_names.iter().enumerate() {
         let img = load_texture_image(&textures_root, texture_name, &extra_sources)
             .unwrap_or_else(missing_texture_image);
-        let rgba = img.to_rgba8();
+        let rgba = atlas_source_image(texture_name, img).to_rgba8();
         let (w, h) = rgba.dimensions();
-        let size = tile_size.get_or_insert((w, h));
-        let (tile_w, tile_h) = *size;
+        let (tile_w, tile_h) = tile_size;
         let rgba = if w != tile_w || h != tile_h {
             imageops::resize(&rgba, tile_w, tile_h, imageops::Nearest)
         } else {
@@ -231,6 +239,24 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
     )
 }
 
+fn atlas_source_image(texture_name: &str, img: DynamicImage) -> DynamicImage {
+    if is_animated_block_strip(texture_name, &img) {
+        let rgba = img.to_rgba8();
+        let frame = imageops::crop_imm(&rgba, 0, 0, rgba.width(), rgba.width()).to_image();
+        DynamicImage::ImageRgba8(frame)
+    } else {
+        img
+    }
+}
+
+fn is_animated_block_strip(texture_name: &str, img: &DynamicImage) -> bool {
+    if !texture_name.ends_with(".png") {
+        return false;
+    }
+    let (w, h) = img.dimensions();
+    h > w && h % w == 0
+}
+
 const PLAYER_HEAD_TEXTURES: [&str; 6] = [
     "head_player_top.png",
     "head_player_bottom.png",
@@ -245,7 +271,9 @@ fn extra_texture_sources() -> HashMap<String, PathBuf> {
     [
         ("barrier_item.png", "items/barrier.png"),
         ("chest_normal.png", "entity/chest/normal.png"),
+        ("chest_normal_double.png", "entity/chest/normal_double.png"),
         ("chest_trapped.png", "entity/chest/trapped.png"),
+        ("chest_trapped_double.png", "entity/chest/trapped_double.png"),
         ("chest_ender.png", "entity/chest/ender.png"),
         ("sign_entity.png", "entity/sign.png"),
     ]

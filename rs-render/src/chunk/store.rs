@@ -22,6 +22,42 @@ pub fn update_store(store: &mut ChunkStore, chunk: ChunkData) {
     }
 }
 
+pub fn set_chest_open_count(
+    store: &mut ChunkStore,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    open_count: u8,
+) -> Vec<(i32, i32)> {
+    let mut touched = Vec::new();
+    let mut positions = vec![IVec3::new(x, y, z)];
+    for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+        let neighbor = block_at_store(store, x + dx, y, z + dz);
+        if block_type(neighbor) == block_id {
+            positions.push(IVec3::new(x + dx, y, z + dz));
+        }
+    }
+
+    for pos in positions {
+        store.chest_states.insert(
+            pos,
+            ChestAnimationState {
+                open_count,
+                progress: store
+                    .chest_states
+                    .get(&pos)
+                    .map(|state| state.progress)
+                    .unwrap_or(0.0),
+            },
+        );
+        touched.push((pos.x.div_euclid(CHUNK_SIZE), pos.z.div_euclid(CHUNK_SIZE)));
+    }
+    touched.sort_unstable();
+    touched.dedup();
+    touched
+}
+
 pub fn apply_block_update(store: &mut ChunkStore, update: BlockUpdate) -> Vec<(i32, i32)> {
     if !(0..WORLD_HEIGHT).contains(&update.y) {
         return Vec::new();
@@ -37,6 +73,12 @@ pub fn apply_block_update(store: &mut ChunkStore, update: BlockUpdate) -> Vec<(i
         .entry((chunk_x, chunk_z))
         .or_insert_with(ChunkColumn::new);
     column.set_block(local_x, update.y, local_z, update.block_id);
+    let pos = IVec3::new(update.x, update.y, update.z);
+    if matches!(block_type(update.block_id), 54 | 130 | 146) {
+        store.chest_states.entry(pos).or_default();
+    } else {
+        store.chest_states.remove(&pos);
+    }
 
     let mut touched = vec![(chunk_x, chunk_z)];
     if local_x == 0 {
@@ -56,6 +98,7 @@ pub fn apply_block_update(store: &mut ChunkStore, update: BlockUpdate) -> Vec<(i
 
 pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSnapshot {
     let mut columns = HashMap::new();
+    let mut chest_states = HashMap::new();
     for dz in -1..=1 {
         for dx in -1..=1 {
             let neighbor_key = (key.0 + dx, key.1 + dz);
@@ -64,10 +107,57 @@ pub fn snapshot_for_chunk(store: &ChunkStore, key: (i32, i32)) -> ChunkColumnSna
             }
         }
     }
+    for (pos, state) in &store.chest_states {
+        let chest_chunk = (pos.x.div_euclid(CHUNK_SIZE), pos.z.div_euclid(CHUNK_SIZE));
+        if (chest_chunk.0 - key.0).abs() <= 1 && (chest_chunk.1 - key.1).abs() <= 1 {
+            chest_states.insert(*pos, *state);
+        }
+    }
     ChunkColumnSnapshot {
         center_key: key,
         columns,
+        chest_states,
     }
+}
+
+pub fn animate_chests(store: &mut ChunkStore, dt_seconds: f32) -> Vec<(i32, i32)> {
+    let mut touched = Vec::new();
+    let speed = 2.0;
+    let epsilon = 0.001;
+    for (pos, state) in &mut store.chest_states {
+        let target = if state.open_count > 0 { 1.0 } else { 0.0 };
+        let next = if state.progress < target {
+            (state.progress + dt_seconds * speed).min(target)
+        } else {
+            (state.progress - dt_seconds * speed).max(target)
+        };
+        if (next - state.progress).abs() > epsilon {
+            state.progress = next;
+            touched.push((pos.x.div_euclid(CHUNK_SIZE), pos.z.div_euclid(CHUNK_SIZE)));
+        }
+    }
+    touched.sort_unstable();
+    touched.dedup();
+    touched
+}
+
+fn block_at_store(store: &ChunkStore, x: i32, y: i32, z: i32) -> u16 {
+    if !(0..WORLD_HEIGHT).contains(&y) {
+        return 0;
+    }
+    let chunk_x = x.div_euclid(CHUNK_SIZE);
+    let chunk_z = z.div_euclid(CHUNK_SIZE);
+    let local_x = x.rem_euclid(CHUNK_SIZE) as usize;
+    let local_z = z.rem_euclid(CHUNK_SIZE) as usize;
+    let section_idx = (y / SECTION_HEIGHT) as usize;
+    let local_y = (y % SECTION_HEIGHT) as usize;
+    store
+        .chunks
+        .get(&(chunk_x, chunk_z))
+        .and_then(|column| column.sections.get(section_idx))
+        .and_then(|section| section.as_ref())
+        .map(|section| section[local_y * 16 * 16 + local_z * 16 + local_x])
+        .unwrap_or(0)
 }
 
 pub(super) fn build_chunk_occlusion_data(

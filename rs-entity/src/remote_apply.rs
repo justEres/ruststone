@@ -1,6 +1,23 @@
 use super::*;
 use crate::motion::{update_item_motion_velocity, update_motion_velocity};
 
+fn has_explicit_item_texture(stack: &InventoryItemStack) -> bool {
+    item_texture_candidates(stack.item_id, stack.damage)
+        .into_iter()
+        .filter(|rel| rel.starts_with("items/"))
+        .any(|rel| texturepack_textures_root().join(rel).is_file())
+}
+
+fn block_display_quads_for_stack(stack: &InventoryItemStack) -> Option<Vec<IconQuad>> {
+    let block_id = u16::try_from(stack.item_id).ok()?;
+    block_registry_key(block_id)?;
+    if has_explicit_item_texture(stack) {
+        return None;
+    }
+    let mut resolver = BlockModelResolver::new(default_model_roots());
+    block_item_display_quads(block_id, stack.damage as u8, &mut resolver)
+}
+
 pub fn apply_remote_entity_events(
     mut commands: Commands,
     time: Res<Time>,
@@ -10,6 +27,7 @@ pub fn apply_remote_entity_events(
     mut item_textures: ResMut<ItemTextureCache>,
     mut entity_textures: ResMut<EntityTextureCache>,
     item_sprite_mesh: Res<ItemSpriteMesh>,
+    chunk_assets: Res<ChunkRenderAssets>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut params: RemoteEntityApplyParams,
@@ -636,36 +654,61 @@ pub fn apply_remote_entity_events(
                     continue;
                 };
 
-                item_textures.request_stack(&stack);
-                let material = item_textures.material_for_stack(&stack).unwrap_or_else(|| {
-                    materials.add(StandardMaterial {
-                        base_color: Color::WHITE,
-                        alpha_mode: AlphaMode::Mask(0.5),
-                        cull_mode: None,
-                        unlit: true,
-                        perceptual_roughness: 1.0,
-                        metallic: 0.0,
-                        ..Default::default()
-                    })
-                });
-                let item_entity = commands
-                    .spawn((
-                        Name::new("RemoteHeldItem"),
-                        Mesh3d(item_sprite_mesh.0.clone()),
-                        MeshMaterial3d(material),
-                        Transform {
-                            translation: Vec3::new(0.02, -0.86, -0.18),
-                            rotation: Quat::from_rotation_x(-0.30) * Quat::from_rotation_y(0.35),
-                            scale: Vec3::splat(0.55),
+                let item_entity = if let Some(quads) = block_display_quads_for_stack(&stack) {
+                    let (mesh, _) = build_block_display_mesh(&quads, &chunk_assets.texture_mapping);
+                    commands
+                        .spawn((
+                            Name::new("RemoteHeldBlock"),
+                            Mesh3d(meshes.add(mesh)),
+                            MeshMaterial3d::<ChunkAtlasMaterial>(
+                                chunk_assets.cutout_material.clone(),
+                            ),
+                            Transform {
+                                translation: Vec3::new(0.00, -0.82, -0.20),
+                                rotation: Quat::from_rotation_x(-0.25)
+                                    * Quat::from_rotation_y(0.45),
+                                scale: Vec3::splat(0.40),
+                                ..Default::default()
+                            },
+                            GlobalTransform::default(),
+                            Visibility::Visible,
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                        ))
+                        .id()
+                } else {
+                    item_textures.request_stack(&stack);
+                    let material = item_textures.material_for_stack(&stack).unwrap_or_else(|| {
+                        materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            alpha_mode: AlphaMode::Mask(0.5),
+                            cull_mode: None,
+                            unlit: true,
+                            perceptual_roughness: 1.0,
+                            metallic: 0.0,
                             ..Default::default()
-                        },
-                        GlobalTransform::default(),
-                        Visibility::Visible,
-                        InheritedVisibility::default(),
-                        ViewVisibility::default(),
-                        ItemSpriteStack(stack),
-                    ))
-                    .id();
+                        })
+                    });
+                    commands
+                        .spawn((
+                            Name::new("RemoteHeldItem"),
+                            Mesh3d(item_sprite_mesh.0.clone()),
+                            MeshMaterial3d(material),
+                            Transform {
+                                translation: Vec3::new(0.02, -0.86, -0.18),
+                                rotation: Quat::from_rotation_x(-0.30)
+                                    * Quat::from_rotation_y(0.35),
+                                scale: Vec3::splat(0.55),
+                                ..Default::default()
+                            },
+                            GlobalTransform::default(),
+                            Visibility::Visible,
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                            ItemSpriteStack(stack),
+                        ))
+                        .id()
+                };
                 commands.entity(parts.arm_right).add_child(item_entity);
                 commands.entity(root).insert(RemoteHeldItem(item_entity));
             }

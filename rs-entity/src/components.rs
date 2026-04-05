@@ -238,8 +238,8 @@ pub struct FirstPersonViewModel;
 #[derive(Component, Debug, Clone)]
 pub struct FirstPersonViewModelParts {
     pub arm_right: Entity,
-    pub item: Entity,
     pub skin_model: PlayerSkinModel,
+    pub held_stack: Option<InventoryItemStack>,
 }
 
 #[derive(Component, Debug, Clone, Copy)]

@@ -142,6 +142,30 @@ pub(super) fn handle_packet(pkt: Packet, to_main: &crossbeam::channel::Sender<Fr
                 let _ = to_main.send(FromNetMessage::BlockUpdates(updates));
             }
         }
+        Packet::BlockAction(block_action) => {
+            let block_id = block_action.block_type.0 as u16;
+            if matches!(block_id, 54 | 130 | 146) {
+                let _ = to_main.send(FromNetMessage::ChestAction(ChestAction {
+                    x: block_action.location.x,
+                    y: block_action.location.y,
+                    z: block_action.location.z,
+                    block_id,
+                    open_count: block_action.byte1,
+                }));
+            }
+        }
+        Packet::BlockAction_u16(block_action) => {
+            let block_id = block_action.block_type.0 as u16;
+            if matches!(block_id, 54 | 130 | 146) {
+                let _ = to_main.send(FromNetMessage::ChestAction(ChestAction {
+                    x: block_action.x,
+                    y: block_action.y as i32,
+                    z: block_action.z,
+                    block_id,
+                    open_count: block_action.byte1,
+                }));
+            }
+        }
         Packet::UpdateBlockEntity(_ube) => {}
         _ => {}
     }

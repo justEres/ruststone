@@ -8,6 +8,7 @@ use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
 
 mod async_mesh;
+mod block_display;
 mod block_models;
 mod block_textures;
 mod camera;
@@ -20,9 +21,14 @@ mod lighting;
 mod reflection;
 mod world;
 
+pub use block_display::{
+    anvil_display_quads, block_item_display_quads, brewing_stand_display_quads,
+    build_block_display_mesh, chest_display_quads, face_texture_name_for_display_fallback,
+    sign_display_quads, skull_display_quads, torch_display_quads,
+};
 pub use block_models::{BlockModelResolver, IconQuad, default_model_roots};
 pub use block_textures::{AtlasBlockMapping, Face as ModelFace, build_block_texture_mapping};
-pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
+pub use chunk::{ChunkAtlasMaterial, ChunkRenderAssets, ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };
@@ -76,6 +82,7 @@ impl Plugin for RenderPlugin {
                 debug::refresh_render_state_on_mode_change
                     .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
+                animate_chest_meshes.before(enqueue_chunk_meshes),
                 enqueue_chunk_meshes,
                 disable_engine_frustum_culling_globally,
                 dynamic_lights::update_dynamic_block_lights,
@@ -147,6 +154,18 @@ fn enqueue_chunk_meshes(
             }
             chunk::WorldUpdate::BlockUpdate(block_update) => {
                 for key in chunk::apply_block_update(&mut store, block_update) {
+                    pending.keys.insert(key);
+                    updated_keys.insert(key);
+                }
+            }
+            chunk::WorldUpdate::ChestAction {
+                x,
+                y,
+                z,
+                block_id,
+                open_count,
+            } => {
+                for key in chunk::set_chest_open_count(&mut store, x, y, z, block_id, open_count) {
                     pending.keys.insert(key);
                     updated_keys.insert(key);
                 }
@@ -250,6 +269,20 @@ fn enqueue_chunk_meshes(
     perf.last_updates = updates_len;
     perf.last_updates_raw = raw_updates;
     perf.in_flight = in_flight.chunks.len() as u32;
+}
+
+fn animate_chest_meshes(
+    time: Res<Time>,
+    mut store: ResMut<chunk::ChunkStore>,
+    mut pending: ResMut<chunk::PendingChunkRemesh>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    for key in chunk::animate_chests(&mut store, dt) {
+        pending.keys.insert(key);
+    }
 }
 
 fn mesh_priority_score(key: (i32, i32), cam_pos: Vec3, cam_forward: Vec3) -> f32 {

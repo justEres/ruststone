@@ -27,13 +27,16 @@ use bevy::render::view::RenderLayers;
 use bevy_egui::{EguiContexts, egui};
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use rs_render::{
+    BlockModelResolver, ChunkAtlasMaterial, ChunkRenderAssets, IconQuad,
+    block_item_display_quads, build_block_display_mesh, default_model_roots,
     CHUNK_CUTOUT_RENDER_LAYER, CHUNK_OPAQUE_RENDER_LAYER, CHUNK_TRANSPARENT_RENDER_LAYER,
     LOCAL_PLAYER_RENDER_LAYER, MAIN_RENDER_LAYER, PlayerCamera,
 };
 use rs_sim::collision::{WorldCollisionMap, is_solid};
 use rs_utils::{
     AppState, ApplicationState, InventoryItemStack, MobKind, NetEntityAnimation, NetEntityKind,
-    NetEntityMessage, PlayerSkinModel, UiState,
+    NetEntityMessage, PlayerSkinModel, UiState, block_registry_key, item_texture_candidates,
+    texturepack_textures_root,
 };
 use tracing::{debug, info, warn};
 

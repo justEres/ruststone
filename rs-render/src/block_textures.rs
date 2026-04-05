@@ -177,6 +177,7 @@ impl AtlasBlockMapping {
                 15 => "wool_colored_black.png",
                 _ => "wool_colored_white.png",
             }),
+            37 => Some("flower_dandelion.png"),
             53 => Some("planks_oak.png"),
             67 => Some("cobblestone.png"),
             108 => Some("brick.png"),
@@ -200,6 +201,14 @@ impl AtlasBlockMapping {
                 7 => "flower_tulip_pink.png",
                 8 => "flower_oxeye_daisy.png",
                 _ => "flower_rose.png",
+            }),
+            145 => Some(match face {
+                Face::PosY => match (meta >> 2).min(2) {
+                    1 => "anvil_top_damaged_1.png",
+                    2 => "anvil_top_damaged_2.png",
+                    _ => "anvil_top_damaged_0.png",
+                },
+                _ => "anvil_base.png",
             }),
             51 => Some(if (meta & 0x1) != 0 {
                 "fire_layer_1.png"

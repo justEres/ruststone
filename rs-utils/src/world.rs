@@ -65,6 +65,15 @@ pub struct BlockUpdate {
     pub block_id: u16,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ChestAction {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub block_id: u16,
+    pub open_count: u8,
+}
+
 #[derive(Clone)]
 pub struct PlayerPosition {
     pub position: Option<(f64, f64, f64)>,

@@ -211,20 +211,22 @@ impl BlockModelResolver {
     }
 
     fn load_model(&mut self, key: &str) -> Option<&ModelFile> {
-        if self.models.contains_key(key) {
-            return self.models.get(key);
+        for model_key in model_key_candidates(key) {
+            if self.models.contains_key(&model_key) {
+                return self.models.get(&model_key);
+            }
+            let Some((namespace, path)) = split_model_key(&model_key) else {
+                continue;
+            };
+            let rel = format!("models/{path}.json");
+            let Some(raw) = self.read_first_in_namespace(namespace, &rel) else {
+                continue;
+            };
+            let parsed = serde_json::from_str::<ModelFile>(&raw).ok()?;
+            self.models.insert(model_key.clone(), parsed);
+            return self.models.get(&model_key);
         }
-        let model_key = if key.contains(':') {
-            key.to_string()
-        } else {
-            format!("minecraft:{key}")
-        };
-        let (namespace, path) = split_model_key(&model_key)?;
-        let rel = format!("models/{path}.json");
-        let raw = self.read_first_in_namespace(namespace, &rel)?;
-        let parsed = serde_json::from_str::<ModelFile>(&raw).ok()?;
-        self.models.insert(model_key.clone(), parsed);
-        self.models.get(&model_key)
+        None
     }
 
     fn read_first(&self, rel: &str) -> Option<String> {
@@ -242,6 +244,27 @@ impl BlockModelResolver {
         }
         None
     }
+}
+
+fn model_key_candidates(key: &str) -> Vec<String> {
+    if let Some((namespace, path)) = split_model_key(key) {
+        if path.contains('/') {
+            return vec![key.to_string()];
+        }
+        return vec![
+            format!("{namespace}:block/{path}"),
+            key.to_string(),
+            format!("{namespace}:item/{path}"),
+        ];
+    }
+    if key.contains('/') {
+        return vec![format!("minecraft:{key}")];
+    }
+    vec![
+        format!("minecraft:block/{key}"),
+        format!("minecraft:{key}"),
+        format!("minecraft:item/{key}"),
+    ]
 }
 
 

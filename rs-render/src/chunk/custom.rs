@@ -18,9 +18,10 @@ pub(super) fn add_custom_block(
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
     voxel_ao_foliage_boost: f32,
+    vanilla_bake: VanillaBakeSettings,
 ) {
     match block_model_kind(block_type(block_id)) {
-        BlockModelKind::Cross | BlockModelKind::TorchLike => add_cross_plant(
+        BlockModelKind::Cross => add_cross_plant(
             batch,
             snapshot,
             texture_mapping,
@@ -36,6 +37,25 @@ pub(super) fn add_custom_block(
             voxel_ao_strength,
             voxel_ao_cutout,
             voxel_ao_foliage_boost,
+        ),
+        BlockModelKind::TorchLike => add_named_custom_block(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            barrier_billboard,
+            voxel_ao_enabled,
+            voxel_ao_strength,
+            voxel_ao_cutout,
+            voxel_ao_foliage_boost,
+            vanilla_bake,
         ),
         BlockModelKind::Slab => add_slab_block(
             batch,
@@ -106,6 +126,7 @@ pub(super) fn add_custom_block(
             voxel_ao_strength,
             voxel_ao_cutout,
             voxel_ao_foliage_boost,
+            vanilla_bake,
         ),
         _ => {}
     }

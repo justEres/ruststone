@@ -489,6 +489,7 @@ pub(super) fn raycast_block(
         return None;
     }
 
+    let collision_world = WorldCollision::with_map(world);
     let mut prev_cell = origin.floor().as_ivec3();
     let step = 0.05f32;
     let mut t = step;
@@ -499,19 +500,104 @@ pub(super) fn raycast_block(
             let block_state = world.block_at(cell.x, cell.y, cell.z);
             let block_id = block_state_id(block_state);
             if block_id != 0 && !matches!(block_id, 8 | 9 | 10 | 11) {
-                let normal = prev_cell - cell;
-                let normal = IVec3::new(normal.x.signum(), normal.y.signum(), normal.z.signum());
-                return Some(RayHit {
-                    block: cell,
-                    normal,
-                    distance: t,
-                });
+                let mut nearest_hit: Option<(f32, IVec3)> = None;
+                for (min, max) in target_block_boxes(&collision_world, block_state, cell.x, cell.y, cell.z)
+                {
+                    let Some((distance, normal)) =
+                        ray_aabb_hit(origin, dir, min, max, max_distance)
+                    else {
+                        continue;
+                    };
+                    match nearest_hit {
+                        Some((current, _)) if current <= distance => {}
+                        _ => nearest_hit = Some((distance, normal)),
+                    }
+                }
+                if let Some((distance, normal)) = nearest_hit {
+                    return Some(RayHit {
+                        block: cell,
+                        normal,
+                        distance,
+                    });
+                }
             }
             prev_cell = cell;
         }
         t += step;
     }
     None
+}
+
+pub(super) fn target_block_boxes(
+    world: &WorldCollision,
+    block_state: u16,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+) -> Vec<(Vec3, Vec3)> {
+    let mut boxes =
+        crate::sim::movement::debug_block_collision_boxes(world, block_state, block_x, block_y, block_z);
+    if !boxes.is_empty() {
+        return boxes;
+    }
+
+    let min = Vec3::new(block_x as f32, block_y as f32, block_z as f32);
+    let max = min + Vec3::ONE;
+    let id = block_state_id(block_state);
+
+    let fallback = match rs_utils::block_model_kind(id) {
+        rs_utils::BlockModelKind::Cross => {
+            let h = if id == 175 { 1.0 } else { 0.875 };
+            vec![(min + Vec3::new(0.1, 0.0, 0.1), min + Vec3::new(0.9, h, 0.9))]
+        }
+        rs_utils::BlockModelKind::TorchLike => {
+            vec![(min + Vec3::new(0.4, 0.0, 0.4), min + Vec3::new(0.6, 0.75, 0.6))]
+        }
+        rs_utils::BlockModelKind::Custom => match id {
+            26 => vec![(min, min + Vec3::new(1.0, 9.0 / 16.0, 1.0))],
+            27 | 28 | 66 | 157 | 171 => vec![(min, min + Vec3::new(1.0, 1.0 / 16.0, 1.0))],
+            63 => vec![
+                (
+                    min + Vec3::new(0.0, 7.0 / 16.0, 7.0 / 16.0),
+                    min + Vec3::new(1.0, 17.0 / 16.0, 9.0 / 16.0),
+                ),
+                (
+                    min + Vec3::new(7.0 / 16.0, 0.0, 7.0 / 16.0),
+                    min + Vec3::new(9.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0),
+                ),
+            ],
+            68 => {
+                let board = match rs_utils::block_state_meta(block_state) & 0x7 {
+                    2 => (
+                        min + Vec3::new(0.0, 4.5 / 16.0, 14.0 / 16.0),
+                        min + Vec3::new(1.0, 12.5 / 16.0, 16.0 / 16.0),
+                    ),
+                    3 => (
+                        min + Vec3::new(0.0, 4.5 / 16.0, 0.0),
+                        min + Vec3::new(1.0, 12.5 / 16.0, 2.0 / 16.0),
+                    ),
+                    4 => (
+                        min + Vec3::new(14.0 / 16.0, 4.5 / 16.0, 0.0),
+                        min + Vec3::new(16.0 / 16.0, 12.5 / 16.0, 1.0),
+                    ),
+                    _ => (
+                        min + Vec3::new(0.0, 4.5 / 16.0, 0.0),
+                        min + Vec3::new(2.0 / 16.0, 12.5 / 16.0, 1.0),
+                    ),
+                };
+                vec![board]
+            }
+            78 => {
+                let h = ((rs_utils::block_state_meta(block_state) & 0x7) as f32 + 1.0) / 8.0;
+                vec![(min, min + Vec3::new(1.0, h.clamp(0.125, 1.0), 1.0))]
+            }
+            _ => vec![(min, max)],
+        },
+        _ => vec![(min, max)],
+    };
+
+    boxes.extend(fallback);
+    boxes
 }
 
 fn raycast_remote_entity(
@@ -589,6 +675,58 @@ fn ray_aabb_distance(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3, max_dist: f3
         Some(t_min)
     } else if t_max >= 0.0 && t_max <= max_dist {
         Some(t_max)
+    } else {
+        None
+    }
+}
+
+fn ray_aabb_hit(
+    origin: Vec3,
+    dir: Vec3,
+    min: Vec3,
+    max: Vec3,
+    max_dist: f32,
+) -> Option<(f32, IVec3)> {
+    let mut t_min = 0.0f32;
+    let mut t_max = max_dist;
+    let mut hit_normal = IVec3::ZERO;
+
+    for axis in 0..3 {
+        let origin_axis = origin[axis];
+        let dir_axis = dir[axis];
+        let min_axis = min[axis];
+        let max_axis = max[axis];
+
+        if dir_axis.abs() < 1e-6 {
+            if origin_axis < min_axis || origin_axis > max_axis {
+                return None;
+            }
+            continue;
+        }
+
+        let inv_dir = 1.0 / dir_axis;
+        let mut t1 = (min_axis - origin_axis) * inv_dir;
+        let mut t2 = (max_axis - origin_axis) * inv_dir;
+        let mut normal = IVec3::ZERO;
+        normal[axis] = if dir_axis > 0.0 { -1 } else { 1 };
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+            normal[axis] *= -1;
+        }
+        if t1 > t_min {
+            t_min = t1;
+            hit_normal = normal;
+        }
+        t_max = t_max.min(t2);
+        if t_max < t_min {
+            return None;
+        }
+    }
+
+    if t_min >= 0.0 && t_min <= max_dist {
+        Some((t_min, hit_normal))
+    } else if t_max >= 0.0 && t_max <= max_dist {
+        Some((t_max, hit_normal))
     } else {
         None
     }

@@ -57,6 +57,7 @@ pub(super) fn blockstate_name_candidates(block_id: u16, base_name: &str, meta: u
             out.push(name.to_string());
         }
         35 => out.push(format!("{}_wool", color_variant(meta))),
+        37 => out.push("dandelion".to_string()),
         38 => {
             let name = match meta {
                 1 => "blue_orchid",

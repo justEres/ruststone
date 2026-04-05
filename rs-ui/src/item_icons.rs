@@ -41,19 +41,17 @@ impl ItemIconCache {
             .ok()
             .and_then(block_registry_key)
             .is_some();
-        let prefer_flat_block_icon = u16::try_from(stack.item_id).ok().is_some_and(|id| {
-            matches!(
-                block_model_kind(id),
-                BlockModelKind::Cross | BlockModelKind::TorchLike
-            )
-        });
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
         let mut first_candidate_image: Option<(String, egui::ColorImage)> = None;
+        let mut has_explicit_item_texture = false;
         for rel_path in &candidates {
             let full_path = texturepack_textures_root().join(&rel_path);
             if !full_path.exists() {
                 continue;
+            }
+            if rel_path.starts_with("items/") {
+                has_explicit_item_texture = true;
             }
             let Some(color_image) = load_color_image(&full_path) else {
                 continue;
@@ -63,7 +61,7 @@ impl ItemIconCache {
         }
 
         if is_block_item
-            && !prefer_flat_block_icon
+            && !has_explicit_item_texture
             && let Some((image, source)) = generate_isometric_block_icon(
                 stack.item_id,
                 stack.damage,
@@ -73,9 +71,10 @@ impl ItemIconCache {
                 &mut self.logged_model_fallback,
             )
         {
-            // For blocks that only hit manual cube fallback (flowers, rails, etc.),
-            // prefer their explicit flat item texture if available.
+            // If the model path collapsed all the way to a manual cube but a more accurate
+            // block texture candidate exists, prefer that flat fallback over a fake cube.
             if source == IsometricIconSource::ManualCubeFallback
+                && !has_explicit_item_texture
                 && let Some((rel_path, color_image)) = first_candidate_image.take()
             {
                 let texture_name =
@@ -123,7 +122,6 @@ impl ItemIconCache {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IsometricIconSource {
     BlockstateModel,
-    ItemModel,
     ManualCubeFallback,
 }
 
@@ -140,7 +138,7 @@ fn generate_isometric_block_icon(
         return None;
     }
 
-    if let Some(mut quads) = resolver.icon_quads_for_meta(block_id, damage as u8) {
+    if let Some(mut quads) = block_item_display_quads(block_id, damage as u8, resolver) {
         quads.sort_by(|a, b| {
             quad_depth(a)
                 .partial_cmp(&quad_depth(b))
@@ -171,26 +169,6 @@ fn generate_isometric_block_icon(
                 damage,
                 block_registry_key(block_id)
             );
-        }
-    }
-
-    if let Some(quads) = resolver.block_item_icon_quads(block_id, damage as u8) {
-        let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
-        let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
-        let mut rendered_any = false;
-        for quad in quads {
-            let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
-                continue;
-            };
-            rendered_any = true;
-            let tint = quad
-                .tint_index
-                .and_then(|_| icon_tint_color(block_id, damage))
-                .unwrap_or([255, 255, 255]);
-            raster_iso_quad(&mut out, &mut depth, &quad, &tex, tint);
-        }
-        if rendered_any {
-            return Some((out, IsometricIconSource::ItemModel));
         }
     }
 

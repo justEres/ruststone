@@ -4,6 +4,7 @@ use rs_protocol::format::ComponentType;
 use rs_protocol::format::color::Color;
 use rs_protocol::protocol::{Conn, packet::Packet};
 use rs_protocol::types::Value as MetadataValue;
+use rs_utils::world::ChestAction;
 use rs_utils::{
     BlockUpdate, FromNetMessage, InventoryEnchantment, InventoryItemMeta, InventoryItemStack,
     InventoryMessage, InventoryWindowInfo, MobKind, NetEntityAnimation, NetEntityKind,
@@ -163,7 +164,9 @@ pub fn handle_packet(
         | Packet::BlockChange_u8(_)
         | Packet::MultiBlockChange_VarInt(_)
         | Packet::MultiBlockChange_u16(_)
-        | Packet::UpdateBlockEntity(_) => world::handle_packet(pkt, to_main),
+        | Packet::UpdateBlockEntity(_)
+        | Packet::BlockAction(_)
+        | Packet::BlockAction_u16(_) => world::handle_packet(pkt, to_main),
         Packet::TeleportPlayer_NoConfirm(_)
         | Packet::TeleportPlayer_OnGround(_)
         | Packet::PlayerPosition(_)
