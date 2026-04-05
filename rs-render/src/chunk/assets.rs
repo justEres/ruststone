@@ -175,7 +175,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
     for texture_name in &texture_names {
         let img = load_texture_image(&textures_root, texture_name, &extra_sources)
             .unwrap_or_else(missing_texture_image);
-        let (w, h) = img.dimensions();
+        let (w, h) = atlas_source_image(texture_name, img).dimensions();
         tile_size.0 = tile_size.0.max(w);
         tile_size.1 = tile_size.1.max(h);
     }
@@ -183,7 +183,7 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
     for (idx, texture_name) in texture_names.iter().enumerate() {
         let img = load_texture_image(&textures_root, texture_name, &extra_sources)
             .unwrap_or_else(missing_texture_image);
-        let rgba = img.to_rgba8();
+        let rgba = atlas_source_image(texture_name, img).to_rgba8();
         let (w, h) = rgba.dimensions();
         let (tile_w, tile_h) = tile_size;
         let rgba = if w != tile_w || h != tile_h {
@@ -237,6 +237,24 @@ fn load_or_build_atlas() -> (Image, Arc<AtlasBlockMapping>, Arc<BiomeTintResolve
         mapping,
         biome_tints,
     )
+}
+
+fn atlas_source_image(texture_name: &str, img: DynamicImage) -> DynamicImage {
+    if is_animated_block_strip(texture_name, &img) {
+        let rgba = img.to_rgba8();
+        let frame = imageops::crop_imm(&rgba, 0, 0, rgba.width(), rgba.width()).to_image();
+        DynamicImage::ImageRgba8(frame)
+    } else {
+        img
+    }
+}
+
+fn is_animated_block_strip(texture_name: &str, img: &DynamicImage) -> bool {
+    if !texture_name.ends_with(".png") {
+        return false;
+    }
+    let (w, h) = img.dimensions();
+    h > w && h % w == 0
 }
 
 const PLAYER_HEAD_TEXTURES: [&str; 6] = [

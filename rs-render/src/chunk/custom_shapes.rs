@@ -1,23 +1,5 @@
 use super::*;
 use crate::IconQuad;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-fn anvil_quads_for_meta(meta: u8) -> Option<Vec<IconQuad>> {
-    static CACHE: OnceLock<Mutex<HashMap<u8, Vec<IconQuad>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(cached) = cache.lock().ok()?.get(&meta).cloned() {
-        return Some(cached);
-    }
-
-    let damage_meta = (meta >> 2).min(2);
-    let mut resolver = BlockModelResolver::new(default_model_roots());
-    let quads = resolver.icon_quads_for_meta(145, damage_meta)?;
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(meta, quads.clone());
-    }
-    Some(quads)
-}
 
 fn atlas_texture_name(texture_path: &str) -> &str {
     texture_path
@@ -116,6 +98,20 @@ fn chest_model_to_local(vertex: [f32; 3], facing: ChestFacing, span_x: f32) -> [
     rotate_chest_local(canonical, facing, span_x, 1.0)
 }
 
+fn rotate_lid_vertex(vertex: [f32; 3], angle: f32) -> [f32; 3] {
+    let pivot_y = 7.0;
+    let pivot_z = 15.0;
+    let dy = vertex[1] - pivot_y;
+    let dz = vertex[2] - pivot_z;
+    let sin = angle.sin();
+    let cos = angle.cos();
+    [
+        vertex[0],
+        pivot_y + dy * cos - dz * sin,
+        pivot_z + dy * sin + dz * cos,
+    ]
+}
+
 fn push_chest_box_quads(
     out: &mut Vec<IconQuad>,
     texture_name: &str,
@@ -125,6 +121,8 @@ fn push_chest_box_quads(
     box_size: [f32; 3],
     facing: ChestFacing,
     span_x: f32,
+    render_bottom: bool,
+    lid_angle: Option<f32>,
 ) {
     let (u, v) = texture_offset;
     let (dx, dy, dz) = (box_size[0], box_size[1], box_size[2]);
@@ -171,10 +169,20 @@ fn push_chest_box_quads(
         ),
     ];
 
-    for (vertices, uv) in faces {
+    for (face_index, (vertices, uv)) in faces.into_iter().enumerate() {
+        if face_index == 2 && !render_bottom {
+            continue;
+        }
+        let flipped_vertices = [vertices[0], vertices[3], vertices[2], vertices[1]];
+        let flipped_uv = [uv[0], uv[3], uv[2], uv[1]];
+        let flipped_vertices = if let Some(angle) = lid_angle {
+            flipped_vertices.map(|vertex| rotate_lid_vertex(vertex, angle))
+        } else {
+            flipped_vertices
+        };
         out.push(IconQuad {
-            vertices: vertices.map(|vertex| chest_model_to_local(vertex, facing, span_x)),
-            uv,
+            vertices: flipped_vertices.map(|vertex| chest_model_to_local(vertex, facing, span_x)),
+            uv: flipped_uv,
             texture_path: texture_name.to_string(),
             tint_index: None,
         });
@@ -218,6 +226,125 @@ fn chest_pair_extents(
     }
 }
 
+fn rotate_box_y(min: [f32; 3], max: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let corners = [
+        [min[0], min[1], min[2]],
+        [min[0], min[1], max[2]],
+        [max[0], min[1], min[2]],
+        [max[0], min[1], max[2]],
+        [min[0], max[1], min[2]],
+        [min[0], max[1], max[2]],
+        [max[0], max[1], min[2]],
+        [max[0], max[1], max[2]],
+    ];
+    let mut out_min = [f32::INFINITY; 3];
+    let mut out_max = [f32::NEG_INFINITY; 3];
+    for [x, y, z] in corners {
+        let rx = z;
+        let rz = 1.0 - x;
+        out_min[0] = out_min[0].min(rx);
+        out_min[1] = out_min[1].min(y);
+        out_min[2] = out_min[2].min(rz);
+        out_max[0] = out_max[0].max(rx);
+        out_max[1] = out_max[1].max(y);
+        out_max[2] = out_max[2].max(rz);
+    }
+    (out_min, out_max)
+}
+
+fn anvil_top_texture(meta: u8) -> &'static str {
+    match (meta >> 2).min(2) {
+        1 => "blocks/anvil_top_damaged_1.png",
+        2 => "blocks/anvil_top_damaged_2.png",
+        _ => "blocks/anvil_top_damaged_0.png",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_anvil_block(
+    batch: &mut MeshBatch,
+    snapshot: &ChunkColumnSnapshot,
+    texture_mapping: &AtlasBlockMapping,
+    biome_tints: &BiomeTintResolver,
+    chunk_x: i32,
+    chunk_z: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    tint: BiomeTint,
+    vanilla_bake: VanillaBakeSettings,
+) {
+    let meta = block_meta(block_id);
+    let x_aligned = matches!(meta & 0x3, 1 | 3);
+    let parts = [
+        ([2.0 / 16.0, 0.0, 2.0 / 16.0], [14.0 / 16.0, 4.0 / 16.0, 14.0 / 16.0]),
+        ([4.0 / 16.0, 4.0 / 16.0, 3.0 / 16.0], [12.0 / 16.0, 5.0 / 16.0, 13.0 / 16.0]),
+        ([6.0 / 16.0, 5.0 / 16.0, 4.0 / 16.0], [10.0 / 16.0, 10.0 / 16.0, 12.0 / 16.0]),
+        ([3.0 / 16.0, 10.0 / 16.0, 0.0], [13.0 / 16.0, 1.0, 1.0]),
+    ];
+
+    for (min, max) in parts {
+        let (min, max) = if x_aligned {
+            rotate_box_y(min, max)
+        } else {
+            (min, max)
+        };
+        add_box(
+            batch,
+            Some((snapshot, chunk_x, chunk_z, x, y, z, block_id)),
+            texture_mapping,
+            biome_tints,
+            x,
+            y,
+            z,
+            min,
+            max,
+            block_id,
+            tint,
+        );
+    }
+
+    let top_min = [3.0 / 16.0, 10.0 / 16.0, 0.0];
+    let top_max = [13.0 / 16.0, 1.0, 1.0];
+    let (top_min, top_max) = if x_aligned {
+        rotate_box_y(top_min, top_max)
+    } else {
+        (top_min, top_max)
+    };
+    let y_top = top_max[1] + 0.0005;
+    let top_quad = IconQuad {
+        vertices: [
+            [top_min[0], y_top, top_min[2]],
+            [top_max[0], y_top, top_min[2]],
+            [top_max[0], y_top, top_max[2]],
+            [top_min[0], y_top, top_max[2]],
+        ],
+        uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        texture_path: anvil_top_texture(meta).to_string(),
+        tint_index: None,
+    };
+    add_model_quads(
+        batch,
+        snapshot,
+        texture_mapping,
+        biome_tints,
+        chunk_x,
+        chunk_z,
+        x,
+        y,
+        z,
+        block_id,
+        tint,
+        &[top_quad],
+        false,
+        0.0,
+        false,
+        0.0,
+        vanilla_bake,
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn add_chest_block(
     batch: &mut MeshBatch,
@@ -244,6 +371,14 @@ fn add_chest_block(
     };
     let facing = ChestFacing::from_meta(block_meta(block_id));
     let mut quads = Vec::new();
+    let below_occluding = is_occluding_block(block_at(snapshot, chunk_x, chunk_z, x, y - 1, z));
+    let lid_progress = snapshot
+        .chest_states
+        .get(&IVec3::new(x, y, z))
+        .map(|state| state.progress)
+        .unwrap_or(0.0);
+    let eased = 1.0 - (1.0 - lid_progress).powi(3);
+    let lid_angle = -(eased * std::f32::consts::FRAC_PI_2);
 
     push_chest_box_quads(
         &mut quads,
@@ -254,6 +389,8 @@ fn add_chest_block(
         [span_x * 16.0 - 2.0, 10.0, 14.0],
         facing,
         span_x,
+        !below_occluding,
+        None,
     );
     push_chest_box_quads(
         &mut quads,
@@ -264,6 +401,8 @@ fn add_chest_block(
         [span_x * 16.0 - 2.0, 5.0, 14.0],
         facing,
         span_x,
+        true,
+        Some(lid_angle),
     );
     push_chest_box_quads(
         &mut quads,
@@ -274,6 +413,8 @@ fn add_chest_block(
         [2.0, 4.0, 1.0],
         facing,
         span_x,
+        true,
+        Some(lid_angle),
     );
 
     add_model_quads(
@@ -501,29 +642,20 @@ pub(super) fn add_named_custom_block(
             voxel_ao_foliage_boost,
             vanilla_bake,
         ),
-        145 => {
-            if let Some(quads) = anvil_quads_for_meta(block_meta(block_id)) {
-                add_model_quads(
-                    batch,
-                    snapshot,
-                    texture_mapping,
-                    biome_tints,
-                    chunk_x,
-                    chunk_z,
-                    x,
-                    y,
-                    z,
-                    block_id,
-                    tint,
-                    &quads,
-                    voxel_ao_enabled,
-                    voxel_ao_strength,
-                    voxel_ao_cutout,
-                    voxel_ao_foliage_boost,
-                    vanilla_bake,
-                );
-            }
-        }
+        145 => add_anvil_block(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            vanilla_bake,
+        ),
         54 | 130 | 146 => add_chest_block(
             batch,
             snapshot,

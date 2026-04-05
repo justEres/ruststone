@@ -76,6 +76,7 @@ impl Plugin for RenderPlugin {
                 debug::refresh_render_state_on_mode_change
                     .after(debug::apply_render_debug_settings),
                 debug::remesh_on_meshing_toggle,
+                animate_chest_meshes.before(enqueue_chunk_meshes),
                 enqueue_chunk_meshes,
                 disable_engine_frustum_culling_globally,
                 dynamic_lights::update_dynamic_block_lights,
@@ -147,6 +148,18 @@ fn enqueue_chunk_meshes(
             }
             chunk::WorldUpdate::BlockUpdate(block_update) => {
                 for key in chunk::apply_block_update(&mut store, block_update) {
+                    pending.keys.insert(key);
+                    updated_keys.insert(key);
+                }
+            }
+            chunk::WorldUpdate::ChestAction {
+                x,
+                y,
+                z,
+                block_id,
+                open_count,
+            } => {
+                for key in chunk::set_chest_open_count(&mut store, x, y, z, block_id, open_count) {
                     pending.keys.insert(key);
                     updated_keys.insert(key);
                 }
@@ -250,6 +263,20 @@ fn enqueue_chunk_meshes(
     perf.last_updates = updates_len;
     perf.last_updates_raw = raw_updates;
     perf.in_flight = in_flight.chunks.len() as u32;
+}
+
+fn animate_chest_meshes(
+    time: Res<Time>,
+    mut store: ResMut<chunk::ChunkStore>,
+    mut pending: ResMut<chunk::PendingChunkRemesh>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    for key in chunk::animate_chests(&mut store, dt) {
+        pending.keys.insert(key);
+    }
 }
 
 fn mesh_priority_score(key: (i32, i32), cam_pos: Vec3, cam_forward: Vec3) -> f32 {

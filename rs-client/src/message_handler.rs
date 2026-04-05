@@ -171,6 +171,15 @@ pub fn handle_messages(
                     chunk_updates.0.push(WorldUpdate::BlockUpdate(update));
                 }
             }
+            FromNetMessage::ChestAction(action) => {
+                chunk_updates.0.push(WorldUpdate::ChestAction {
+                    x: action.x,
+                    y: action.y,
+                    z: action.z,
+                    block_id: action.block_id,
+                    open_count: action.open_count,
+                });
+            }
             FromNetMessage::UpdateHealth {
                 health,
                 food,

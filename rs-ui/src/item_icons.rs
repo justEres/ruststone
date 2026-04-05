@@ -41,19 +41,17 @@ impl ItemIconCache {
             .ok()
             .and_then(block_registry_key)
             .is_some();
-        let prefer_flat_block_icon = u16::try_from(stack.item_id).ok().is_some_and(|id| {
-            matches!(
-                block_model_kind(id),
-                BlockModelKind::Cross | BlockModelKind::TorchLike
-            )
-        });
 
         let candidates = item_texture_candidates(stack.item_id, stack.damage);
         let mut first_candidate_image: Option<(String, egui::ColorImage)> = None;
+        let mut has_explicit_item_texture = false;
         for rel_path in &candidates {
             let full_path = texturepack_textures_root().join(&rel_path);
             if !full_path.exists() {
                 continue;
+            }
+            if rel_path.starts_with("items/") {
+                has_explicit_item_texture = true;
             }
             let Some(color_image) = load_color_image(&full_path) else {
                 continue;
@@ -63,7 +61,7 @@ impl ItemIconCache {
         }
 
         if is_block_item
-            && !prefer_flat_block_icon
+            && !has_explicit_item_texture
             && let Some((image, source)) = generate_isometric_block_icon(
                 stack.item_id,
                 stack.damage,
@@ -73,9 +71,10 @@ impl ItemIconCache {
                 &mut self.logged_model_fallback,
             )
         {
-            // For blocks that only hit manual cube fallback (flowers, rails, etc.),
-            // prefer their explicit flat item texture if available.
+            // If the model path collapsed all the way to a manual cube but a more accurate
+            // block texture candidate exists, prefer that flat fallback over a fake cube.
             if source == IsometricIconSource::ManualCubeFallback
+                && !has_explicit_item_texture
                 && let Some((rel_path, color_image)) = first_candidate_image.take()
             {
                 let texture_name =
@@ -138,6 +137,10 @@ fn generate_isometric_block_icon(
     let block_id = u16::try_from(item_id).ok()?;
     if block_registry_key(block_id).is_none() {
         return None;
+    }
+
+    if let Some(image) = generate_custom_block_icon(block_id, texture_cache) {
+        return Some((image, IsometricIconSource::BlockstateModel));
     }
 
     if let Some(mut quads) = resolver.icon_quads_for_meta(block_id, damage as u8) {
@@ -279,6 +282,63 @@ fn generate_isometric_block_icon(
         raster_iso_quad(&mut out, &mut depth, quad, tex, [255, 255, 255]);
     }
     Some((out, IsometricIconSource::ManualCubeFallback))
+}
+
+fn generate_custom_block_icon(
+    block_id: u16,
+    texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
+) -> Option<egui::ColorImage> {
+    match block_id {
+        54 | 130 | 146 => generate_chest_icon(block_id, texture_cache),
+        _ => None,
+    }
+}
+
+fn generate_chest_icon(
+    block_id: u16,
+    texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
+) -> Option<egui::ColorImage> {
+    let texture_name = match block_id {
+        130 => "entity/chest/ender.png",
+        146 => "entity/chest/trapped.png",
+        _ => "entity/chest/normal.png",
+    };
+    let tex = load_model_texture(texture_name, texture_cache)?;
+    let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
+    let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
+    for quad in chest_icon_quads() {
+        raster_iso_quad(&mut out, &mut depth, &quad, &tex, [255, 255, 255]);
+    }
+    Some(out)
+}
+
+fn chest_icon_quads() -> Vec<IconQuad> {
+    vec![
+        icon_quad(
+            [[1.0, 6.0, 15.0], [15.0, 6.0, 15.0], [15.0, 16.0, 15.0], [1.0, 16.0, 15.0]],
+            [[14.0 / 64.0, 29.0 / 64.0], [28.0 / 64.0, 29.0 / 64.0], [28.0 / 64.0, 19.0 / 64.0], [14.0 / 64.0, 19.0 / 64.0]],
+            "entity/chest/normal.png",
+        ),
+        icon_quad(
+            [[15.0, 6.0, 15.0], [15.0, 6.0, 1.0], [15.0, 16.0, 1.0], [15.0, 16.0, 15.0]],
+            [[42.0 / 64.0, 29.0 / 64.0], [56.0 / 64.0, 29.0 / 64.0], [56.0 / 64.0, 19.0 / 64.0], [42.0 / 64.0, 19.0 / 64.0]],
+            "entity/chest/normal.png",
+        ),
+        icon_quad(
+            [[1.0, 16.0, 1.0], [15.0, 16.0, 1.0], [15.0, 16.0, 15.0], [1.0, 16.0, 15.0]],
+            [[14.0 / 64.0, 14.0 / 64.0], [28.0 / 64.0, 14.0 / 64.0], [28.0 / 64.0, 0.0], [14.0 / 64.0, 0.0]],
+            "entity/chest/normal.png",
+        ),
+    ]
+}
+
+fn icon_quad(vertices: [[f32; 3]; 4], uv: [[f32; 2]; 4], texture_path: &str) -> IconQuad {
+    IconQuad {
+        vertices: vertices.map(|[x, y, z]| [x / 16.0, y / 16.0, z / 16.0]),
+        uv,
+        texture_path: texture_path.to_string(),
+        tint_index: None,
+    }
 }
 
 fn load_block_texture(

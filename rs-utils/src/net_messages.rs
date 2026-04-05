@@ -7,7 +7,7 @@ use crate::entities::NetEntityMessage;
 use crate::inventory::{InventoryItemStack, InventoryMessage};
 use crate::scoreboard::ScoreboardMessage;
 use crate::sound::SoundEvent;
-use crate::world::{BlockUpdate, ChunkData, PlayerPosition};
+use crate::world::{BlockUpdate, ChestAction, ChunkData, PlayerPosition};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthMode {
@@ -149,6 +149,7 @@ pub enum FromNetMessage {
         z: i32,
     },
     BlockUpdates(Vec<BlockUpdate>),
+    ChestAction(ChestAction),
     PlayerPosition(PlayerPosition),
     UpdateHealth {
         health: f32,
