@@ -122,7 +122,6 @@ impl ItemIconCache {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IsometricIconSource {
     BlockstateModel,
-    ItemModel,
     ManualCubeFallback,
 }
 
@@ -139,11 +138,7 @@ fn generate_isometric_block_icon(
         return None;
     }
 
-    if let Some(image) = generate_custom_block_icon(block_id, texture_cache) {
-        return Some((image, IsometricIconSource::BlockstateModel));
-    }
-
-    if let Some(mut quads) = resolver.icon_quads_for_meta(block_id, damage as u8) {
+    if let Some(mut quads) = block_item_display_quads(block_id, damage as u8, resolver) {
         quads.sort_by(|a, b| {
             quad_depth(a)
                 .partial_cmp(&quad_depth(b))
@@ -174,26 +169,6 @@ fn generate_isometric_block_icon(
                 damage,
                 block_registry_key(block_id)
             );
-        }
-    }
-
-    if let Some(quads) = resolver.block_item_icon_quads(block_id, damage as u8) {
-        let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
-        let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
-        let mut rendered_any = false;
-        for quad in quads {
-            let Some(tex) = load_model_texture(&quad.texture_path, texture_cache) else {
-                continue;
-            };
-            rendered_any = true;
-            let tint = quad
-                .tint_index
-                .and_then(|_| icon_tint_color(block_id, damage))
-                .unwrap_or([255, 255, 255]);
-            raster_iso_quad(&mut out, &mut depth, &quad, &tex, tint);
-        }
-        if rendered_any {
-            return Some((out, IsometricIconSource::ItemModel));
         }
     }
 
@@ -282,119 +257,6 @@ fn generate_isometric_block_icon(
         raster_iso_quad(&mut out, &mut depth, quad, tex, [255, 255, 255]);
     }
     Some((out, IsometricIconSource::ManualCubeFallback))
-}
-
-fn generate_custom_block_icon(
-    block_id: u16,
-    texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
-) -> Option<egui::ColorImage> {
-    match block_id {
-        54 | 130 | 146 => generate_chest_icon(block_id, texture_cache),
-        _ => None,
-    }
-}
-
-fn generate_chest_icon(
-    block_id: u16,
-    texture_cache: &mut HashMap<String, Option<egui::ColorImage>>,
-) -> Option<egui::ColorImage> {
-    let texture_name = match block_id {
-        130 => "entity/chest/ender.png",
-        146 => "entity/chest/trapped.png",
-        _ => "entity/chest/normal.png",
-    };
-    let tex = load_model_texture(texture_name, texture_cache)?;
-    let mut out = egui::ColorImage::new([48, 48], vec![egui::Color32::TRANSPARENT; 48 * 48]);
-    let mut depth = vec![f32::NEG_INFINITY; out.size[0] * out.size[1]];
-    for quad in chest_icon_quads(texture_name) {
-        raster_iso_quad(&mut out, &mut depth, &quad, &tex, [255, 255, 255]);
-    }
-    Some(out)
-}
-
-fn chest_icon_quads(texture_path: &str) -> Vec<IconQuad> {
-    let mut out = Vec::new();
-    push_icon_box_quads(
-        &mut out,
-        texture_path,
-        (64.0, 64.0),
-        (0.0, 19.0),
-        [1.0, 6.0, 1.0],
-        [14.0, 10.0, 14.0],
-    );
-    push_icon_box_quads(
-        &mut out,
-        texture_path,
-        (64.0, 64.0),
-        (0.0, 0.0),
-        [1.0, 2.0, 1.0],
-        [14.0, 5.0, 14.0],
-    );
-    push_icon_box_quads(
-        &mut out,
-        texture_path,
-        (64.0, 64.0),
-        (0.0, 0.0),
-        [7.0, 5.0, 0.0],
-        [2.0, 4.0, 1.0],
-    );
-    out
-}
-
-fn push_icon_box_quads(
-    out: &mut Vec<IconQuad>,
-    texture_path: &str,
-    texture_size: (f32, f32),
-    texture_offset: (f32, f32),
-    box_origin: [f32; 3],
-    box_size: [f32; 3],
-) {
-    let (u, v) = texture_offset;
-    let (dx, dy, dz) = (box_size[0], box_size[1], box_size[2]);
-    let (x1, y1, z1) = (box_origin[0], box_origin[1], box_origin[2]);
-    let (x2, y2, z2) = (x1 + dx, y1 + dy, z1 + dz);
-    let (tex_w, tex_h) = texture_size;
-    let faces = [
-        (
-            [[x2, y1, z2], [x2, y1, z1], [x2, y2, z1], [x2, y2, z2]],
-            [[u + dz + dx, v + dz], [u + dz + dx + dz, v + dz], [u + dz + dx + dz, v + dz + dy], [u + dz + dx, v + dz + dy]],
-        ),
-        (
-            [[x1, y1, z1], [x1, y1, z2], [x1, y2, z2], [x1, y2, z1]],
-            [[u, v + dz], [u + dz, v + dz], [u + dz, v + dz + dy], [u, v + dz + dy]],
-        ),
-        (
-            [[x1, y2, z1], [x2, y2, z1], [x2, y2, z2], [x1, y2, z2]],
-            [[u + dz, v], [u + dz + dx, v], [u + dz + dx, v + dz], [u + dz, v + dz]],
-        ),
-        (
-            [[x1, y1, z2], [x2, y1, z2], [x2, y2, z2], [x1, y2, z2]],
-            [
-                [u + dz + dx + dz, v + dz],
-                [u + dz + dx + dz + dx, v + dz],
-                [u + dz + dx + dz + dx, v + dz + dy],
-                [u + dz + dx + dz, v + dz + dy],
-            ],
-        ),
-        (
-            [[x2, y1, z1], [x1, y1, z1], [x1, y2, z1], [x2, y2, z1]],
-            [[u + dz, v + dz], [u + dz + dx, v + dz], [u + dz + dx, v + dz + dy], [u + dz, v + dz + dy]],
-        ),
-    ];
-
-    for (vertices, uv_px) in faces {
-        let uv = uv_px.map(|[uu, vv]| [uu / tex_w, vv / tex_h]);
-        out.push(icon_quad(vertices, uv, texture_path));
-    }
-}
-
-fn icon_quad(vertices: [[f32; 3]; 4], uv: [[f32; 2]; 4], texture_path: &str) -> IconQuad {
-    IconQuad {
-        vertices: vertices.map(|[x, y, z]| [x / 16.0, y / 16.0, z / 16.0]),
-        uv,
-        texture_path: texture_path.to_string(),
-        tint_index: None,
-    }
 }
 
 fn load_block_texture(

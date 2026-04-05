@@ -13,7 +13,7 @@ use bevy_egui::{
 };
 use rs_render::{
     AntiAliasingMode, BlockModelResolver, IconQuad, ModelFace, RenderDebugSettings,
-    ShadingModel, VanillaBlockShadowMode, default_model_roots,
+    ShadingModel, VanillaBlockShadowMode, block_item_display_quads, default_model_roots,
 };
 use rs_utils::{
     AppState, ApplicationState, AuthMode, BlockFace, BlockModelKind, BreakIndicator, Chat,

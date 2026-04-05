@@ -8,6 +8,7 @@ use bevy::render::view::VisibilitySystems;
 use bevy::render::view::{InheritedVisibility, NoFrustumCulling, ViewVisibility, Visibility};
 
 mod async_mesh;
+mod block_display;
 mod block_models;
 mod block_textures;
 mod camera;
@@ -20,9 +21,13 @@ mod lighting;
 mod reflection;
 mod world;
 
+pub use block_display::{
+    anvil_display_quads, block_item_display_quads, build_block_display_mesh,
+    chest_display_quads, face_texture_name_for_display_fallback,
+};
 pub use block_models::{BlockModelResolver, IconQuad, default_model_roots};
 pub use block_textures::{AtlasBlockMapping, Face as ModelFace, build_block_texture_mapping};
-pub use chunk::{ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
+pub use chunk::{ChunkAtlasMaterial, ChunkRenderAssets, ChunkStore, ChunkUpdateQueue, WorldUpdate, apply_block_update};
 pub use components::{
     ChunkRoot, LookAngles, Player, PlayerCamera, ShadowCasterLight, Velocity, WorldRoot,
 };

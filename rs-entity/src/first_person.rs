@@ -1,5 +1,22 @@
 use super::*;
 
+fn has_explicit_item_texture(stack: &InventoryItemStack) -> bool {
+    item_texture_candidates(stack.item_id, stack.damage)
+        .into_iter()
+        .filter(|rel| rel.starts_with("items/"))
+        .any(|rel| texturepack_textures_root().join(rel).is_file())
+}
+
+fn block_display_quads_for_stack(stack: &InventoryItemStack) -> Option<Vec<IconQuad>> {
+    let block_id = u16::try_from(stack.item_id).ok()?;
+    block_registry_key(block_id)?;
+    if has_explicit_item_texture(stack) {
+        return None;
+    }
+    let mut resolver = BlockModelResolver::new(default_model_roots());
+    block_item_display_quads(block_id, stack.damage as u8, &mut resolver)
+}
+
 pub fn first_person_viewmodel_system(
     mut commands: Commands,
     app_state: Res<AppState>,
@@ -10,6 +27,7 @@ pub fn first_person_viewmodel_system(
     inventory: Res<rs_utils::InventoryState>,
     mut item_textures: ResMut<ItemTextureCache>,
     item_sprite_mesh: Res<ItemSpriteMesh>,
+    chunk_assets: Res<ChunkRenderAssets>,
     texture_debug: Res<PlayerTextureDebugSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -47,10 +65,6 @@ pub fn first_person_viewmodel_system(
         return;
     };
 
-    if let Some(stack) = held.as_ref() {
-        item_textures.request_stack(&stack);
-    }
-
     let base_pose_rotation = Quat::from_rotation_y(std::f32::consts::PI)
         * Quat::from_rotation_x(-1.835)
         * Quat::from_rotation_y(0.32)
@@ -62,21 +76,9 @@ pub fn first_person_viewmodel_system(
 
     // Recreate if missing or if the skin model changed (classic vs slim affects arm geometry).
     if let Ok((root, parts)) = existing.get_single() {
-        if parts.skin_model != skin_model.0 {
+        if parts.skin_model != skin_model.0 || parts.held_stack != held {
             commands.entity(root).despawn_recursive();
         } else {
-            // Update held item stack without rebuilding.
-            if let Ok(mut item_entity) = commands.get_entity(parts.item) {
-                match held.clone() {
-                    Some(stack) => {
-                        item_entity.insert((ItemSpriteStack(stack), Visibility::Visible));
-                    }
-                    None => {
-                        item_entity.remove::<ItemSpriteStack>();
-                        item_entity.insert(Visibility::Hidden);
-                    }
-                }
-            }
             return;
         }
     }
@@ -131,46 +133,94 @@ pub fn first_person_viewmodel_system(
         .id();
     commands.entity(arm_right).add_child(hand_anchor);
 
-    let item_placeholder = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        alpha_mode: AlphaMode::Mask(0.5),
-        cull_mode: None,
-        unlit: true,
-        perceptual_roughness: 1.0,
-        metallic: 0.0,
-        ..Default::default()
-    });
-    let item = commands
-        .spawn((
-            Name::new("FirstPersonHeldItem"),
-            Mesh3d(item_sprite_mesh.0.clone()),
-            MeshMaterial3d(item_placeholder),
-            Transform {
-                translation: Vec3::new(0.05, 0.1, 0.38),
-                rotation: Quat::from_rotation_y(std::f32::consts::PI)
-                    * Quat::from_rotation_x(0.35)
-                    * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-                scale: Vec3::splat(0.72),
-            },
-            GlobalTransform::default(),
-            if held.is_some() {
-                Visibility::Visible
-            } else {
-                Visibility::Hidden
-            },
-            InheritedVisibility::default(),
-            ViewVisibility::default(),
-        ))
-        .id();
-    if let Some(stack) = held {
-        commands.entity(item).insert(ItemSpriteStack(stack));
-    }
+    let item = if let Some(stack) = held.clone() {
+        if let Some(quads) = block_display_quads_for_stack(&stack) {
+            let (mesh, _) = build_block_display_mesh(&quads, &chunk_assets.texture_mapping);
+            commands
+                .spawn((
+                    Name::new("FirstPersonHeldBlock"),
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d::<ChunkAtlasMaterial>(chunk_assets.cutout_material.clone()),
+                    Transform {
+                        translation: Vec3::new(0.02, 0.05, 0.20),
+                        rotation: Quat::from_rotation_y(std::f32::consts::PI)
+                            * Quat::from_rotation_x(0.55)
+                            * Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+                        scale: Vec3::splat(0.52),
+                    },
+                    GlobalTransform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                ))
+                .id()
+        } else {
+            item_textures.request_stack(&stack);
+            let item_placeholder = materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                alpha_mode: AlphaMode::Mask(0.5),
+                cull_mode: None,
+                unlit: true,
+                perceptual_roughness: 1.0,
+                metallic: 0.0,
+                ..Default::default()
+            });
+            let item = commands
+                .spawn((
+                    Name::new("FirstPersonHeldItem"),
+                    Mesh3d(item_sprite_mesh.0.clone()),
+                    MeshMaterial3d(item_placeholder),
+                    Transform {
+                        translation: Vec3::new(0.05, 0.1, 0.38),
+                        rotation: Quat::from_rotation_y(std::f32::consts::PI)
+                            * Quat::from_rotation_x(0.35)
+                            * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                        scale: Vec3::splat(0.72),
+                    },
+                    GlobalTransform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    ItemSpriteStack(stack),
+                ))
+                .id();
+            item
+        }
+    } else {
+        let item_placeholder = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            alpha_mode: AlphaMode::Mask(0.5),
+            cull_mode: None,
+            unlit: true,
+            perceptual_roughness: 1.0,
+            metallic: 0.0,
+            ..Default::default()
+        });
+        commands
+            .spawn((
+                Name::new("FirstPersonHeldItem"),
+                Mesh3d(item_sprite_mesh.0.clone()),
+                MeshMaterial3d(item_placeholder),
+                Transform {
+                    translation: Vec3::new(0.05, 0.1, 0.38),
+                    rotation: Quat::from_rotation_y(std::f32::consts::PI)
+                        * Quat::from_rotation_x(0.35)
+                        * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                    scale: Vec3::splat(0.72),
+                },
+                GlobalTransform::default(),
+                Visibility::Hidden,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+            ))
+            .id()
+    };
     commands.entity(hand_anchor).add_child(item);
 
     commands.entity(root).insert(FirstPersonViewModelParts {
         arm_right,
-        item,
         skin_model: skin_model.0,
+        held_stack: held,
     });
 }
 
