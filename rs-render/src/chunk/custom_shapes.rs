@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     IconQuad, anvil_display_quads, brewing_stand_display_quads, skull_display_quads,
-    torch_display_quads,
+    sign_display_quads, torch_display_quads,
 };
 
 fn atlas_texture_name(texture_path: &str) -> &str {
@@ -920,8 +920,25 @@ pub(super) fn add_named_custom_block(
                 tint,
             );
         }
-        63 => add_sign_post_block(batch, texture_mapping, biome_tints, x, y, z, block_id, tint),
-        68 => add_wall_sign_block(batch, texture_mapping, biome_tints, x, y, z, block_id, tint),
+        63 | 68 => add_model_quads(
+            batch,
+            snapshot,
+            texture_mapping,
+            biome_tints,
+            chunk_x,
+            chunk_z,
+            x,
+            y,
+            z,
+            block_id,
+            tint,
+            &sign_display_quads(id, block_meta(block_id)),
+            false,
+            0.0,
+            voxel_ao_cutout,
+            voxel_ao_foliage_boost,
+            vanilla_bake,
+        ),
         140 => add_box(
             batch,
             None,
@@ -1143,81 +1160,4 @@ fn add_wall_block(
             tint,
         );
     }
-}
-
-fn add_sign_post_block(
-    batch: &mut MeshBatch,
-    texture_mapping: &AtlasBlockMapping,
-    biome_tints: &BiomeTintResolver,
-    x: i32,
-    y: i32,
-    z: i32,
-    block_id: u16,
-    tint: BiomeTint,
-) {
-    let yaw = (block_meta(block_id) as f32) * std::f32::consts::TAU / 16.0;
-    let sx = yaw.sin().abs();
-    let sz = yaw.cos().abs();
-    let half_thickness = 0.0625 + 0.0625 * sx.max(sz);
-    let min_x = (0.5 - half_thickness).clamp(0.0, 1.0);
-    let max_x = (0.5 + half_thickness).clamp(0.0, 1.0);
-    let min_z = (0.5 - half_thickness).clamp(0.0, 1.0);
-    let max_z = (0.5 + half_thickness).clamp(0.0, 1.0);
-    add_box(
-        batch,
-        None,
-        texture_mapping,
-        biome_tints,
-        x,
-        y,
-        z,
-        [min_x, 0.5, min_z],
-        [max_x, 1.0, max_z],
-        block_id,
-        tint,
-    );
-    add_box(
-        batch,
-        None,
-        texture_mapping,
-        biome_tints,
-        x,
-        y,
-        z,
-        [0.4375, 0.0, 0.4375],
-        [0.5625, 0.5, 0.5625],
-        block_id,
-        tint,
-    );
-}
-
-fn add_wall_sign_block(
-    batch: &mut MeshBatch,
-    texture_mapping: &AtlasBlockMapping,
-    biome_tints: &BiomeTintResolver,
-    x: i32,
-    y: i32,
-    z: i32,
-    block_id: u16,
-    tint: BiomeTint,
-) {
-    let (min, max) = match block_meta(block_id) & 0x7 {
-        2 => ([0.0, 0.25, 0.875], [1.0, 0.875, 0.9375]),
-        3 => ([0.0, 0.25, 0.0625], [1.0, 0.875, 0.125]),
-        4 => ([0.875, 0.25, 0.0], [0.9375, 0.875, 1.0]),
-        _ => ([0.0625, 0.25, 0.0], [0.125, 0.875, 1.0]),
-    };
-    add_box(
-        batch,
-        None,
-        texture_mapping,
-        biome_tints,
-        x,
-        y,
-        z,
-        min,
-        max,
-        block_id,
-        tint,
-    );
 }

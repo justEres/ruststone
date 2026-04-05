@@ -49,6 +49,10 @@ fn uv_rect(u0: f32, v0: f32, u1: f32, v1: f32, rotation: i32) -> [[f32; 2]; 4] {
     uv
 }
 
+fn flip_v(uv: [[f32; 2]; 4]) -> [[f32; 2]; 4] {
+    uv.map(|[u, v]| [u, 1.0 - v])
+}
+
 fn rotate_y(vertices: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
     vertices.map(|[x, y, z]| [z, y, 1.0 - x])
 }
@@ -77,6 +81,38 @@ fn rotate_vertices_around_z(
             origin[0] + dx * cos - dy * sin,
             origin[1] + dx * sin + dy * cos,
             z,
+        ]
+    })
+}
+
+fn rotate_vertices_around_y(
+    vertices: [[f32; 3]; 4],
+    origin: [f32; 3],
+    angle_rad: f32,
+) -> [[f32; 3]; 4] {
+    let sin = angle_rad.sin();
+    let cos = angle_rad.cos();
+    vertices.map(|[x, y, z]| {
+        let dx = x - origin[0];
+        let dz = z - origin[2];
+        [
+            origin[0] + dx * cos + dz * sin,
+            y,
+            origin[2] - dx * sin + dz * cos,
+        ]
+    })
+}
+
+fn transform_vertices(
+    vertices: [[f32; 3]; 4],
+    scale: [f32; 3],
+    translate: [f32; 3],
+) -> [[f32; 3]; 4] {
+    vertices.map(|[x, y, z]| {
+        [
+            x * scale[0] + translate[0],
+            y * scale[1] + translate[1],
+            z * scale[2] + translate[2],
         ]
     })
 }
@@ -367,7 +403,7 @@ fn push_box_quads(
         }
         out.push(IconQuad {
             vertices: vertices.map(|[x, y, z]| [x / 16.0, y / 16.0, z / 16.0]),
-            uv: uv,
+            uv: flip_v(uv),
             texture_path: texture_path.to_string(),
             tint_index: None,
         });
@@ -387,13 +423,13 @@ fn push_rotated_plane(
     let south = face_vertices(from, to, "south").unwrap();
     out.push(IconQuad {
         vertices: rotate_vertices_y(north, quarter_turns),
-        uv: uv_rect(uv_front[0], uv_front[1], uv_front[2], uv_front[3], 0),
+        uv: flip_v(uv_rect(uv_front[0], uv_front[1], uv_front[2], uv_front[3], 0)),
         texture_path: texture_path.to_string(),
         tint_index: None,
     });
     out.push(IconQuad {
         vertices: rotate_vertices_y(south, quarter_turns),
-        uv: uv_rect(uv_back[0], uv_back[1], uv_back[2], uv_back[3], 0),
+        uv: flip_v(uv_rect(uv_back[0], uv_back[1], uv_back[2], uv_back[3], 0)),
         texture_path: texture_path.to_string(),
         tint_index: None,
     });
@@ -406,38 +442,50 @@ pub fn torch_display_quads(block_id: u16, meta: u8) -> Vec<IconQuad> {
         _ => "blocks/torch_on.png",
     };
     let mut out = Vec::new();
-    let mut push_torch_cuboid = |vertices_rotation_y: i32, wall_angle: Option<f32>| {
-        let faces = [
-            ("down", [7.0, 13.0, 9.0, 15.0], 0),
-            ("up", [7.0, 6.0, 9.0, 8.0], 0),
-            ("north", [0.0, 0.0, 16.0, 16.0], 0),
-            ("south", [0.0, 0.0, 16.0, 16.0], 0),
-            ("west", [0.0, 0.0, 16.0, 16.0], 0),
-            ("east", [0.0, 0.0, 16.0, 16.0], 0),
-        ];
-        for (dir, uv, rotation) in faces {
-            let Some(mut vertices) = face_vertices([7.0, 0.0, 7.0], [9.0, 10.0, 9.0], dir) else {
-                continue;
-            };
-            if let Some(angle) = wall_angle {
-                vertices = rotate_vertices_around_z(vertices, [0.0, 3.5 / 16.0, 0.5], angle);
-            }
-            vertices = rotate_vertices_y(vertices, vertices_rotation_y);
+    if let Some(turns) = match meta & 0x7 {
+        1 => Some(0),
+        2 => Some(2),
+        3 => Some(1),
+        4 => Some(3),
+        _ => None,
+    } {
+        for (dir, uv, from, to) in [
+            ("down", [7.0, 13.0, 9.0, 15.0], [-1.0, 3.5, 7.0], [1.0, 13.5, 9.0]),
+            ("up", [7.0, 6.0, 9.0, 8.0], [-1.0, 3.5, 7.0], [1.0, 13.5, 9.0]),
+            ("west", [0.0, 0.0, 16.0, 16.0], [-1.0, 3.5, 0.0], [1.0, 19.5, 16.0]),
+            ("east", [0.0, 0.0, 16.0, 16.0], [-1.0, 3.5, 0.0], [1.0, 19.5, 16.0]),
+            ("north", [0.0, 0.0, 16.0, 16.0], [-8.0, 3.5, 7.0], [8.0, 19.5, 9.0]),
+            ("south", [0.0, 0.0, 16.0, 16.0], [-8.0, 3.5, 7.0], [8.0, 19.5, 9.0]),
+        ] {
+            let verts = face_vertices(from, to, dir)
+                .unwrap()
+                .map(|[x, y, z]| [x / 16.0, y / 16.0, z / 16.0]);
             out.push(IconQuad {
-                vertices,
-                uv: uv_rect(uv[0], uv[1], uv[2], uv[3], rotation),
+                vertices: rotate_vertices_y(
+                    rotate_vertices_around_z(verts, [0.0, 3.5 / 16.0, 0.5], -22.5),
+                    turns,
+                ),
+                uv: flip_v(uv_rect(uv[0], uv[1], uv[2], uv[3], 0)),
                 texture_path: texture_path.to_string(),
                 tint_index: None,
             });
         }
-    };
-
-    match meta & 0x7 {
-        1 => push_torch_cuboid(0, Some(-22.5)),
-        2 => push_torch_cuboid(2, Some(-22.5)),
-        3 => push_torch_cuboid(1, Some(-22.5)),
-        4 => push_torch_cuboid(3, Some(-22.5)),
-        _ => push_torch_cuboid(0, None),
+    } else {
+        for (dir, uv, from, to) in [
+            ("down", [7.0, 13.0, 9.0, 15.0], [7.0, 0.0, 7.0], [9.0, 10.0, 9.0]),
+            ("up", [7.0, 6.0, 9.0, 8.0], [7.0, 0.0, 7.0], [9.0, 10.0, 9.0]),
+            ("west", [0.0, 0.0, 16.0, 16.0], [7.0, 0.0, 0.0], [9.0, 16.0, 16.0]),
+            ("east", [0.0, 0.0, 16.0, 16.0], [7.0, 0.0, 0.0], [9.0, 16.0, 16.0]),
+            ("north", [0.0, 0.0, 16.0, 16.0], [0.0, 0.0, 7.0], [16.0, 16.0, 9.0]),
+            ("south", [0.0, 0.0, 16.0, 16.0], [0.0, 0.0, 7.0], [16.0, 16.0, 9.0]),
+        ] {
+            out.push(IconQuad {
+                vertices: face_vertices(from, to, dir).unwrap(),
+                uv: flip_v(uv_rect(uv[0], uv[1], uv[2], uv[3], 0)),
+                texture_path: texture_path.to_string(),
+                tint_index: None,
+            });
+        }
     }
     out
 }
@@ -501,7 +549,7 @@ pub fn brewing_stand_display_quads(meta: u8) -> Vec<IconQuad> {
                     let r = angle.to_radians();
                     [0.5 + dx * r.cos() - dz * r.sin(), v[1], 0.5 + dx * r.sin() + dz * r.cos()]
                 }),
-            uv: uv_rect(8.0, 0.0, 0.0, 16.0, 0),
+            uv: flip_v(uv_rect(8.0, 0.0, 0.0, 16.0, 0)),
             texture_path: "blocks/brewing_stand.png".to_string(),
             tint_index: None,
         });
@@ -513,7 +561,7 @@ pub fn brewing_stand_display_quads(meta: u8) -> Vec<IconQuad> {
                     let r = angle.to_radians();
                     [0.5 + dx * r.cos() - dz * r.sin(), v[1], 0.5 + dx * r.sin() + dz * r.cos()]
                 }),
-            uv: uv_rect(0.0, 0.0, 8.0, 16.0, 0),
+            uv: flip_v(uv_rect(0.0, 0.0, 8.0, 16.0, 0)),
             texture_path: "blocks/brewing_stand.png".to_string(),
             tint_index: None,
         });
@@ -549,13 +597,13 @@ pub fn brewing_stand_display_quads(meta: u8) -> Vec<IconQuad> {
         );
         out.push(IconQuad {
             vertices: north,
-            uv: uv_rect(0.0, 0.0, 3.0, 6.0, 0),
+            uv: flip_v(uv_rect(0.0, 0.0, 3.0, 6.0, 0)),
             texture_path: bottle_texture.to_string(),
             tint_index: None,
         });
         out.push(IconQuad {
             vertices: south,
-            uv: uv_rect(3.0, 0.0, 0.0, 6.0, 0),
+            uv: flip_v(uv_rect(3.0, 0.0, 0.0, 6.0, 0)),
             texture_path: bottle_texture.to_string(),
             tint_index: None,
         });
@@ -575,15 +623,80 @@ pub fn skull_display_quads(meta: u8) -> Vec<IconQuad> {
         _ => ([4.0, 0.0, 4.0], [12.0, 8.0, 12.0]),
     };
     let faces = [
-        ("down", [16.0, 0.0, 8.0, 8.0], "blocks/head_player_bottom.png"),
-        ("up", [8.0, 0.0, 16.0, 8.0], "blocks/head_player_top.png"),
-        ("north", [8.0, 8.0, 16.0, 16.0], "blocks/head_player_front.png"),
-        ("south", [8.0, 8.0, 16.0, 16.0], "blocks/head_player_back.png"),
-        ("west", [0.0, 8.0, 8.0, 16.0], "blocks/head_player_left.png"),
-        ("east", [16.0, 8.0, 8.0, 16.0], "blocks/head_player_right.png"),
+        ("down", "blocks/head_player_bottom.png"),
+        ("up", "blocks/head_player_top.png"),
+        ("north", "blocks/head_player_front.png"),
+        ("south", "blocks/head_player_back.png"),
+        ("west", "blocks/head_player_left.png"),
+        ("east", "blocks/head_player_right.png"),
     ];
-    for (dir, uv, texture) in faces {
-        push_model_face(&mut out, min, max, dir, uv, 0, texture, false);
+    for (dir, texture) in faces {
+        if let Some(vertices) = face_vertices(min, max, dir) {
+            out.push(IconQuad {
+                vertices,
+                uv: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+                texture_path: texture.to_string(),
+                tint_index: None,
+            });
+        }
+    }
+    out
+}
+
+pub fn sign_display_quads(block_id: u16, meta: u8) -> Vec<IconQuad> {
+    let texture = "sign_entity.png";
+    let mut out = Vec::new();
+    if block_id == 63 {
+        let mut board_quads = Vec::new();
+        push_box_quads(
+            &mut board_quads,
+            texture,
+            (64.0, 32.0),
+            (0.0, 0.0),
+            [0.0, 7.0, 7.0],
+            [16.0, 8.0, 2.0],
+            false,
+        );
+        let mut post_quads = Vec::new();
+        push_box_quads(
+            &mut post_quads,
+            texture,
+            (64.0, 32.0),
+            (0.0, 14.0),
+            [7.0, 0.0, 7.0],
+            [2.0, 9.0, 2.0],
+            false,
+        );
+        let angle = -(meta as f32) * std::f32::consts::TAU / 16.0;
+        for quad in board_quads.into_iter().chain(post_quads) {
+            out.push(IconQuad {
+                vertices: rotate_vertices_around_y(
+                    quad.vertices,
+                    [0.5, 0.0, 0.5],
+                    angle,
+                ),
+                uv: quad.uv,
+                texture_path: quad.texture_path,
+                tint_index: None,
+            });
+        }
+    } else {
+        let (origin, size) = match meta & 0x7 {
+            2 => ([0.0, 4.5, 14.0], [16.0, 8.0, 2.0]),
+            3 => ([0.0, 4.5, 0.0], [16.0, 8.0, 2.0]),
+            4 => ([14.0, 4.5, 0.0], [2.0, 8.0, 16.0]),
+            5 => ([0.0, 4.5, 0.0], [2.0, 8.0, 16.0]),
+            _ => ([0.0, 4.5, 14.0], [16.0, 8.0, 2.0]),
+        };
+        push_box_quads(
+            &mut out,
+            texture,
+            (64.0, 32.0),
+            (0.0, 0.0),
+            origin,
+            size,
+            false,
+        );
     }
     out
 }
@@ -598,6 +711,7 @@ pub fn block_item_display_quads(
         145 => return Some(anvil_display_quads(meta, matches!(meta & 0x3, 1 | 3))),
         117 => return Some(brewing_stand_display_quads(meta)),
         144 => return Some(skull_display_quads(meta)),
+        63 | 68 => return Some(sign_display_quads(block_id, meta)),
         _ => {}
     }
 

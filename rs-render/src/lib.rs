@@ -24,7 +24,7 @@ mod world;
 pub use block_display::{
     anvil_display_quads, block_item_display_quads, brewing_stand_display_quads,
     build_block_display_mesh, chest_display_quads, face_texture_name_for_display_fallback,
-    skull_display_quads, torch_display_quads,
+    sign_display_quads, skull_display_quads, torch_display_quads,
 };
 pub use block_models::{BlockModelResolver, IconQuad, default_model_roots};
 pub use block_textures::{AtlasBlockMapping, Face as ModelFace, build_block_texture_mapping};
