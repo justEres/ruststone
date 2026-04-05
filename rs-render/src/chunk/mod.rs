@@ -97,6 +97,7 @@ pub struct VanillaBakeSettings {
     pub sun_trace_distance: f32,
     pub top_face_sun_bias: f32,
     pub ao_shadow_blend: f32,
+    pub foliage_ao_boost: f32,
 }
 
 impl VanillaBakeSettings {
@@ -115,6 +116,7 @@ impl VanillaBakeSettings {
             sun_trace_distance: settings.vanilla_sun_trace_distance,
             top_face_sun_bias: settings.vanilla_top_face_sun_bias,
             ao_shadow_blend: settings.vanilla_ao_shadow_blend,
+            foliage_ao_boost: settings.voxel_ao_foliage_boost,
         }
     }
 }
@@ -265,6 +267,7 @@ impl ChunkColumnSnapshot {
         voxel_ao_enabled: bool,
         voxel_ao_strength: f32,
         voxel_ao_cutout: bool,
+        voxel_ao_foliage_boost: f32,
         barrier_billboard: bool,
         vanilla_bake: VanillaBakeSettings,
         texture_mapping: &AtlasBlockMapping,
@@ -279,6 +282,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                voxel_ao_foliage_boost,
                 barrier_billboard,
                 vanilla_bake,
                 texture_mapping,
@@ -293,6 +297,7 @@ impl ChunkColumnSnapshot {
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                voxel_ao_foliage_boost,
                 barrier_billboard,
                 vanilla_bake,
                 texture_mapping,

@@ -48,9 +48,9 @@ fn is_vanilla_leaf_block(block_id: u16) -> bool {
 fn vanilla_leaf_face_shade(face: Face) -> f32 {
     match face {
         Face::PosY => 1.0,
-        Face::NegY => 0.84,
-        Face::PosZ | Face::NegZ => 0.93,
-        Face::PosX | Face::NegX => 0.89,
+        Face::NegY => 0.62,
+        Face::PosZ | Face::NegZ => 0.82,
+        Face::PosX | Face::NegX => 0.72,
     }
 }
 
@@ -163,6 +163,7 @@ pub(super) fn compute_vertex_shade(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     vanilla_bake: VanillaBakeSettings,
 ) -> f32 {
     if !can_apply_vertex_shading(block_id, voxel_ao_cutout) {
@@ -178,12 +179,14 @@ pub(super) fn compute_vertex_shade(
             y,
             z,
             face,
+            vertex,
             voxel_ao_enabled,
             voxel_ao_strength,
             vanilla_bake,
         );
     }
     let softened_foliage = is_softened_vanilla_foliage(block_id);
+    let foliage_boost = voxel_ao_foliage_boost.clamp(0.5, 4.0);
     let (ao, sky_level, block_level) =
         face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
     let ao_term = if voxel_ao_enabled {
@@ -191,7 +194,7 @@ pub(super) fn compute_vertex_shade(
         if leaf_block {
             s *= 0.10;
         } else if softened_foliage {
-            s *= 0.38;
+            s *= 0.38 * foliage_boost;
         }
         1.0 - s + ao * s
     } else {
@@ -237,7 +240,8 @@ pub(super) fn compute_vertex_shade(
     }
     let mut light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
     let base_floor = 0.18 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.72;
-    let foliage_floor = 0.34 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.66;
+    let foliage_floor_base = 0.34 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.66;
+    let foliage_floor = (foliage_floor_base - (foliage_boost - 1.0).max(0.0) * 0.08).max(0.26);
     if leaf_block {
         let leaf_floor = 0.52 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.34;
         light = (light * 1.12 + 0.04).max(leaf_floor);
@@ -327,20 +331,23 @@ fn vanilla_leaf_face_baked_shade(
     y: i32,
     z: i32,
     face: Face,
+    vertex: [f32; 3],
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     vanilla_bake: VanillaBakeSettings,
 ) -> f32 {
-    let (sky_level, block_level) = face_light_levels(snapshot, chunk_x, chunk_z, x, y, z, face);
-    let face_term = vanilla_face_shade_exact(face);
+    let (_, sky_level, block_level) =
+        face_vertex_light_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex);
+    let face_term = vanilla_leaf_face_shade(face);
     let ao_term = if voxel_ao_enabled {
         apply_ao_strength(
-            averaged_face_vanilla_ao(snapshot, chunk_x, chunk_z, x, y, z, face),
-            voxel_ao_strength,
+            face_vertex_weighted_ao(snapshot, chunk_x, chunk_z, x, y, z, face, vertex),
+            (voxel_ao_strength * vanilla_bake.foliage_ao_boost.clamp(0.5, 4.0)).clamp(0.0, 2.0),
         )
     } else {
         1.0
     };
-    let light = vanilla_light_mix(sky_level, block_level, vanilla_bake);
+    let light = vanilla_light_mix(sky_level, block_level, vanilla_bake)
+        .max(0.28 + vanilla_bake.ambient_floor.clamp(0.0, 0.95) * 0.22);
     (light * face_term * ao_term).clamp(0.0, 1.0)
 }

@@ -8,6 +8,7 @@ pub(super) fn build_chunk_mesh_culled(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     barrier_billboard: bool,
     vanilla_bake: VanillaBakeSettings,
     texture_mapping: &AtlasBlockMapping,
@@ -51,6 +52,7 @@ pub(super) fn build_chunk_mesh_culled(
                             voxel_ao_enabled,
                             voxel_ao_strength,
                             voxel_ao_cutout,
+                            voxel_ao_foliage_boost,
                         );
                         continue;
                     }
@@ -64,6 +66,7 @@ pub(super) fn build_chunk_mesh_culled(
                         voxel_ao_enabled,
                         voxel_ao_strength,
                         voxel_ao_cutout,
+                        voxel_ao_foliage_boost,
                         vanilla_bake,
                         chunk_x,
                         chunk_z,
@@ -105,6 +108,7 @@ pub(super) fn build_chunk_mesh_greedy(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     barrier_billboard: bool,
     vanilla_bake: VanillaBakeSettings,
     texture_mapping: &AtlasBlockMapping,
@@ -147,6 +151,7 @@ pub(super) fn build_chunk_mesh_greedy(
                         voxel_ao_enabled,
                         voxel_ao_strength,
                         voxel_ao_cutout,
+                        voxel_ao_foliage_boost,
                     );
                 }
             }
@@ -211,6 +216,7 @@ pub(super) fn build_chunk_mesh_greedy(
                                 voxel_ao_enabled,
                                 voxel_ao_strength,
                                 voxel_ao_cutout,
+                                voxel_ao_foliage_boost,
                                 vanilla_bake,
                             ),
                         };
@@ -246,6 +252,7 @@ pub(super) fn build_chunk_mesh_greedy(
                             voxel_ao_enabled,
                             voxel_ao_strength,
                             voxel_ao_cutout,
+                            voxel_ao_foliage_boost,
                             vanilla_bake,
                         );
                     }
@@ -273,6 +280,7 @@ fn add_greedy_quad(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     vanilla_bake: VanillaBakeSettings,
 ) {
     let data = batch.data_for(block_id);
@@ -361,6 +369,7 @@ fn add_greedy_quad(
         voxel_ao_enabled,
         voxel_ao_strength,
         voxel_ao_cutout,
+        voxel_ao_foliage_boost,
         vanilla_bake,
     );
     for shade in shades {
@@ -444,6 +453,7 @@ fn add_block_faces(
     voxel_ao_enabled: bool,
     voxel_ao_strength: f32,
     voxel_ao_cutout: bool,
+    voxel_ao_foliage_boost: f32,
     vanilla_bake: VanillaBakeSettings,
     chunk_x: i32,
     chunk_z: i32,
@@ -577,6 +587,7 @@ fn add_block_faces(
                 voxel_ao_enabled,
                 voxel_ao_strength,
                 voxel_ao_cutout,
+                voxel_ao_foliage_boost,
                 vanilla_bake,
             );
             if is_grass_side_face(block_id, face) {
