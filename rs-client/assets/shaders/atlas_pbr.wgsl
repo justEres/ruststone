@@ -48,7 +48,7 @@
 
 const ATLAS_COLUMNS: f32 = 64.0;
 const ATLAS_ROWS: f32 = 64.0;
-const ATLAS_UV_INSET: f32 = 0.02;
+const ATLAS_UV_INSET: f32 = 0.0;
 const ATLAS_UV_PACK_SCALE: f32 = 1024.0;
 
 // Rendering architecture notes:
@@ -84,6 +84,8 @@ struct AtlasLightingUniform {
 fn atlas_uv_from_repeating(local_uv: vec2<f32>, tile_origin: vec2<f32>) -> vec2<f32> {
     let tile_size = vec2<f32>(1.0 / ATLAS_COLUMNS, 1.0 / ATLAS_ROWS);
     let inset = tile_size * ATLAS_UV_INSET;
+    // The atlas path uses textureLoad() with integer texel coordinates below,
+    // so shrinking the UV range here just crops the tile instead of preventing bleed.
     return tile_origin + inset + fract(local_uv) * (tile_size - inset * 2.0);
 }
 
