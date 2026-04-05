@@ -18,3 +18,5 @@ ruststone_sound_cache
 commands.md
 
 rustone.exe
+rs-client/assets/debug/atlas_dump.png
+rs-client/assets/debug/atlas_alpha.png

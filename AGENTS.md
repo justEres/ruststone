@@ -2,9 +2,11 @@
 
 ## Project Workflow Rules
 
+- For any new feature or larger bug fix, create a dedicated feature branch before implementation.
+- Do not create a feature branch for very small tweaks/minor touch-ups only, such as constant tuning or similarly narrow numerical patches.
 - For any new feature or larger bug fix, run `cargo check -q` before committing.
-- After that successful check, create a commit in the same session.
-- Do not create commits for very small tweaks/minor touch-ups only.
+- After that successful check, commits may be created freely on the feature branch during implementation.
+- Do not merge a feature branch back automatically; wait for explicit user instruction to merge.
 
 ## Commit Scope
 
