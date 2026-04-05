@@ -20,8 +20,8 @@ else
   echo "warning: rustup not found; assuming target $TARGET is already installed"
 fi
 
-echo "Building $PACKAGE for $TARGET (release, feature: bundle_assets)..."
-cargo build --release --target "$TARGET" -p "$PACKAGE" --features bundle_assets
+echo "Building $PACKAGE for $TARGET (release)..."
+cargo build --release --target "$TARGET" -p "$PACKAGE"
 
 SRC_EXE="target/$TARGET/release/$BIN_NAME.exe"
 if [[ ! -f "$SRC_EXE" ]]; then
@@ -31,3 +31,4 @@ fi
 
 cp -f "$SRC_EXE" "$OUT_EXE"
 echo "Wrote $(pwd)/$OUT_EXE"
+echo "Assets are downloaded automatically on first run."
